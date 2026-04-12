@@ -1,0 +1,19 @@
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Rust build artifacts
+target/
+
+# IDE / editor
+.claude/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
