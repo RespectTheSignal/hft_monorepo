@@ -8,6 +8,7 @@ from typing import Any
 
 import structlog
 
+from strategy_flipster.market_data.latest_cache import LatestTickerCache
 from strategy_flipster.types import BookTicker
 
 logger = structlog.get_logger(__name__)
@@ -28,12 +29,14 @@ class MarketDataAggregator:
         self,
         feeds: list[Any],  # list[MarketDataFeed] — Protocol이라 Any 사용
         queue_size: int = 10_000,
+        latest_cache: LatestTickerCache | None = None,
     ) -> None:
         self._feeds: list[Any] = feeds
         self._queue: asyncio.Queue[BookTicker] = asyncio.Queue(maxsize=queue_size)
         self._tasks: list[asyncio.Task[None]] = []
         self._running: bool = False
         self._last_recv_ns: dict[int, int] = {}  # id(feed) → ns
+        self._latest_cache: LatestTickerCache | None = latest_cache
 
     async def start(self) -> None:
         """모든 피드 연결 및 수신 태스크 시작"""
@@ -106,6 +109,8 @@ class MarketDataAggregator:
                     continue
                 backoff = 1.0
                 self._last_recv_ns[id(feed)] = time.time_ns()
+                if self._latest_cache is not None:
+                    self._latest_cache.update(ticker)
                 if self._queue.full():
                     try:
                         self._queue.get_nowait()

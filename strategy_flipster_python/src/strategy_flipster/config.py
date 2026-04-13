@@ -63,12 +63,21 @@ class MarketStatsConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SnapshotHistoryConfig:
+    """(거래소, 심볼)별 호가 시계열 롤링 저장"""
+    enabled: bool = True
+    interval_ms: int = 50
+    max_age_sec: float = 60.0
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     flipster_api: FlipsterApiConfig
     flipster_feed: FlipsterFeedConfig
     exchange_feeds: list[ExchangeFeedConfig]
     strategy: StrategyConfig
     market_stats: MarketStatsConfig
+    snapshot_history: SnapshotHistoryConfig
 
 
 # 거래소별 기본 포트
@@ -164,10 +173,19 @@ def load_config(path: Path | str) -> AppConfig:
         interval_ms=stats_raw.get("interval_ms", 10_000),
     )
 
+    # ── Snapshot History ──
+    hist_raw = raw.get("snapshot_history", {})
+    snapshot_history = SnapshotHistoryConfig(
+        enabled=hist_raw.get("enabled", True),
+        interval_ms=hist_raw.get("interval_ms", 50),
+        max_age_sec=float(hist_raw.get("max_age_sec", 60.0)),
+    )
+
     return AppConfig(
         flipster_api=flipster_api,
         flipster_feed=flipster_feed,
         exchange_feeds=exchange_feeds,
         strategy=strategy,
         market_stats=market_stats,
+        snapshot_history=snapshot_history,
     )

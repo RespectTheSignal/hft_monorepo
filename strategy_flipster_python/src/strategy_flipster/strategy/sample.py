@@ -10,6 +10,8 @@ import time
 
 import structlog
 
+from strategy_flipster.market_data.history import SnapshotHistory
+from strategy_flipster.market_data.latest_cache import LatestTickerCache
 from strategy_flipster.market_data.stats_cache import MarketStatsCache
 from strategy_flipster.types import BookTicker, OrderRequest
 from strategy_flipster.user_data.state import UserState
@@ -21,33 +23,34 @@ class SampleStrategy:
     """Binance/Flipster 스프레드 모니터링 — 샘플 구현"""
 
     def __init__(self) -> None:
-        # 심볼별 최신 호가 캐시
-        self._binance_tickers: dict[str, BookTicker] = {}
-        self._flipster_tickers: dict[str, BookTicker] = {}
         self._last_log_ns: int = 0
 
     async def on_book_ticker(
         self,
         ticker: BookTicker,
         state: UserState,
+        latest: LatestTickerCache,
         market_stats: MarketStatsCache,
+        history: SnapshotHistory,
     ) -> list[OrderRequest]:
-        # 거래소별 캐시 업데이트
-        if ticker.exchange == "binance":
-            self._binance_tickers[ticker.symbol] = ticker
-        elif ticker.exchange == "flipster":
-            self._flipster_tickers[ticker.symbol] = ticker
-
         # 주기적 로깅 (1초마다)
         now = time.time_ns()
         if now - self._last_log_ns > 1_000_000_000:
             self._last_log_ns = now
+            # 예시: Binance BTCUSDT vs Flipster BTCUSDT.PERP mid 평균 차이 (최근 30s)
+            avg_diff = history.spread_mean(
+                "flipster", "BTCUSDT.PERP",
+                "binance", "BTCUSDT",
+                duration_sec=30.0,
+            )
             logger.info(
                 "strategy_tick",
-                binance_symbols=len(self._binance_tickers),
-                flipster_symbols=len(self._flipster_tickers),
+                latest_symbols=len(latest),
                 positions=len(state.positions),
                 stats_symbols=len(market_stats),
+                history_series=history.series_count(),
+                history_samples=len(history),
+                btc_fl_minus_bn_30s=round(avg_diff, 4),
             )
 
         return []
@@ -55,14 +58,18 @@ class SampleStrategy:
     async def on_timer(
         self,
         state: UserState,
+        latest: LatestTickerCache,
         market_stats: MarketStatsCache,
+        history: SnapshotHistory,
     ) -> list[OrderRequest]:
         return []
 
     async def on_start(
         self,
         state: UserState,
+        latest: LatestTickerCache,
         market_stats: MarketStatsCache,
+        history: SnapshotHistory,
     ) -> None:
         logger.info("sample_strategy_started")
 

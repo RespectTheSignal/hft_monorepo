@@ -45,3 +45,10 @@ tick_interval_ms = 10
 # 전체 perpetual ticker 주기 풀링 (funding/OI/24h volume 등)
 enabled = true
 interval_ms = 10000
+
+[snapshot_history]
+# (거래소, 심볼)별 호가 시계열 롤링 저장
+# 50ms 간격, 최근 60s 보관 (∼1200 샘플/심볼)
+enabled = true
+interval_ms = 50
+max_age_sec = 60.0
