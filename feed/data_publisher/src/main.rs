@@ -56,13 +56,49 @@ fn parse_args() -> CliArgs {
 
 struct TickEvent {
     symbol: String,
-    bid: Option<String>,
-    ask: Option<String>,
+    bid_price: Option<f64>,
+    ask_price: Option<f64>,
+    last_price: Option<f64>,
+    mark_price: Option<f64>,
+    index_price: Option<f64>,
     latency_us: f64,
-    recv_ns: i64,          // local timestamp when message was read
-    server_ts_ns: i64,     // server-side timestamp from message
-    read_gap_us: f64,      // time since last message on this connection
-    conn_id: usize,        // which connection this came from
+    recv_ns: i64,
+    server_ts_ns: i64,
+    read_gap_us: f64,
+    conn_id: usize,
+}
+
+// ---------------------------------------------------------------------------
+// Per-symbol merged state (Flipster sends partial updates)
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Default)]
+struct TickerState {
+    bid_price: Option<f64>,
+    ask_price: Option<f64>,
+    last_price: Option<f64>,
+    mark_price: Option<f64>,
+    index_price: Option<f64>,
+}
+
+impl TickerState {
+    fn merge(&mut self, tick: &TickEvent) {
+        if tick.bid_price.is_some() {
+            self.bid_price = tick.bid_price;
+        }
+        if tick.ask_price.is_some() {
+            self.ask_price = tick.ask_price;
+        }
+        if tick.last_price.is_some() {
+            self.last_price = tick.last_price;
+        }
+        if tick.mark_price.is_some() {
+            self.mark_price = tick.mark_price;
+        }
+        if tick.index_price.is_some() {
+            self.index_price = tick.index_price;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -192,59 +228,30 @@ async fn main() -> Result<()> {
     info!("{}", "-".repeat(78));
 
     let mut stats: HashMap<String, LatencyStats> = HashMap::new();
-    let spike_threshold_us: f64 = 60_000.0; // 60ms
-    let mut spike_count: u64 = 0;
-    let mut spike_with_large_gap: u64 = 0;  // read_gap also large → network/kernel delay
-    let mut spike_with_small_gap: u64 = 0;  // read_gap normal → server-side staleness
-    let mut spike_details: Vec<(String, f64, f64, usize, i64, i64)> = Vec::new(); // for summary
+    let mut ticker_state: HashMap<String, TickerState> = HashMap::new();
 
     loop {
         tokio::select! {
             ev = rx.recv() => {
                 match ev {
                     Some(tick) => {
-                        let bid = tick.bid.as_deref().unwrap_or("-");
-                        let ask = tick.ask.as_deref().unwrap_or("-");
-                        let spread = match (&tick.bid, &tick.ask) {
-                            (Some(b), Some(a)) => {
-                                let bf: f64 = b.parse().unwrap_or(0.0);
-                                let af: f64 = a.parse().unwrap_or(0.0);
-                                format!("{:.4}", af - bf)
-                            }
+                        // Merge partial update into per-symbol state
+                        let state = ticker_state
+                            .entry(tick.symbol.clone())
+                            .or_default();
+                        state.merge(&tick);
+
+                        let bid_str = state.bid_price.map(|v| format!("{v}")).unwrap_or("-".into());
+                        let ask_str = state.ask_price.map(|v| format!("{v}")).unwrap_or("-".into());
+                        let spread = match (state.bid_price, state.ask_price) {
+                            (Some(b), Some(a)) => format!("{:.4}", a - b),
                             _ => "-".into(),
                         };
 
-                        if tick.latency_us > spike_threshold_us {
-                            spike_count += 1;
-                            let gap_threshold_us = 80_000.0; // 80ms — normal gap is ~few ms
-                            if tick.read_gap_us > gap_threshold_us {
-                                spike_with_large_gap += 1;
-                            } else {
-                                spike_with_small_gap += 1;
-                            }
-                            warn!(
-                                "SPIKE [ws-{}] {:<24} latency={:.1}ms  read_gap={:.1}ms  server_ts={} recv_ns={}",
-                                tick.conn_id,
-                                tick.symbol,
-                                tick.latency_us / 1000.0,
-                                tick.read_gap_us / 1000.0,
-                                tick.server_ts_ns,
-                                tick.recv_ns,
-                            );
-                            spike_details.push((
-                                tick.symbol.clone(),
-                                tick.latency_us,
-                                tick.read_gap_us,
-                                tick.conn_id,
-                                tick.server_ts_ns,
-                                tick.recv_ns,
-                            ));
-                        } else {
-                            info!(
-                                "{:<24} {:>14} {:>14} {:>12} {:>9.1}\u{00b5}s",
-                                tick.symbol, bid, ask, spread, tick.latency_us,
-                            );
-                        }
+                        info!(
+                            "{:<24} {:>14} {:>14} {:>12} {:>9.1}\u{00b5}s",
+                            tick.symbol, bid_str, ask_str, spread, tick.latency_us,
+                        );
 
                         stats
                             .entry(tick.symbol)
@@ -261,32 +268,6 @@ async fn main() -> Result<()> {
                 info!("shutting down...");
                 break;
             }
-        }
-    }
-
-    // ---- Spike diagnosis summary -----------------------------------------
-    if spike_count > 0 {
-        info!("");
-        info!("===== Spike Diagnosis (latency > {:.0}ms) =====", spike_threshold_us / 1000.0);
-        info!("total spikes:            {}", spike_count);
-        info!("  large read_gap (>80ms): {} → network/kernel delivery delay", spike_with_large_gap);
-        info!("  small read_gap (<80ms): {} → server-side stale timestamp", spike_with_small_gap);
-        info!("");
-        info!(
-            "{:<24} {:>10} {:>10} {:>6} {:>20} {:>20}",
-            "symbol", "latency", "read_gap", "conn", "server_ts", "recv_ns"
-        );
-        info!("{}", "-".repeat(94));
-        for (sym, lat, gap, conn, sts, rns) in &spike_details {
-            info!(
-                "{:<24} {:>8.1}ms {:>8.1}ms {:>6} {:>20} {:>20}",
-                sym,
-                lat / 1000.0,
-                gap / 1000.0,
-                conn,
-                sts,
-                rns,
-            );
         }
     }
 
@@ -390,8 +371,11 @@ fn parse_tickers(
             if let Ok(ticker) = serde_json::from_value::<Ticker>(row.clone()) {
                 events.push(TickEvent {
                     symbol: ticker.symbol,
-                    bid: ticker.bid_price,
-                    ask: ticker.ask_price,
+                    bid_price: ticker.bid_price.as_deref().and_then(|s| s.parse().ok()),
+                    ask_price: ticker.ask_price.as_deref().and_then(|s| s.parse().ok()),
+                    last_price: ticker.last_price.as_deref().and_then(|s| s.parse().ok()),
+                    mark_price: ticker.mark_price.as_deref().and_then(|s| s.parse().ok()),
+                    index_price: ticker.index_price.as_deref().and_then(|s| s.parse().ok()),
                     latency_us,
                     recv_ns,
                     server_ts_ns: server_ts,
