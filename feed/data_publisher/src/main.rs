@@ -3,6 +3,7 @@ use data_publisher::error::Result;
 use data_publisher::flipster::models::{Ticker, WsMessage};
 use data_publisher::flipster::rest::FlipsterRestClient;
 use data_publisher::flipster::ws::FlipsterWsClient;
+use data_publisher::store::QdbWriter;
 use data_publisher::time_sync;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -219,7 +220,29 @@ async fn main() -> Result<()> {
     }
     drop(tx); // main holds no sender — channel closes when all tasks exit
 
-    // ---- 4. Collect events ------------------------------------------------
+    // ---- 4. QuestDB writer (optional) ---------------------------------------
+    let mut qdb = match &config.qdb_client_conf {
+        Some(conf) => {
+            info!("connecting to QuestDB (5s timeout)...");
+            match QdbWriter::try_new_with_timeout(conf, "flipster_bookticker", 5) {
+                Ok(Some(w)) => Some(w),
+                Ok(None) => {
+                    warn!("QuestDB unreachable — running without persistence");
+                    None
+                }
+                Err(e) => {
+                    error!("QuestDB init failed: {e} — running without persistence");
+                    None
+                }
+            }
+        }
+        None => {
+            info!("QDB_CLIENT_CONF not set — running without QuestDB");
+            None
+        }
+    };
+
+    // ---- 5. Collect events ------------------------------------------------
     info!("===== Receiving Tickers (Ctrl-C to stop) =====");
     info!(
         "{:<24} {:>14} {:>14} {:>12} {:>12}",
@@ -229,6 +252,8 @@ async fn main() -> Result<()> {
 
     let mut stats: HashMap<String, LatencyStats> = HashMap::new();
     let mut ticker_state: HashMap<String, TickerState> = HashMap::new();
+    let mut last_flush = std::time::Instant::now();
+    let flush_interval = std::time::Duration::from_millis(200);
 
     loop {
         tokio::select! {
@@ -253,6 +278,35 @@ async fn main() -> Result<()> {
                             tick.symbol, bid_str, ask_str, spread, tick.latency_us,
                         );
 
+                        // Write merged state to QuestDB
+                        if let Some(ref mut w) = qdb {
+                            if let Err(e) = w.buffer_tick(
+                                &tick.symbol,
+                                state.bid_price,
+                                state.ask_price,
+                                state.last_price,
+                                state.mark_price,
+                                state.index_price,
+                                tick.server_ts_ns,
+                            ) {
+                                error!("QuestDB buffer error: {e}");
+                            }
+
+                            // Periodic flush
+                            if last_flush.elapsed() >= flush_interval {
+                                match w.flush() {
+                                    Ok(n) if n > 0 => {
+                                        info!("QuestDB flushed {n} rows (total: {})", w.rows_flushed());
+                                    }
+                                    Err(e) => {
+                                        error!("QuestDB flush error: {e}");
+                                    }
+                                    _ => {}
+                                }
+                                last_flush = std::time::Instant::now();
+                            }
+                        }
+
                         stats
                             .entry(tick.symbol)
                             .or_insert_with(LatencyStats::new)
@@ -271,7 +325,19 @@ async fn main() -> Result<()> {
         }
     }
 
-    // ---- 5. Print summary -------------------------------------------------
+    // Final flush
+    if let Some(ref mut w) = qdb {
+        if let Err(e) = w.flush() {
+            error!("QuestDB final flush error: {e}");
+        }
+        info!(
+            "QuestDB total: {} rows flushed, {} errors",
+            w.rows_flushed(),
+            w.flush_errors()
+        );
+    }
+
+    // ---- 6. Print summary -------------------------------------------------
     print_summary(&stats);
 
     Ok(())

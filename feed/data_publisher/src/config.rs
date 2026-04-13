@@ -6,6 +6,7 @@ pub struct Config {
     pub api_secret: String,
     pub base_url: String,
     pub ws_url: String,
+    pub qdb_client_conf: Option<String>,
 }
 
 impl Config {
@@ -20,6 +21,7 @@ impl Config {
                 .unwrap_or_else(|_| "https://trading-api.flipster.io".into()),
             ws_url: std::env::var("FLIPSTER_WS_URL")
                 .unwrap_or_else(|_| "wss://trading-api.flipster.io/api/v1/stream".into()),
+            qdb_client_conf: std::env::var("QDB_CLIENT_CONF").ok(),
         })
     }
 }
