@@ -6,6 +6,7 @@ import asyncio
 import signal
 import sys
 from pathlib import Path
+from typing import Any
 
 import structlog
 
@@ -13,14 +14,63 @@ from strategy_flipster.config import AppConfig, load_config
 from strategy_flipster.execution.order_manager import OrderManager
 from strategy_flipster.execution.rest_client import FlipsterExecutionClient
 from strategy_flipster.market_data.aggregator import MarketDataAggregator
-from strategy_flipster.market_data.binance_zmq import BinanceZmqFeed
 from strategy_flipster.market_data.flipster_ipc import FlipsterIpcFeed
+from strategy_flipster.market_data.flipster_zmq import FlipsterZmqFeed
+from strategy_flipster.market_data.zmq_feed import ExchangeZmqFeed
 from strategy_flipster.strategy.sample import SampleStrategy
 from strategy_flipster.user_data.rest_client import FlipsterUserRestClient
 from strategy_flipster.user_data.state import UserState
 from strategy_flipster.user_data.ws_client import FlipsterUserWsClient
 
 logger = structlog.get_logger(__name__)
+
+
+def _build_feeds(config: AppConfig) -> list[Any]:
+    """설정에서 피드 목록 생성"""
+    feeds: list[Any] = []
+
+    # Flipster 피드 (ZMQ 또는 IPC)
+    if config.flipster_feed.mode == "zmq":
+        feeds.append(FlipsterZmqFeed(
+            zmq_address=config.flipster_feed.zmq_address,
+            topics=config.flipster_feed.symbols,
+        ))
+        logger.info(
+            "feed_added",
+            exchange="flipster",
+            mode="zmq",
+            address=config.flipster_feed.zmq_address,
+        )
+    else:
+        feeds.append(FlipsterIpcFeed(
+            socket_path=config.flipster_feed.ipc_socket_path,
+            process_id=config.flipster_feed.process_id,
+            symbols=config.flipster_feed.symbols,
+        ))
+        logger.info(
+            "feed_added",
+            exchange="flipster",
+            mode="ipc",
+            path=config.flipster_feed.ipc_socket_path,
+        )
+
+    # 외부 거래소 피드 (동일 wire format)
+    for feed_config in config.exchange_feeds:
+        if not feed_config.enabled:
+            continue
+        feeds.append(ExchangeZmqFeed(
+            zmq_address=feed_config.zmq_address,
+            exchange_name=feed_config.exchange,
+            topics=feed_config.topics,
+        ))
+        logger.info(
+            "feed_added",
+            exchange=feed_config.exchange,
+            mode="zmq",
+            address=feed_config.zmq_address,
+        )
+
+    return feeds
 
 
 async def run(config: AppConfig) -> None:
@@ -33,23 +83,7 @@ async def run(config: AppConfig) -> None:
         loop.add_signal_handler(sig, shutdown_event.set)
 
     # ── 모듈 생성 ──
-
-    # Market Data 피드
-    feeds: list = []
-
-    binance_feed = BinanceZmqFeed(
-        zmq_address=config.binance_feed.zmq_address,
-        topics=config.binance_feed.topics,
-    )
-    feeds.append(binance_feed)
-
-    flipster_feed = FlipsterIpcFeed(
-        socket_path=config.flipster_feed.ipc_socket_path,
-        process_id=config.flipster_feed.process_id,
-        symbols=config.flipster_feed.symbols,
-    )
-    feeds.append(flipster_feed)
-
+    feeds = _build_feeds(config)
     aggregator = MarketDataAggregator(feeds)
 
     # User Data
@@ -89,7 +123,7 @@ async def run(config: AppConfig) -> None:
         logger.exception("initial_state_load_failed")
 
     # ── 태스크 시작 ──
-    logger.info("starting_tasks")
+    logger.info("starting_tasks", feed_count=len(feeds))
 
     await aggregator.start()
     await strategy.on_start(user_state)

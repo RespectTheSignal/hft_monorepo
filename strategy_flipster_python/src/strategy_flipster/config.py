@@ -28,14 +28,25 @@ class FlipsterApiConfig:
 
 @dataclass(frozen=True, slots=True)
 class FlipsterFeedConfig:
+    """Flipster 시장 데이터 피드 설정.
+
+    mode:
+      - "zmq": ZMQ PUB에 직접 SUB (원격 가능, data_subscriber 불필요)
+      - "ipc": data_subscriber IPC Unix socket (로컬 전용)
+    """
+    mode: str = "zmq"  # "zmq" 또는 "ipc"
+    zmq_address: str = "tcp://211.181.122.104:7000"
     ipc_socket_path: str = "/tmp/flipster_data_subscriber.sock"
     symbols: list[str] = field(default_factory=list)
     process_id: str = "strategy_main"
 
 
 @dataclass(frozen=True, slots=True)
-class BinanceFeedConfig:
-    zmq_address: str = "tcp://211.181.122.3:6000"
+class ExchangeFeedConfig:
+    """범용 거래소 ZMQ 피드 설정 (binance, gate, bybit, bitget, okx)"""
+    exchange: str
+    zmq_address: str
+    enabled: bool = True
     topics: list[str] = field(default_factory=list)
 
 
@@ -48,8 +59,18 @@ class StrategyConfig:
 class AppConfig:
     flipster_api: FlipsterApiConfig
     flipster_feed: FlipsterFeedConfig
-    binance_feed: BinanceFeedConfig
+    exchange_feeds: list[ExchangeFeedConfig]
     strategy: StrategyConfig
+
+
+# 거래소별 기본 포트
+_DEFAULT_PORTS: dict[str, int] = {
+    "binance": 6000,
+    "gate": 5559,
+    "bybit": 5558,
+    "bitget": 6010,
+    "okx": 6011,
+}
 
 
 def load_config(path: Path | str) -> AppConfig:
@@ -64,7 +85,7 @@ def load_config(path: Path | str) -> AppConfig:
     with open(config_path, "rb") as f:
         raw = tomllib.load(f)
 
-    # Flipster API — 환경변수 우선
+    # ── Flipster API ──
     flipster_api_raw = raw.get("flipster_api", {})
     api_key = os.environ.get("FLIPSTER_API_KEY", flipster_api_raw.get("api_key", ""))
     api_secret = os.environ.get("FLIPSTER_API_SECRET", flipster_api_raw.get("api_secret", ""))
@@ -82,22 +103,47 @@ def load_config(path: Path | str) -> AppConfig:
         ws_url=flipster_api_raw.get("ws_url", "wss://trading-api.flipster.io/api/v1/stream"),
     )
 
-    # Flipster Feed
+    # ── Flipster Feed ──
     feed_raw = raw.get("flipster_feed", {})
     flipster_feed = FlipsterFeedConfig(
+        mode=feed_raw.get("mode", "zmq"),
+        zmq_address=feed_raw.get("zmq_address", "tcp://211.181.122.104:7000"),
         ipc_socket_path=feed_raw.get("ipc_socket_path", "/tmp/flipster_data_subscriber.sock"),
         symbols=feed_raw.get("symbols", []),
         process_id=feed_raw.get("process_id", "strategy_main"),
     )
 
-    # Binance Feed
-    binance_raw = raw.get("binance_feed", {})
-    binance_feed = BinanceFeedConfig(
-        zmq_address=binance_raw.get("zmq_address", "tcp://211.181.122.3:6000"),
-        topics=binance_raw.get("topics", []),
-    )
+    # ── Exchange Feeds (멀티 거래소) ──
+    exchange_feeds: list[ExchangeFeedConfig] = []
 
-    # Strategy
+    # [[exchange_feeds]] 배열 형태
+    for entry in raw.get("exchange_feeds", []):
+        exchange = entry.get("exchange", "")
+        if not exchange:
+            continue
+        default_port = _DEFAULT_PORTS.get(exchange, 6000)
+        zmq_addr = entry.get("zmq_address", f"tcp://127.0.0.1:{default_port}")
+        exchange_feeds.append(ExchangeFeedConfig(
+            exchange=exchange,
+            zmq_address=zmq_addr,
+            enabled=entry.get("enabled", True),
+            topics=entry.get("topics", []),
+        ))
+
+    # 하위 호환: [binance_feed] 섹션이 있으면 exchange_feeds에 추가
+    binance_raw = raw.get("binance_feed")
+    if binance_raw is not None:
+        # 이미 exchange_feeds에 binance가 없을 때만 추가
+        has_binance = any(f.exchange == "binance" for f in exchange_feeds)
+        if not has_binance:
+            exchange_feeds.append(ExchangeFeedConfig(
+                exchange="binance",
+                zmq_address=binance_raw.get("zmq_address", "tcp://211.181.122.3:6000"),
+                enabled=True,
+                topics=binance_raw.get("topics", []),
+            ))
+
+    # ── Strategy ──
     strategy_raw = raw.get("strategy", {})
     strategy = StrategyConfig(
         tick_interval_ms=strategy_raw.get("tick_interval_ms", 10),
@@ -106,6 +152,6 @@ def load_config(path: Path | str) -> AppConfig:
     return AppConfig(
         flipster_api=flipster_api,
         flipster_feed=flipster_feed,
-        binance_feed=binance_feed,
+        exchange_feeds=exchange_feeds,
         strategy=strategy,
     )
