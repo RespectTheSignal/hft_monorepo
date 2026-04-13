@@ -46,11 +46,21 @@ class SampleStrategy:
             canonical = "SOL"
             fl_sym = to_exchange_symbol(EXCHANGE_FLIPSTER, canonical)
             bn_sym = to_exchange_symbol(EXCHANGE_BINANCE, canonical)
-            spread_30s = history.spread_mean(
+
+            # 거래소 간 mid 차이 시계열 (Flipster − Binance)
+            diff_30s = history.cross_mid_diff_array(
                 EXCHANGE_FLIPSTER, fl_sym,
                 EXCHANGE_BINANCE, bn_sym,
                 duration_sec=30.0,
             )
+            basis_last = float(diff_30s[-1]) if diff_30s.size else 0.0
+            basis_mean = float(diff_30s.mean()) if diff_30s.size else 0.0
+            basis_std = float(diff_30s.std()) if diff_30s.size else 0.0
+
+            # 각 거래소 호가 스프레드 (ask - bid) 평균
+            fl_spread_30s = history.avg_spread(EXCHANGE_FLIPSTER, fl_sym, 30.0)
+            bn_spread_30s = history.avg_spread(EXCHANGE_BINANCE, bn_sym, 30.0)
+
             fl_latest = history.latest(EXCHANGE_FLIPSTER, fl_sym)
             bn_latest = history.latest(EXCHANGE_BINANCE, bn_sym)
             fl_mid = fl_latest[3] if fl_latest else 0.0
@@ -64,8 +74,11 @@ class SampleStrategy:
                 history_samples=len(history),
                 sol_fl_mid=round(fl_mid, 4),
                 sol_bn_mid=round(bn_mid, 4),
-                sol_fl_minus_bn=round(fl_mid - bn_mid, 4),
-                sol_spread_30s_avg=round(spread_30s, 4),
+                sol_basis_now=round(basis_last, 4),
+                sol_basis_mean_30s=round(basis_mean, 4),
+                sol_basis_std_30s=round(basis_std, 5),
+                sol_fl_spread_30s=round(fl_spread_30s, 4),
+                sol_bn_spread_30s=round(bn_spread_30s, 4),
             )
 
         return []

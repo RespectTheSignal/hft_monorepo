@@ -103,6 +103,12 @@ class SymbolRingBuffer:
         start = self._start_index(cutoff_ns)
         return self.ts[start:self._n]
 
+    def spread_slice(self, cutoff_ns: int) -> np.ndarray:
+        """심볼 자체의 (ask − bid) 시계열 — numpy 벡터 감산"""
+        start = self._start_index(cutoff_ns)
+        end = self._n
+        return self.ask[start:end] - self.bid[start:end]
+
     def latest(self) -> tuple[int, float, float, float] | None:
         if self._n == 0:
             return None
@@ -193,6 +199,15 @@ class SnapshotHistory:
             return np.empty(0, dtype=np.int64)
         return buf.ts_slice(self._cutoff_ns(duration_sec))
 
+    def spread_array(
+        self, exchange: str, symbol: str, duration_sec: float | None = None,
+    ) -> np.ndarray:
+        """심볼의 (ask − bid) 시계열 — 호가 스프레드"""
+        buf = self._buffers.get((exchange, symbol))
+        if buf is None:
+            return np.empty(0, dtype=np.float64)
+        return buf.spread_slice(self._cutoff_ns(duration_sec))
+
     def latest(self, exchange: str, symbol: str) -> tuple[int, float, float, float] | None:
         buf = self._buffers.get((exchange, symbol))
         if buf is None:
@@ -209,18 +224,78 @@ class SnapshotHistory:
             return 0.0
         return float(arr.mean())
 
-    def spread_mean(
+    def avg_spread(
+        self, exchange: str, symbol: str, duration_sec: float,
+    ) -> float:
+        """심볼 자체 호가 스프레드(ask − bid)의 구간 평균"""
+        arr = self.spread_array(exchange, symbol, duration_sec)
+        if arr.size == 0:
+            return 0.0
+        return float(arr.mean())
+
+    def cross_mid_diff_array(
+        self,
+        exchange_a: str, symbol_a: str,
+        exchange_b: str, symbol_b: str,
+        duration_sec: float | None = None,
+    ) -> np.ndarray:
+        """거래소 간 mid 차이 시계열 (a − b). 시간 정렬됨.
+
+        SnapshotSampler가 매 tick마다 동일 ts로 모든 심볼을 쓰므로,
+        두 심볼 모두 존재하는 tick부터는 ts가 elementwise 일치. 공통 시작 시각
+        이후로 잘라서 길이 맞춰 감산.
+        """
+        buf_a = self._buffers.get((exchange_a, symbol_a))
+        buf_b = self._buffers.get((exchange_b, symbol_b))
+        if buf_a is None or buf_b is None:
+            return np.empty(0, dtype=np.float64)
+        cutoff = self._cutoff_ns(duration_sec)
+        ts_a = buf_a.ts_slice(cutoff)
+        ts_b = buf_b.ts_slice(cutoff)
+        if ts_a.size == 0 or ts_b.size == 0:
+            return np.empty(0, dtype=np.float64)
+        mid_a = buf_a.mid_slice(cutoff)
+        mid_b = buf_b.mid_slice(cutoff)
+        # 더 늦게 시작한 쪽 기준으로 정렬
+        t_start = max(int(ts_a[0]), int(ts_b[0]))
+        idx_a = int(np.searchsorted(ts_a, t_start, side="left"))
+        idx_b = int(np.searchsorted(ts_b, t_start, side="left"))
+        a = mid_a[idx_a:]
+        b = mid_b[idx_b:]
+        n = min(a.size, b.size)
+        if n == 0:
+            return np.empty(0, dtype=np.float64)
+        return a[:n] - b[:n]
+
+    def cross_mid_diff_mean(
         self,
         exchange_a: str, symbol_a: str,
         exchange_b: str, symbol_b: str,
         duration_sec: float,
     ) -> float:
-        """(a_mid_mean − b_mid_mean). 시계열 정렬은 하지 않음 — 구간 평균 차이."""
-        a = self.mid_array(exchange_a, symbol_a, duration_sec)
-        b = self.mid_array(exchange_b, symbol_b, duration_sec)
-        if a.size == 0 or b.size == 0:
+        """거래소 간 mid 차이 구간 평균 (정렬된 시계열 기준)"""
+        arr = self.cross_mid_diff_array(
+            exchange_a, symbol_a, exchange_b, symbol_b, duration_sec,
+        )
+        if arr.size == 0:
             return 0.0
-        return float(a.mean() - b.mean())
+        return float(arr.mean())
+
+    def cross_mid_diff_latest(
+        self,
+        exchange_a: str, symbol_a: str,
+        exchange_b: str, symbol_b: str,
+    ) -> float:
+        """현재 거래소 간 mid 차이 (마지막 공통 tick)"""
+        arr = self.cross_mid_diff_array(
+            exchange_a, symbol_a, exchange_b, symbol_b, duration_sec=None,
+        )
+        if arr.size == 0:
+            return 0.0
+        return float(arr[-1])
+
+    # 하위 호환 alias — 기존 spread_mean 사용처가 있다면 바로 안 깨지도록 유지
+    spread_mean = cross_mid_diff_mean
 
 
 class SnapshotSampler:

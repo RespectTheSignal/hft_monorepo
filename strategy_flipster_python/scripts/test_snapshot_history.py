@@ -106,24 +106,58 @@ def test_ring_buffer_searchsorted() -> None:
 
 # ── 4. SnapshotHistory aggregate helpers ──
 
-def test_history_spread_mean() -> None:
-    hr("4. SnapshotHistory.spread_mean")
+def test_history_aggregates() -> None:
+    hr("4. SnapshotHistory aggregates (cross_mid_diff / avg_spread)")
     hist = SnapshotHistory(interval_sec=0.05, max_age_sec=60.0)
     now = time.time_ns()
-    # binance: mid=100, flipster: mid=101.5 (+1.5 spread)
+    # binance: mid=100 (bid=99.5, ask=100.5 → spread=1.0)
+    # flipster: mid=101.5 (bid=101.0, ask=102.0 → spread=1.0)
     for i in range(50):
         ts = now - (50 - i) * 1_000_000  # 1ms 간격
-        hist.append("binance", "BTCUSDT", ts, 99.5, 100.5)  # mid=100
-        hist.append("flipster", "BTCUSDT.PERP", ts, 101.0, 102.0)  # mid=101.5
-    diff = hist.spread_mean(
+        hist.append("binance", "BTCUSDT", ts, 99.5, 100.5)
+        hist.append("flipster", "BTCUSDT.PERP", ts, 101.0, 102.0)
+
+    diff = hist.cross_mid_diff_mean(
         "flipster", "BTCUSDT.PERP",
         "binance", "BTCUSDT",
         duration_sec=1.0,
     )
-    check(f"spread ≈ +1.5 (실측 {diff:.4f})", abs(diff - 1.5) < 1e-9)
+    check(f"cross_mid_diff_mean ≈ +1.5 (실측 {diff:.4f})", abs(diff - 1.5) < 1e-9)
+
+    diff_arr = hist.cross_mid_diff_array(
+        "flipster", "BTCUSDT.PERP",
+        "binance", "BTCUSDT",
+        duration_sec=1.0,
+    )
+    check(
+        f"cross_mid_diff_array 50샘플 모두 +1.5",
+        diff_arr.shape[0] == 50 and bool(np.all(np.abs(diff_arr - 1.5) < 1e-9)),
+    )
+
+    latest_diff = hist.cross_mid_diff_latest(
+        "flipster", "BTCUSDT.PERP", "binance", "BTCUSDT",
+    )
+    check(f"cross_mid_diff_latest = 1.5", abs(latest_diff - 1.5) < 1e-9)
 
     mean_bn = hist.mid_mean("binance", "BTCUSDT", duration_sec=1.0)
     check(f"binance mid_mean=100.0 (실측 {mean_bn})", abs(mean_bn - 100.0) < 1e-9)
+
+    bn_spread = hist.avg_spread("binance", "BTCUSDT", duration_sec=1.0)
+    check(f"binance avg_spread=1.0 (실측 {bn_spread})", abs(bn_spread - 1.0) < 1e-9)
+
+    fl_spread_arr = hist.spread_array("flipster", "BTCUSDT.PERP", duration_sec=1.0)
+    check(
+        f"flipster spread_array 50샘플 모두 1.0",
+        fl_spread_arr.shape[0] == 50 and bool(np.all(fl_spread_arr == 1.0)),
+    )
+
+    # 하위 호환: spread_mean alias 가 cross_mid_diff_mean 과 동일 동작
+    alias_diff = hist.spread_mean(
+        "flipster", "BTCUSDT.PERP",
+        "binance", "BTCUSDT",
+        duration_sec=1.0,
+    )
+    check("spread_mean alias 동작", abs(alias_diff - diff) < 1e-12)
 
 
 # ── 5. SnapshotSampler 스케줄 정확도 + 부하 ──
@@ -178,37 +212,37 @@ async def test_sampler_throughput() -> None:
 # ── 6. 전략 조회 벤치 (핫패스 시뮬) ──
 
 def test_query_bench() -> None:
-    hr("6. 전략 조회 벤치 (spread_mean × 많은 심볼)")
+    hr("6. 전략 조회 벤치 (cross_mid_diff + avg_spread)")
     hist = SnapshotHistory(interval_sec=0.05, max_age_sec=60.0)
     now = time.time_ns()
-    # 200 심볼 × 2 거래소, 1200 샘플 (full)
     for s in range(200):
         for i in range(1200):
-            ts = now - (1200 - i) * 50_000_000  # 50ms 간격
+            ts = now - (1200 - i) * 50_000_000
             hist.append("binance", f"S{s}", ts, 100.0, 100.1)
             hist.append("flipster", f"S{s}.PERP", ts, 101.0, 101.1)
 
     import time as _t
-    # spread_mean 반복 호출 (전략이 심볼별로 조회하는 시뮬)
     N = 200
     t0 = _t.perf_counter_ns()
     for s in range(N):
-        hist.spread_mean("flipster", f"S{s}.PERP", "binance", f"S{s}", duration_sec=30.0)
-    elapsed_us = (_t.perf_counter_ns() - t0) / 1000
-    per_call_us = elapsed_us / N
-    print(f"  {N}회 spread_mean: 총 {elapsed_us:.1f}μs, per-call {per_call_us:.2f}μs")
-    check(
-        "per-call < 200μs (심볼당)",
-        per_call_us < 200.0,
-        f"{per_call_us:.2f}μs",
-    )
+        hist.cross_mid_diff_mean("flipster", f"S{s}.PERP", "binance", f"S{s}", duration_sec=30.0)
+    cross_us = (_t.perf_counter_ns() - t0) / 1000
+    print(f"  {N}회 cross_mid_diff: 총 {cross_us:.1f}μs, per-call {cross_us / N:.2f}μs")
+    check("cross_mid_diff per-call < 200μs", cross_us / N < 200.0, f"{cross_us / N:.2f}μs")
+
+    t0 = _t.perf_counter_ns()
+    for s in range(N):
+        hist.avg_spread("flipster", f"S{s}.PERP", duration_sec=30.0)
+    spread_us = (_t.perf_counter_ns() - t0) / 1000
+    print(f"  {N}회 avg_spread:    총 {spread_us:.1f}μs, per-call {spread_us / N:.2f}μs")
+    check("avg_spread per-call < 200μs", spread_us / N < 200.0, f"{spread_us / N:.2f}μs")
 
 
 async def main() -> None:
     test_ring_buffer_basic()
     test_ring_buffer_shift()
     test_ring_buffer_searchsorted()
-    test_history_spread_mean()
+    test_history_aggregates()
     await test_sampler_throughput()
     test_query_bench()
 
