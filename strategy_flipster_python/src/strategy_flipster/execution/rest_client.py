@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from decimal import Decimal
 
@@ -23,13 +24,28 @@ from strategy_flipster.types import (
 
 logger = structlog.get_logger(__name__)
 
+# 재시도 대상 예외 (네트워크 일시 장애)
+_RETRY_EXC = (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError)
+# 재시도 대상 HTTP 상태
+_RETRY_STATUS = frozenset({500, 502, 503, 504})
+# 기본 재시도 파라미터
+_DEFAULT_MAX_RETRIES: int = 3
+_DEFAULT_BACKOFF_BASE: float = 0.1
+
 
 class FlipsterExecutionClient:
     """Flipster Trade API 클라이언트"""
 
-    def __init__(self, config: FlipsterApiConfig) -> None:
+    def __init__(
+        self,
+        config: FlipsterApiConfig,
+        max_retries: int = _DEFAULT_MAX_RETRIES,
+        backoff_base: float = _DEFAULT_BACKOFF_BASE,
+    ) -> None:
         self._config: FlipsterApiConfig = config
         self._client: httpx.AsyncClient | None = None
+        self._max_retries: int = max_retries
+        self._backoff_base: float = backoff_base
 
     async def start(self) -> None:
         self._client = httpx.AsyncClient(
@@ -60,7 +76,13 @@ class FlipsterExecutionClient:
         method: str,
         path: str,
         body: dict | None = None,
+        *,
+        retry: bool = True,
     ) -> dict | list:
+        """HTTP 요청. retry=True면 일시 장애(5xx/timeout/connect) 재시도.
+
+        POST /api/v1/trade/order 처럼 재시도가 위험한 호출은 retry=False로 호출.
+        """
         if self._client is None:
             raise AppException(AppError(kind=ErrorKind.NETWORK, message="클라이언트 미시작"))
 
@@ -68,28 +90,56 @@ class FlipsterExecutionClient:
         if body is not None:
             body_str = json.dumps(body)
 
-        headers = self._auth_headers(method, path, body_str)
-        headers["Content-Type"] = "application/json"
+        max_attempts = self._max_retries + 1 if retry else 1
+        attempt = 0
+        while True:
+            attempt += 1
+            # 매 시도마다 새 서명 (expires 갱신)
+            headers = self._auth_headers(method, path, body_str)
+            headers["Content-Type"] = "application/json"
 
-        if method == "GET":
-            resp = await self._client.get(path, headers=headers)
-        elif method == "POST":
-            resp = await self._client.post(path, headers=headers, content=body_str)
-        elif method == "PUT":
-            resp = await self._client.put(path, headers=headers, content=body_str)
-        elif method == "DELETE":
-            resp = await self._client.request("DELETE", path, headers=headers, content=body_str)
-        else:
-            raise AppException(AppError(kind=ErrorKind.API, message=f"지원하지 않는 메서드: {method}"))
+            try:
+                if method == "GET":
+                    resp = await self._client.get(path, headers=headers)
+                elif method == "POST":
+                    resp = await self._client.post(path, headers=headers, content=body_str)
+                elif method == "PUT":
+                    resp = await self._client.put(path, headers=headers, content=body_str)
+                elif method == "DELETE":
+                    resp = await self._client.request("DELETE", path, headers=headers, content=body_str)
+                else:
+                    raise AppException(AppError(kind=ErrorKind.API, message=f"지원하지 않는 메서드: {method}"))
+            except _RETRY_EXC as e:
+                if attempt >= max_attempts:
+                    raise AppException(AppError(
+                        kind=ErrorKind.NETWORK,
+                        message=f"{method} {path}: {type(e).__name__} {e} (after {attempt} attempts)",
+                    )) from e
+                delay = self._backoff_base * (3 ** (attempt - 1))
+                logger.warning(
+                    "rest_retry_network",
+                    method=method, path=path, attempt=attempt, exc=type(e).__name__, delay=delay,
+                )
+                await asyncio.sleep(delay)
+                continue
 
-        if resp.status_code != 200:
+            if resp.status_code == 200:
+                return resp.json()
+
+            if retry and resp.status_code in _RETRY_STATUS and attempt < max_attempts:
+                delay = self._backoff_base * (3 ** (attempt - 1))
+                logger.warning(
+                    "rest_retry_5xx",
+                    method=method, path=path, status=resp.status_code, attempt=attempt, delay=delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+
             raise AppException(AppError(
                 kind=ErrorKind.API,
                 message=f"{method} {path}: {resp.status_code} {resp.text}",
                 status_code=resp.status_code,
             ))
-
-        return resp.json()
 
     # ── 주문 ──
 
@@ -113,7 +163,10 @@ class FlipsterExecutionClient:
         if req.max_slippage_price is not None:
             body["maxSlippagePrice"] = str(req.max_slippage_price)
 
-        data = await self._request("POST", "/api/v1/trade/order", body)
+        # 주문 제출은 double-submit 위험으로 retry 금지 (상위 strategy에서 판단)
+        data = await self._request("POST", "/api/v1/trade/order", body, retry=False)
+        if isinstance(data, list):
+            raise AppException(AppError(kind=ErrorKind.API, message="place_order 응답이 list"))
         order_data = data.get("order", data)
 
         logger.info(

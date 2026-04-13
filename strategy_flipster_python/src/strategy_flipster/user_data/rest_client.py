@@ -1,7 +1,8 @@
-"""Flipster REST 클라이언트 — 계정/포지션 조회"""
+"""Flipster REST 클라이언트 — 계정/포지션 조회 (GET 전용, retry 적용)"""
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 
 import httpx
@@ -20,13 +21,23 @@ from strategy_flipster.types import (
 
 logger = structlog.get_logger(__name__)
 
+_RETRY_EXC = (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError)
+_RETRY_STATUS = frozenset({500, 502, 503, 504})
+
 
 class FlipsterUserRestClient:
-    """Flipster REST API — 계정 정보 조회용"""
+    """Flipster REST API — 계정 정보 조회용 (GET만, 항상 retry)"""
 
-    def __init__(self, config: FlipsterApiConfig) -> None:
+    def __init__(
+        self,
+        config: FlipsterApiConfig,
+        max_retries: int = 3,
+        backoff_base: float = 0.1,
+    ) -> None:
         self._config: FlipsterApiConfig = config
         self._client: httpx.AsyncClient | None = None
+        self._max_retries: int = max_retries
+        self._backoff_base: float = backoff_base
 
     async def start(self) -> None:
         self._client = httpx.AsyncClient(
@@ -52,17 +63,37 @@ class FlipsterUserRestClient:
         if self._client is None:
             raise AppException(AppError(kind=ErrorKind.NETWORK, message="클라이언트 미시작"))
 
-        headers = self._auth_headers("GET", path)
-        resp = await self._client.get(path, headers=headers)
+        max_attempts = self._max_retries + 1
+        attempt = 0
+        while True:
+            attempt += 1
+            headers = self._auth_headers("GET", path)
+            try:
+                resp = await self._client.get(path, headers=headers)
+            except _RETRY_EXC as e:
+                if attempt >= max_attempts:
+                    raise AppException(AppError(
+                        kind=ErrorKind.NETWORK,
+                        message=f"GET {path}: {type(e).__name__} {e} (after {attempt} attempts)",
+                    )) from e
+                delay = self._backoff_base * (3 ** (attempt - 1))
+                logger.warning("user_rest_retry_network", path=path, attempt=attempt, exc=type(e).__name__, delay=delay)
+                await asyncio.sleep(delay)
+                continue
 
-        if resp.status_code != 200:
+            if resp.status_code == 200:
+                return resp.json()
+            if resp.status_code in _RETRY_STATUS and attempt < max_attempts:
+                delay = self._backoff_base * (3 ** (attempt - 1))
+                logger.warning("user_rest_retry_5xx", path=path, status=resp.status_code, attempt=attempt, delay=delay)
+                await asyncio.sleep(delay)
+                continue
+
             raise AppException(AppError(
                 kind=ErrorKind.API,
                 message=f"GET {path} failed: {resp.status_code} {resp.text}",
                 status_code=resp.status_code,
             ))
-
-        return resp.json()
 
     async def get_account(self) -> AccountInfo:
         data = await self._get("/api/v1/account")

@@ -70,16 +70,17 @@ class FlipsterZmqFeed:
         logger.info("flipster_zmq_disconnected")
 
     async def recv(self) -> BookTicker | None:
-        """다음 BookTicker 수신"""
-        if self._socket is None:
-            return None
+        """다음 BookTicker 수신. 파싱 실패 프레임은 내부에서 skip.
 
-        parts = await self._socket.recv_multipart()
-        if len(parts) != 2:
-            return None
-
-        payload = parts[1]
-        if len(payload) != FLIPSTER_BT_SIZE:
-            return None
-
-        return parse_flipster_bookticker(payload)
+        None 반환 = 소켓 종료. 호출자는 reconnect 시도.
+        """
+        while True:
+            if self._socket is None:
+                return None
+            parts = await self._socket.recv_multipart()
+            if len(parts) != 2:
+                continue
+            payload = parts[1]
+            if len(payload) != FLIPSTER_BT_SIZE:
+                continue
+            return parse_flipster_bookticker(payload)

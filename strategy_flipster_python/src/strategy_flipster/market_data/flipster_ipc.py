@@ -63,31 +63,30 @@ class FlipsterIpcFeed:
         logger.info("flipster_ipc_disconnected")
 
     async def recv(self) -> BookTicker | None:
-        """다음 BookTicker 수신. 연결 종료 시 None 반환."""
-        if self._reader is None:
-            return None
+        """다음 BookTicker 수신. 연결 종료 시 None 반환 (aggregator가 재연결).
 
-        try:
-            # topic_len (4B LE)
-            topic_len_bytes = await self._reader.readexactly(4)
-            (topic_len,) = _LEN_STRUCT.unpack(topic_len_bytes)
+        알 수 없는 payload_len은 내부에서 skip.
+        """
+        while True:
+            if self._reader is None:
+                return None
+            try:
+                topic_len_bytes = await self._reader.readexactly(4)
+                (topic_len,) = _LEN_STRUCT.unpack(topic_len_bytes)
 
-            # topic
-            _topic = await self._reader.readexactly(topic_len)
+                _topic = await self._reader.readexactly(topic_len)
 
-            # payload_len (4B LE)
-            payload_len_bytes = await self._reader.readexactly(4)
-            (payload_len,) = _LEN_STRUCT.unpack(payload_len_bytes)
+                payload_len_bytes = await self._reader.readexactly(4)
+                (payload_len,) = _LEN_STRUCT.unpack(payload_len_bytes)
 
-            # payload
-            payload = await self._reader.readexactly(payload_len)
+                payload = await self._reader.readexactly(payload_len)
 
-            if payload_len == FLIPSTER_BT_SIZE:
-                return parse_flipster_bookticker(payload)
+                if payload_len == FLIPSTER_BT_SIZE:
+                    return parse_flipster_bookticker(payload)
 
-            logger.warning("flipster_ipc_unknown_payload", payload_len=payload_len)
-            return None
+                logger.warning("flipster_ipc_unknown_payload", payload_len=payload_len)
+                continue
 
-        except asyncio.IncompleteReadError:
-            logger.warning("flipster_ipc_connection_closed")
-            return None
+            except asyncio.IncompleteReadError:
+                logger.warning("flipster_ipc_connection_closed")
+                return None

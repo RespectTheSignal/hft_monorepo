@@ -1,12 +1,14 @@
 """Flipster WebSocket private 토픽 클라이언트.
 
 account, account.position, account.balance, account.margin 구독.
+재연결 성공 시 on_reconnect 콜백 호출 → 상위에서 REST 스냅샷 재로딩.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable
 from decimal import Decimal
 from typing import Callable
 
@@ -36,21 +38,28 @@ PRIVATE_TOPICS: list[str] = [
 
 
 class FlipsterUserWsClient:
-    """Flipster WS private 스트림 — UserState 실시간 갱신"""
+    """Flipster WS private 스트림 — UserState 실시간 갱신.
+
+    on_reconnect: 재연결 성공 시 await 되는 비동기 콜백. 보통 REST 스냅샷 재로딩에 사용.
+    최초 연결 시에는 호출하지 않음 (start 이전 초기 로딩과 역할 중복 방지).
+    """
 
     def __init__(
         self,
         config: FlipsterApiConfig,
         state: UserState,
         on_update: Callable[[], None] | None = None,
+        on_reconnect: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._config: FlipsterApiConfig = config
         self._state: UserState = state
         self._on_update: Callable[[], None] | None = on_update
+        self._on_reconnect: Callable[[], Awaitable[None]] | None = on_reconnect
         self._ws: websockets.WebSocketClientProtocol | None = None  # type: ignore[assignment]
         self._running: bool = False
         self._reconnect_delay: float = 1.0
         self._max_reconnect_delay: float = 30.0
+        self._connect_count: int = 0
 
     async def start(self) -> None:
         """WS 연결 + 구독 + 수신 루프 시작"""
@@ -87,7 +96,9 @@ class FlipsterUserWsClient:
             self._config.ws_url,
             additional_headers=headers,
         )
-        logger.info("flipster_ws_connected")
+        self._connect_count += 1
+        is_reconnect = self._connect_count > 1
+        logger.info("flipster_ws_connected", attempt=self._connect_count, reconnect=is_reconnect)
         self._reconnect_delay = 1.0  # 연결 성공 시 리셋
 
         # 구독 요청
@@ -97,6 +108,14 @@ class FlipsterUserWsClient:
         })
         await self._ws.send(subscribe_msg)
         logger.info("flipster_ws_subscribed", topics=PRIVATE_TOPICS)
+
+        # 재연결(최초 아님) 시 REST 스냅샷 재로딩 — 끊긴 구간 업데이트 보완
+        if is_reconnect and self._on_reconnect is not None:
+            try:
+                await self._on_reconnect()
+                logger.info("flipster_ws_state_resynced")
+            except Exception:
+                logger.exception("flipster_ws_resync_failed")
 
         # 수신 루프
         async for raw_msg in self._ws:

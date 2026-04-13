@@ -91,7 +91,35 @@ async def run(config: AppConfig) -> None:
     # User Data
     user_state = UserState()
     user_rest = FlipsterUserRestClient(config.flipster_api)
-    user_ws = FlipsterUserWsClient(config.flipster_api, user_state)
+
+    async def _load_rest_snapshot() -> None:
+        """초기 로딩 + WS 재연결 후 재동기화 공용 루틴"""
+        account = await user_rest.get_account()
+        user_state.update_account(account)
+
+        positions = await user_rest.get_positions()
+        # 전체 교체를 위해 기존 포지션 키셋 비교
+        new_symbols = {p.symbol for p in positions}
+        for stale in list(user_state.positions.keys()):
+            if stale not in new_symbols:
+                user_state.remove_position(stale)
+        for pos in positions:
+            user_state.update_position(pos)
+
+        balances = await user_rest.get_balances()
+        for bal in balances:
+            user_state.update_balance(bal)
+        logger.info(
+            "rest_snapshot_loaded",
+            positions=len(positions),
+            balances=len(balances),
+        )
+
+    user_ws = FlipsterUserWsClient(
+        config.flipster_api,
+        user_state,
+        on_reconnect=_load_rest_snapshot,
+    )
 
     # Execution
     exec_client = FlipsterExecutionClient(config.flipster_api)
@@ -116,19 +144,7 @@ async def run(config: AppConfig) -> None:
 
     # REST로 초기 상태 로딩
     try:
-        account = await user_rest.get_account()
-        user_state.update_account(account)
-        logger.info("account_loaded", available=str(account.available_balance))
-
-        positions = await user_rest.get_positions()
-        for pos in positions:
-            user_state.update_position(pos)
-        logger.info("positions_loaded", count=len(positions))
-
-        balances = await user_rest.get_balances()
-        for bal in balances:
-            user_state.update_balance(bal)
-        logger.info("balances_loaded", count=len(balances))
+        await _load_rest_snapshot()
     except Exception:
         logger.exception("initial_state_load_failed")
 
