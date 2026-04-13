@@ -85,7 +85,7 @@ class FlipsterUserWsClient:
 
         self._ws = await websockets.connect(  # type: ignore[assignment]
             self._config.ws_url,
-            extra_headers=headers,
+            additional_headers=headers,
         )
         logger.info("flipster_ws_connected")
         self._reconnect_delay = 1.0  # 연결 성공 시 리셋

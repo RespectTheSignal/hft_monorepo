@@ -36,7 +36,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from strategy_flipster.config import FlipsterApiConfig
 from strategy_flipster.error import AppException
 from strategy_flipster.execution.rest_client import FlipsterExecutionClient
-from strategy_flipster.types import OrderRequest, OrderSide, OrderType, TimeInForce
+from strategy_flipster.types import (
+    MarginType,
+    OrderRequest,
+    OrderSide,
+    OrderType,
+    TimeInForce,
+)
 from strategy_flipster.user_data.rest_client import FlipsterUserRestClient
 from strategy_flipster.user_data.state import UserState
 from strategy_flipster.user_data.ws_client import FlipsterUserWsClient
@@ -104,12 +110,14 @@ async def run_test(config: FlipsterApiConfig) -> int:
         for p in open_pos[:5]:
             print(f"    {p.symbol} {p.position_side.value} qty={p.position_amount} pnl={p.unrealized_pnl}")
 
-        # ── 2. 기존 대기 주문 확인 ──
-        hr(f"2. 기존 {SYMBOL} 대기 주문 확인")
-        existing = await exec_client.get_pending_orders(SYMBOL)
-        print(f"  {len(existing)}개 발견")
-        for o in existing:
-            print(f"    [{o.order_id[:8]}] {o.side.value} {o.order_type.value} qty={o.quantity} price={o.price} status={o.status.value}")
+        # ── 2. 기존 대기 주문 확인 (전체 + 심볼별) ──
+        hr(f"2. 기존 대기 주문 확인")
+        all_pending = await exec_client.get_pending_orders()
+        print(f"  전체: {len(all_pending)}개")
+        for o in all_pending[:10]:
+            print(f"    [{o.order_id[:8]}] {o.symbol} {o.side.value} {o.order_type.value} qty={o.quantity} price={o.price} status={o.status.value}")
+        existing = [o for o in all_pending if o.symbol == SYMBOL]
+        print(f"  {SYMBOL}: {len(existing)}개")
 
         # ── 3. 계약 스펙 + ticker ──
         hr(f"3. {SYMBOL} 스펙/시세 조회")
@@ -154,6 +162,20 @@ async def run_test(config: FlipsterApiConfig) -> int:
         print(f"  초기 WS 이벤트: {len(ws_events)}개")
         print(f"  state.positions={len(state.positions)} state.balances={len(state.balances)} state.account={'있음' if state.account else '없음'}")
         ws_baseline = len(ws_events)
+
+        # ── 4b. 트레이드 모드 + 심볼 초기 설정 ──
+        hr("4b. 트레이드 모드 / 레버리지 설정")
+        try:
+            await exec_client.set_trade_mode("ONE_WAY")
+            print("  ✓ tradeMode=ONE_WAY 설정 완료")
+        except AppException as e:
+            print(f"  ! set_trade_mode 실패(계속 진행): {e.error.message}")
+
+        try:
+            await exec_client.set_leverage(SYMBOL, 1, MarginType.CROSS)
+            print(f"  ✓ {SYMBOL} leverage=1 margin=CROSS 설정 완료")
+        except AppException as e:
+            print(f"  ! set_leverage 실패(계속 진행): {e.error.message}")
 
         # ── 5. LIMIT 주문 제출 ──
         hr("5. LIMIT 주문 제출")
