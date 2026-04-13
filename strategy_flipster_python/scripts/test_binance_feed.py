@@ -3,7 +3,7 @@
 사용법:
     python scripts/test_binance_feed.py [zmq_address]
 
-기본 주소: tcp://211.181.122.3:6000
+기본 주소: tcp://211.181.122.24:6000
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from strategy_flipster.market_data.binance_zmq import BinanceZmqFeed
 
 
 async def main() -> None:
-    address = sys.argv[1] if len(sys.argv) > 1 else "tcp://211.181.122.3:6000"
+    address = sys.argv[1] if len(sys.argv) > 1 else "tcp://211.181.122.24:6000"
     print(f"Binance ZMQ 연결 중... {address}")
 
     feed = BinanceZmqFeed(zmq_address=address)

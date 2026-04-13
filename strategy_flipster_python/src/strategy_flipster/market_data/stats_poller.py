@@ -89,6 +89,9 @@ class FlipsterMarketStatsPoller:
         self._cache.mark_polled(count)
         return count
 
+    # 느린 풀링 경고 임계치 (ms) — 중위값의 약 2.5배
+    SLOW_THRESHOLD_MS: float = 200.0
+
     async def start(self) -> None:
         """주기 풀링 루프 — cancellation으로 종료"""
         self._running = True
@@ -97,12 +100,21 @@ class FlipsterMarketStatsPoller:
             try:
                 t0 = time.monotonic()
                 count = await self.poll_once()
-                elapsed_ms = (time.monotonic() - t0) * 1000
-                logger.info(
-                    "market_stats_polled",
-                    count=count,
-                    elapsed_ms=round(elapsed_ms, 1),
-                )
+                elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
+                if elapsed_ms > self.SLOW_THRESHOLD_MS:
+                    # 서버/네트워크 지연 — 루프 자체는 정상 동작
+                    logger.warning(
+                        "market_stats_polled_slow",
+                        count=count,
+                        elapsed_ms=elapsed_ms,
+                        threshold_ms=self.SLOW_THRESHOLD_MS,
+                    )
+                else:
+                    logger.info(
+                        "market_stats_polled",
+                        count=count,
+                        elapsed_ms=elapsed_ms,
+                    )
             except asyncio.CancelledError:
                 break
             except Exception:

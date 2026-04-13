@@ -155,7 +155,7 @@ def load_config(path: Path | str) -> AppConfig:
         if not has_binance:
             exchange_feeds.append(ExchangeFeedConfig(
                 exchange="binance",
-                zmq_address=binance_raw.get("zmq_address", "tcp://211.181.122.3:6000"),
+                zmq_address=binance_raw.get("zmq_address", "tcp://211.181.122.24:6000"),
                 enabled=True,
                 topics=binance_raw.get("topics", []),
             ))

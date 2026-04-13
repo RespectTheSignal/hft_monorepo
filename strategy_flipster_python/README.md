@@ -61,7 +61,7 @@ zmq_address = "tcp://211.181.122.104:7000"
 
 [[exchange_feeds]]
 exchange = "binance"
-zmq_address = "tcp://211.181.122.3:6000"
+zmq_address = "tcp://211.181.122.24:6000"
 
 # [[exchange_feeds]]
 # exchange = "gate"
@@ -111,7 +111,7 @@ Payload: symbol(32) + bid/ask/last/mark/index(5×f64) + 4×i64(ns)
 python scripts/test_flipster_zmq_feed.py tcp://211.181.122.104:7000
 
 # 범용 거래소 ZMQ (binance, gate 등)
-python scripts/test_binance_feed.py tcp://211.181.122.3:6000
+python scripts/test_binance_feed.py tcp://211.181.122.24:6000
 
 # Flipster IPC (로컬 data_subscriber 필요)
 python scripts/test_flipster_feed.py

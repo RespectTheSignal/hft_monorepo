@@ -13,6 +13,11 @@ import structlog
 from strategy_flipster.market_data.history import SnapshotHistory
 from strategy_flipster.market_data.latest_cache import LatestTickerCache
 from strategy_flipster.market_data.stats_cache import MarketStatsCache
+from strategy_flipster.market_data.symbol import (
+    EXCHANGE_BINANCE,
+    EXCHANGE_FLIPSTER,
+    to_exchange_symbol,
+)
 from strategy_flipster.types import BookTicker, OrderRequest
 from strategy_flipster.user_data.state import UserState
 
@@ -37,16 +42,17 @@ class SampleStrategy:
         now = time.time_ns()
         if now - self._last_log_ns > 1_000_000_000:
             self._last_log_ns = now
-            # SOL USDT-perp: Flipster("SOLUSDT.PERP") vs Binance("SOL_USDT")
-            fl_sym = "SOLUSDT.PERP"
-            bn_sym = "SOL_USDT"
+            # SOL USDT-perp: 심볼 헬퍼로 거래소별 키 생성
+            canonical = "SOL"
+            fl_sym = to_exchange_symbol(EXCHANGE_FLIPSTER, canonical)
+            bn_sym = to_exchange_symbol(EXCHANGE_BINANCE, canonical)
             spread_30s = history.spread_mean(
-                "flipster", fl_sym,
-                "binance", bn_sym,
+                EXCHANGE_FLIPSTER, fl_sym,
+                EXCHANGE_BINANCE, bn_sym,
                 duration_sec=30.0,
             )
-            fl_latest = history.latest("flipster", fl_sym)
-            bn_latest = history.latest("binance", bn_sym)
+            fl_latest = history.latest(EXCHANGE_FLIPSTER, fl_sym)
+            bn_latest = history.latest(EXCHANGE_BINANCE, bn_sym)
             fl_mid = fl_latest[3] if fl_latest else 0.0
             bn_mid = bn_latest[3] if bn_latest else 0.0
             logger.info(

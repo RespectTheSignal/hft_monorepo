@@ -14,28 +14,28 @@ process_id = "strategy_main"
 
 [[exchange_feeds]]
 exchange = "binance"
-zmq_address = "tcp://211.181.122.3:6000"
+zmq_address = "tcp://211.181.122.24:6000"
 enabled = true
 topics = []
 
 # [[exchange_feeds]]
 # exchange = "gate"
-# zmq_address = "tcp://211.181.122.3:5559"
+# zmq_address = "tcp://211.181.122.24:5559"
 # enabled = false
 
 # [[exchange_feeds]]
 # exchange = "bybit"
-# zmq_address = "tcp://211.181.122.3:5558"
+# zmq_address = "tcp://211.181.122.24:5558"
 # enabled = false
 
 # [[exchange_feeds]]
 # exchange = "bitget"
-# zmq_address = "tcp://211.181.122.3:6010"
+# zmq_address = "tcp://211.181.122.24:6010"
 # enabled = false
 
 # [[exchange_feeds]]
 # exchange = "okx"
-# zmq_address = "tcp://211.181.122.3:6011"
+# zmq_address = "tcp://211.181.122.24:6011"
 # enabled = false
 
 [strategy]

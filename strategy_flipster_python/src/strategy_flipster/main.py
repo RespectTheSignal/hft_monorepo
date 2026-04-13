@@ -24,26 +24,16 @@ from strategy_flipster.market_data.zmq_feed import ExchangeZmqFeed
 from strategy_flipster.strategy.sample import SampleStrategy
 from strategy_flipster.user_data.rest_client import FlipsterUserRestClient
 from strategy_flipster.user_data.state import UserState
-from strategy_flipster.user_data.ws_client import FlipsterUserWsClient
+from strategy_flipster.market_data.symbol import is_supported_symbol
 from strategy_flipster.types import BookTicker
+from strategy_flipster.user_data.ws_client import FlipsterUserWsClient
 
 logger = structlog.get_logger(__name__)
 
 
 def _default_accept(ticker: BookTicker) -> bool:
-    """USDT-margin perpetual만 수용.
-
-    - Flipster: symbol이 'USDT.PERP'로 끝남 (예: BTCUSDT.PERP)
-    - Binance : symbol이 '_USDT'로 끝남 (Binance publisher의 USDT perp 포맷)
-    - 기타 거래소: 통과 (필요 시 후속 확장)
-    """
-    sym = ticker.symbol
-    exch = ticker.exchange
-    if exch == "flipster":
-        return sym.endswith("USDT.PERP")
-    if exch == "binance":
-        return sym.endswith("_USDT")
-    return True
+    """USDT-margin perpetual만 수용 (symbol 헬퍼로 판정)"""
+    return is_supported_symbol(ticker.exchange, ticker.symbol)
 
 
 def _build_feeds(config: AppConfig) -> list[Any]:

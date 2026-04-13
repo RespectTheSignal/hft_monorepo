@@ -41,7 +41,7 @@ async def main() -> None:
     binance_syms: set[str] = set()
     flipster_syms: set[str] = set()
 
-    bn = ExchangeZmqFeed(zmq_address="tcp://211.181.122.3:6000", exchange_name="binance")
+    bn = ExchangeZmqFeed(zmq_address="tcp://211.181.122.24:6000", exchange_name="binance")
     fl = FlipsterZmqFeed(zmq_address="tcp://211.181.122.104:7000")
 
     await asyncio.gather(
