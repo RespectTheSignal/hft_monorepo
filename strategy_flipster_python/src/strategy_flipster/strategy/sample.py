@@ -37,12 +37,18 @@ class SampleStrategy:
         now = time.time_ns()
         if now - self._last_log_ns > 1_000_000_000:
             self._last_log_ns = now
-            # 예시: Binance BTCUSDT vs Flipster BTCUSDT.PERP mid 평균 차이 (최근 30s)
-            avg_diff = history.spread_mean(
-                "flipster", "BTCUSDT.PERP",
-                "binance", "BTCUSDT",
+            # SOL USDT-perp: Flipster("SOLUSDT.PERP") vs Binance("SOL_USDT")
+            fl_sym = "SOLUSDT.PERP"
+            bn_sym = "SOL_USDT"
+            spread_30s = history.spread_mean(
+                "flipster", fl_sym,
+                "binance", bn_sym,
                 duration_sec=30.0,
             )
+            fl_latest = history.latest("flipster", fl_sym)
+            bn_latest = history.latest("binance", bn_sym)
+            fl_mid = fl_latest[3] if fl_latest else 0.0
+            bn_mid = bn_latest[3] if bn_latest else 0.0
             logger.info(
                 "strategy_tick",
                 latest_symbols=len(latest),
@@ -50,7 +56,10 @@ class SampleStrategy:
                 stats_symbols=len(market_stats),
                 history_series=history.series_count(),
                 history_samples=len(history),
-                btc_fl_minus_bn_30s=round(avg_diff, 4),
+                sol_fl_mid=round(fl_mid, 4),
+                sol_bn_mid=round(bn_mid, 4),
+                sol_fl_minus_bn=round(fl_mid - bn_mid, 4),
+                sol_spread_30s_avg=round(spread_30s, 4),
             )
 
         return []

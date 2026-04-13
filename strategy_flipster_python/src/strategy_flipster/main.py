@@ -25,8 +25,25 @@ from strategy_flipster.strategy.sample import SampleStrategy
 from strategy_flipster.user_data.rest_client import FlipsterUserRestClient
 from strategy_flipster.user_data.state import UserState
 from strategy_flipster.user_data.ws_client import FlipsterUserWsClient
+from strategy_flipster.types import BookTicker
 
 logger = structlog.get_logger(__name__)
+
+
+def _default_accept(ticker: BookTicker) -> bool:
+    """USDT-margin perpetual만 수용.
+
+    - Flipster: symbol이 'USDT.PERP'로 끝남 (예: BTCUSDT.PERP)
+    - Binance : symbol이 '_USDT'로 끝남 (Binance publisher의 USDT perp 포맷)
+    - 기타 거래소: 통과 (필요 시 후속 확장)
+    """
+    sym = ticker.symbol
+    exch = ticker.exchange
+    if exch == "flipster":
+        return sym.endswith("USDT.PERP")
+    if exch == "binance":
+        return sym.endswith("_USDT")
+    return True
 
 
 def _build_feeds(config: AppConfig) -> list[Any]:
@@ -89,7 +106,11 @@ async def run(config: AppConfig) -> None:
     # ── 모듈 생성 ──
     feeds = _build_feeds(config)
     latest_cache = LatestTickerCache()
-    aggregator = MarketDataAggregator(feeds, latest_cache=latest_cache)
+    aggregator = MarketDataAggregator(
+        feeds,
+        latest_cache=latest_cache,
+        accept=_default_accept,
+    )
 
     # Snapshot History + Sampler
     history = SnapshotHistory(

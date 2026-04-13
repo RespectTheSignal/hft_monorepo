@@ -3,10 +3,9 @@
 지원 거래소: binance, gate, bybit, bitget, okx (동일 wire format)
 기본 포트: binance=6000, gate=5559, bybit=5558, bitget=6010, okx=6011
 
-Wire format (단일 ZMQ 프레임):
-  [1B type_len][type_str][payload]
-  type = "bookticker" → 120B payload
-  type = "trade"      → 128B payload
+Wire format (ZMQ multipart):
+  part 0: topic 예) b"binance_bookticker_BTC_USDT", b"binance_trade_BTC_USDT"
+  part 1: 120B bookticker payload 또는 128B trade payload
 """
 
 from __future__ import annotations
@@ -25,6 +24,9 @@ from strategy_flipster.types import (
 )
 
 logger = structlog.get_logger(__name__)
+
+_BOOKTICKER_TAG: bytes = b"_bookticker_"
+_TRADE_TAG: bytes = b"_trade_"
 
 # 거래소별 기본 ZMQ PUB 포트
 DEFAULT_PORTS: dict[str, int] = {
@@ -90,46 +92,31 @@ class ExchangeZmqFeed:
         logger.info("zmq_feed_disconnected", exchange=self._exchange_name)
 
     async def recv(self) -> BookTicker | None:
-        """다음 BookTicker 수신. trade 메시지는 건너뜀."""
-        if self._socket is None:
-            return None
+        """다음 BookTicker 수신. trade 메시지와 파싱 실패 프레임은 skip.
 
+        None 반환 = 소켓 종료. 호출자(aggregator)가 재연결.
+        """
         while True:
-            frame: bytes = await self._socket.recv()
-            result = _parse_bookticker(frame)
-            if result is not None:
-                return result
+            if self._socket is None:
+                return None
+            parts = await self._socket.recv_multipart()
+            if len(parts) != 2:
+                continue
+            topic, payload = parts
+            if _BOOKTICKER_TAG in topic and len(payload) == BINANCE_BT_SIZE:
+                return parse_binance_bookticker(payload)
+            # trade 또는 알 수 없는 프레임은 skip
 
     async def recv_any(self) -> BookTicker | Trade | None:
-        """BookTicker 또는 Trade 수신"""
+        """BookTicker 또는 Trade 수신 (파싱 실패 시 None)"""
         if self._socket is None:
             return None
-
-        frame: bytes = await self._socket.recv()
-        return _parse_any(frame)
-
-
-def _parse_bookticker(frame: bytes) -> BookTicker | None:
-    """프레임 → BookTicker (trade 무시)"""
-    if len(frame) < 2:
+        parts = await self._socket.recv_multipart()
+        if len(parts) != 2:
+            return None
+        topic, payload = parts
+        if _BOOKTICKER_TAG in topic and len(payload) == BINANCE_BT_SIZE:
+            return parse_binance_bookticker(payload)
+        if _TRADE_TAG in topic and len(payload) == BINANCE_TRADE_SIZE:
+            return parse_binance_trade(payload)
         return None
-    type_len = frame[0]
-    msg_type = frame[1 : 1 + type_len]
-    payload = frame[1 + type_len :]
-    if msg_type == b"bookticker" and len(payload) == BINANCE_BT_SIZE:
-        return parse_binance_bookticker(payload)
-    return None
-
-
-def _parse_any(frame: bytes) -> BookTicker | Trade | None:
-    """프레임 → BookTicker 또는 Trade"""
-    if len(frame) < 2:
-        return None
-    type_len = frame[0]
-    msg_type = frame[1 : 1 + type_len]
-    payload = frame[1 + type_len :]
-    if msg_type == b"bookticker" and len(payload) == BINANCE_BT_SIZE:
-        return parse_binance_bookticker(payload)
-    if msg_type == b"trade" and len(payload) == BINANCE_TRADE_SIZE:
-        return parse_binance_trade(payload)
-    return None

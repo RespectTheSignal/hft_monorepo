@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from typing import Any
 
 import structlog
@@ -30,6 +31,7 @@ class MarketDataAggregator:
         feeds: list[Any],  # list[MarketDataFeed] — Protocol이라 Any 사용
         queue_size: int = 10_000,
         latest_cache: LatestTickerCache | None = None,
+        accept: Callable[[BookTicker], bool] | None = None,
     ) -> None:
         self._feeds: list[Any] = feeds
         self._queue: asyncio.Queue[BookTicker] = asyncio.Queue(maxsize=queue_size)
@@ -37,6 +39,8 @@ class MarketDataAggregator:
         self._running: bool = False
         self._last_recv_ns: dict[int, int] = {}  # id(feed) → ns
         self._latest_cache: LatestTickerCache | None = latest_cache
+        self._accept: Callable[[BookTicker], bool] | None = accept
+        self._filtered_count: int = 0
 
     async def start(self) -> None:
         """모든 피드 연결 및 수신 태스크 시작"""
@@ -109,6 +113,9 @@ class MarketDataAggregator:
                     continue
                 backoff = 1.0
                 self._last_recv_ns[id(feed)] = time.time_ns()
+                if self._accept is not None and not self._accept(ticker):
+                    self._filtered_count += 1
+                    continue
                 if self._latest_cache is not None:
                     self._latest_cache.update(ticker)
                 if self._queue.full():
