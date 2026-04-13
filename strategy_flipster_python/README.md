@@ -40,19 +40,35 @@ src/strategy_flipster/
     └── sample.py           # 샘플 전략
 ```
 
-## 설정
-
-`config.example.toml`을 복사하여 `config.toml` 생성:
+## 실행
 
 ```bash
+# 설정 파일 준비
 cp config.example.toml config.toml
-```
-
-API 키는 환경변수 사용:
-```bash
+# API 키 설정
 export FLIPSTER_API_KEY="..."
 export FLIPSTER_API_SECRET="..."
+
+# 실행
+PYTHONPATH=src python -m strategy_flipster.main config.toml
 ```
+
+## 이벤트 루프
+
+```
+Task 1: market_data_loop
+  └─ aggregator.recv() → strategy.on_book_ticker() → order_manager.submit()
+  └─ timeout (tick_interval_ms) → strategy.on_timer() → order_manager.submit()
+
+Task 2: user_data_ws_loop
+  └─ Flipster WS → UserState 실시간 갱신
+
+Task 3: shutdown_watcher
+  └─ SIGINT/SIGTERM → graceful shutdown
+```
+
+- bookticker 수신 시 즉시 전략 실행
+- bookticker 없으면 `tick_interval_ms` (기본 10ms) 간격으로 `on_timer` 호출
 
 ## Wire Format
 
@@ -70,7 +86,14 @@ IPC frame: [4B topic_len LE][topic][4B payload_len LE][104B payload]
 Payload: symbol(32) + bid/ask/last/mark/index(5×f64) + 4×i64(ns)
 ```
 
-## 테스트 스크립트
+### Binance Trade (128B)
+
+```
+Payload: exchange(16) + symbol(32) + price/size(2×f64) + id/create_time/create_time_ms(3×i64)
+         + is_internal(1B) + padding(7B) + server_time/pub_sent/sub_recv/sub_dump(4×i64)
+```
+
+## 모듈별 테스트
 
 ```bash
 # Binance ZMQ 피드 테스트
@@ -81,11 +104,46 @@ python scripts/test_flipster_feed.py
 
 # Flipster ZMQ 직접 연결 테스트
 python scripts/test_flipster_zmq_feed.py tcp://211.181.122.104:7000
+
+# 사용자 데이터 테스트 (REST + WS)
+python scripts/test_user_data.py rest   # REST만
+python scripts/test_user_data.py ws     # WS만
+python scripts/test_user_data.py        # 둘 다
+```
+
+## 전략 작성법
+
+`strategy/base.py`의 `Strategy` Protocol 구현:
+
+```python
+class MyStrategy:
+    async def on_book_ticker(self, ticker: BookTicker, state: UserState) -> list[OrderRequest]:
+        # 매 틱마다 호출 — 주문 요청 리스트 반환
+        return []
+
+    async def on_timer(self, state: UserState) -> list[OrderRequest]:
+        # tick_interval_ms 간격 — bookticker 없어도 실행
+        return []
+
+    async def on_start(self, state: UserState) -> None: ...
+    async def on_stop(self) -> None: ...
 ```
 
 ## 설계 원칙
 
-- **Rust 번역 고려**: dataclass(frozen) → struct, Protocol → trait, enum → enum
-- **asyncio 기반**: uvloop 사용, 모든 I/O 비동기
-- **틱 단위 처리**: 매 bookticker + 타이머 인터벌(기본 10ms)로 전략 실행
-- **50~200개 심볼 동시 처리** 대응
+- **Rust 번역 고려**: `@dataclass(frozen, slots)` → struct, `Protocol` → trait, `Enum` → enum
+- **asyncio 기반**: uvloop, 모든 I/O 비동기
+- **틱 + 타이머**: 매 bookticker 즉시 실행 + 인터벌 fallback
+- **50~200개 심볼 동시 처리**
+- **composition > inheritance**: 전역 상태 없음, magic method 없음
+
+## 의존성
+
+| Python | Rust 대응 |
+|--------|-----------|
+| pyzmq | zmq crate |
+| websockets | tokio-tungstenite |
+| httpx | reqwest |
+| uvloop | tokio |
+| structlog | tracing |
+| tomli | toml |
