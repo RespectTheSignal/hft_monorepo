@@ -3,7 +3,7 @@ use data_publisher::error::Result;
 use data_publisher::flipster::models::{Ticker, WsMessage};
 use data_publisher::flipster::rest::FlipsterRestClient;
 use data_publisher::flipster::ws::FlipsterWsClient;
-use data_publisher::store::QdbWriter;
+use data_publisher::publisher::ZmqPublisher;
 use data_publisher::time_sync;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -39,10 +39,13 @@ fn parse_args() -> CliArgs {
                 );
             }
             "--help" | "-h" => {
-                eprintln!("data_publisher — Flipster bookticker latency checker\n");
+                eprintln!("data_publisher — Flipster bookticker ZMQ publisher\n");
                 eprintln!("Options:");
                 eprintln!("  -t, --topics-per-conn <N>  Max topics per WebSocket (default: {DEFAULT_TOPICS_PER_CONN})");
                 eprintln!("  -n, --max-symbols <N>      Limit number of symbols to subscribe");
+                eprintln!("\nEnvironment:");
+                eprintln!("  FLIPSTER_DATA_PORT     ZMQ PUB port (default: 7000)");
+                eprintln!("  FLIPSTER_ZMQ_PUB_ADDR  ZMQ PUB address (default: tcp://0.0.0.0:$PORT)");
                 std::process::exit(0);
             }
             _ => {}
@@ -63,9 +66,8 @@ struct TickEvent {
     mark_price: Option<f64>,
     index_price: Option<f64>,
     latency_us: f64,
-    recv_ns: i64,
     server_ts_ns: i64,
-    read_gap_us: f64,
+    publisher_recv_ns: i64,
     conn_id: usize,
 }
 
@@ -99,6 +101,10 @@ impl TickerState {
         if tick.index_price.is_some() {
             self.index_price = tick.index_price;
         }
+    }
+
+    fn is_ready(&self) -> bool {
+        self.bid_price.is_some() && self.ask_price.is_some()
     }
 }
 
@@ -218,99 +224,57 @@ async fn main() -> Result<()> {
             ws_task(idx, cfg, topics, offset, tx).await;
         });
     }
-    drop(tx); // main holds no sender — channel closes when all tasks exit
+    drop(tx);
 
-    // ---- 4. QuestDB writer (optional) ---------------------------------------
-    let mut qdb = match &config.qdb_client_conf {
-        Some(conf) => {
-            info!("connecting to QuestDB (5s timeout)...");
-            match QdbWriter::try_new_with_timeout(conf, "flipster_bookticker", 5) {
-                Ok(Some(w)) => Some(w),
-                Ok(None) => {
-                    warn!("QuestDB unreachable — running without persistence");
-                    None
-                }
-                Err(e) => {
-                    error!("QuestDB init failed: {e} — running without persistence");
-                    None
-                }
-            }
-        }
-        None => {
-            info!("QDB_CLIENT_CONF not set — running without QuestDB");
-            None
-        }
-    };
+    // ---- 4. ZMQ publisher -------------------------------------------------
+    let mut zmq_pub = ZmqPublisher::new(&config.zmq_pub_addr);
+    info!("ZMQ publisher ready at {}", config.zmq_pub_addr);
 
     // ---- 5. Collect events ------------------------------------------------
     info!("===== Receiving Tickers (Ctrl-C to stop) =====");
-    info!(
-        "{:<24} {:>14} {:>14} {:>12} {:>12}",
-        "symbol", "bid", "ask", "spread", "latency"
-    );
-    info!("{}", "-".repeat(78));
 
     let mut stats: HashMap<String, LatencyStats> = HashMap::new();
     let mut ticker_state: HashMap<String, TickerState> = HashMap::new();
-    let mut last_flush = std::time::Instant::now();
-    let flush_interval = std::time::Duration::from_millis(200);
+    let mut last_status = std::time::Instant::now();
 
     loop {
         tokio::select! {
             ev = rx.recv() => {
                 match ev {
                     Some(tick) => {
-                        // Merge partial update into per-symbol state
                         let state = ticker_state
                             .entry(tick.symbol.clone())
                             .or_default();
                         state.merge(&tick);
 
-                        let bid_str = state.bid_price.map(|v| format!("{v}")).unwrap_or("-".into());
-                        let ask_str = state.ask_price.map(|v| format!("{v}")).unwrap_or("-".into());
-                        let spread = match (state.bid_price, state.ask_price) {
-                            (Some(b), Some(a)) => format!("{:.4}", a - b),
-                            _ => "-".into(),
-                        };
-
-                        info!(
-                            "{:<24} {:>14} {:>14} {:>12} {:>9.1}\u{00b5}s",
-                            tick.symbol, bid_str, ask_str, spread, tick.latency_us,
-                        );
-
-                        // Write merged state to QuestDB
-                        if let Some(ref mut w) = qdb {
-                            if let Err(e) = w.buffer_tick(
+                        // Publish merged state via ZMQ (only when we have bid+ask)
+                        if state.is_ready() {
+                            zmq_pub.publish(
                                 &tick.symbol,
-                                state.bid_price,
-                                state.ask_price,
-                                state.last_price,
-                                state.mark_price,
-                                state.index_price,
+                                state.bid_price.unwrap_or(0.0),
+                                state.ask_price.unwrap_or(0.0),
+                                state.last_price.unwrap_or(0.0),
+                                state.mark_price.unwrap_or(0.0),
+                                state.index_price.unwrap_or(0.0),
                                 tick.server_ts_ns,
-                            ) {
-                                error!("QuestDB buffer error: {e}");
-                            }
-
-                            // Periodic flush
-                            if last_flush.elapsed() >= flush_interval {
-                                match w.flush() {
-                                    Ok(n) if n > 0 => {
-                                        info!("QuestDB flushed {n} rows (total: {})", w.rows_flushed());
-                                    }
-                                    Err(e) => {
-                                        error!("QuestDB flush error: {e}");
-                                    }
-                                    _ => {}
-                                }
-                                last_flush = std::time::Instant::now();
-                            }
+                                tick.publisher_recv_ns,
+                            );
                         }
 
                         stats
                             .entry(tick.symbol)
                             .or_insert_with(LatencyStats::new)
                             .record(tick.latency_us);
+
+                        // Periodic status log
+                        if last_status.elapsed().as_secs() >= 10 {
+                            info!(
+                                "symbols={} zmq_published={}",
+                                ticker_state.len(),
+                                zmq_pub.msg_count(),
+                            );
+                            last_status = std::time::Instant::now();
+                        }
                     }
                     None => {
                         info!("all websocket tasks exited");
@@ -325,17 +289,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Final flush
-    if let Some(ref mut w) = qdb {
-        if let Err(e) = w.flush() {
-            error!("QuestDB final flush error: {e}");
-        }
-        info!(
-            "QuestDB total: {} rows flushed, {} errors",
-            w.rows_flushed(),
-            w.flush_errors()
-        );
-    }
+    info!("ZMQ total: {} messages published", zmq_pub.msg_count());
 
     // ---- 6. Print summary -------------------------------------------------
     print_summary(&stats);
@@ -354,14 +308,22 @@ async fn ws_task(
     offset_ns: i64,
     tx: mpsc::Sender<TickEvent>,
 ) {
+    let mut backoff_secs: u64 = 3;
     loop {
         info!("[ws-{}] connecting ({} topics)...", id, topics.len());
 
         let mut ws = match FlipsterWsClient::connect(&config).await {
-            Ok(ws) => ws,
+            Ok(ws) => {
+                backoff_secs = 3; // reset on success
+                ws
+            }
             Err(e) => {
-                error!("[ws-{}] connect failed: {e}, retrying in 3s", id);
-                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                let is_rate_limited = format!("{e}").contains("429");
+                if is_rate_limited {
+                    backoff_secs = (backoff_secs * 2).min(60);
+                }
+                error!("[ws-{}] connect failed: {e}, retrying in {backoff_secs}s", id);
+                tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs)).await;
                 continue;
             }
         };
@@ -374,23 +336,15 @@ async fn ws_task(
 
         info!("[ws-{}] streaming", id);
 
-        // Read loop
-        let mut last_recv_ns: i64 = 0;
         loop {
             match ws.next_message().await {
                 Some(Ok(Message::Text(text))) => {
                     let recv_ns = time_sync::local_now_ns();
-                    let read_gap_us = if last_recv_ns == 0 {
-                        0.0
-                    } else {
-                        (recv_ns - last_recv_ns) as f64 / 1_000.0
-                    };
-                    last_recv_ns = recv_ns;
 
-                    if let Some(events) = parse_tickers(&text, recv_ns, offset_ns, read_gap_us, id) {
+                    if let Some(events) = parse_tickers(&text, recv_ns, offset_ns, id) {
                         for ev in events {
                             if tx.send(ev).await.is_err() {
-                                return; // receiver dropped → shutdown
+                                return;
                             }
                         }
                     }
@@ -423,7 +377,6 @@ fn parse_tickers(
     text: &str,
     recv_ns: i64,
     offset_ns: i64,
-    read_gap_us: f64,
     conn_id: usize,
 ) -> Option<Vec<TickEvent>> {
     let msg: WsMessage = serde_json::from_str(text).ok()?;
@@ -443,9 +396,8 @@ fn parse_tickers(
                     mark_price: ticker.mark_price.as_deref().and_then(|s| s.parse().ok()),
                     index_price: ticker.index_price.as_deref().and_then(|s| s.parse().ok()),
                     latency_us,
-                    recv_ns,
                     server_ts_ns: server_ts,
-                    read_gap_us,
+                    publisher_recv_ns: recv_ns,
                     conn_id,
                 });
             }
@@ -488,7 +440,6 @@ fn print_summary(stats: &HashMap<String, LatencyStats>) {
         );
     }
 
-    // aggregate
     let all: Vec<f64> = stats
         .values()
         .flat_map(|s| s.samples.iter().copied())

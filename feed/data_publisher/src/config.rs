@@ -6,12 +6,13 @@ pub struct Config {
     pub api_secret: String,
     pub base_url: String,
     pub ws_url: String,
-    pub qdb_client_conf: Option<String>,
+    pub zmq_pub_addr: String,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self> {
         dotenvy::dotenv().ok();
+        let port = std::env::var("FLIPSTER_DATA_PORT").unwrap_or_else(|_| "7000".into());
         Ok(Self {
             api_key: std::env::var("FLIPSTER_API_KEY")
                 .map_err(|_| Error::Config("FLIPSTER_API_KEY not set".into()))?,
@@ -21,7 +22,8 @@ impl Config {
                 .unwrap_or_else(|_| "https://trading-api.flipster.io".into()),
             ws_url: std::env::var("FLIPSTER_WS_URL")
                 .unwrap_or_else(|_| "wss://trading-api.flipster.io/api/v1/stream".into()),
-            qdb_client_conf: std::env::var("QDB_CLIENT_CONF").ok(),
+            zmq_pub_addr: std::env::var("FLIPSTER_ZMQ_PUB_ADDR")
+                .unwrap_or_else(|_| format!("tcp://0.0.0.0:{port}")),
         })
     }
 }
