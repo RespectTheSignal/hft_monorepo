@@ -196,7 +196,7 @@ class FlipsterExecutionClient:
         }
         await self._request("POST", "/api/v1/trade/margin", body)
 
-    # ── 심볼 ──
+    # ── 심볼 / 시장 (인증 필요) ──
 
     async def get_tradable_symbols(self) -> dict[str, list[str]]:
         """거래 가능 심볼 목록"""
@@ -205,6 +205,38 @@ class FlipsterExecutionClient:
             "spot": data.get("spot", []),
             "perpetual": data.get("perpetualSwap", []),
         }
+
+    # ── 시장 (공개, 인증 불필요) ──
+
+    async def _public_get(self, path: str) -> dict | list:
+        if self._client is None:
+            raise AppException(AppError(kind=ErrorKind.NETWORK, message="클라이언트 미시작"))
+        resp = await self._client.get(path)
+        if resp.status_code != 200:
+            raise AppException(AppError(
+                kind=ErrorKind.API,
+                message=f"GET {path}: {resp.status_code} {resp.text}",
+                status_code=resp.status_code,
+            ))
+        return resp.json()
+
+    async def get_contract_info(self, symbol: str) -> dict:
+        """계약 스펙 (tickSize, unitOrderQty, notionalMinOrderAmount 등)"""
+        data = await self._public_get(f"/api/v1/market/contract?symbol={symbol}")
+        if isinstance(data, list):
+            if not data:
+                raise AppException(AppError(kind=ErrorKind.API, message=f"contract 응답 비어있음: {symbol}"))
+            return data[0]
+        return data
+
+    async def get_ticker(self, symbol: str) -> dict:
+        """현재 ticker (bidPrice, askPrice, lastPrice, markPrice 등)"""
+        data = await self._public_get(f"/api/v1/market/ticker?symbol={symbol}")
+        if isinstance(data, list):
+            if not data:
+                raise AppException(AppError(kind=ErrorKind.API, message=f"ticker 응답 비어있음: {symbol}"))
+            return data[0]
+        return data
 
     # ── 파싱 ──
 
