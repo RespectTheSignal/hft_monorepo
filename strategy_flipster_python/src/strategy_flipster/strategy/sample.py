@@ -10,6 +10,7 @@ import time
 
 import structlog
 
+from strategy_flipster.market_data.stats_cache import MarketStatsCache
 from strategy_flipster.types import BookTicker, OrderRequest
 from strategy_flipster.user_data.state import UserState
 
@@ -29,6 +30,7 @@ class SampleStrategy:
         self,
         ticker: BookTicker,
         state: UserState,
+        market_stats: MarketStatsCache,
     ) -> list[OrderRequest]:
         # 거래소별 캐시 업데이트
         if ticker.exchange == "binance":
@@ -45,15 +47,23 @@ class SampleStrategy:
                 binance_symbols=len(self._binance_tickers),
                 flipster_symbols=len(self._flipster_tickers),
                 positions=len(state.positions),
+                stats_symbols=len(market_stats),
             )
 
         return []
 
-    async def on_timer(self, state: UserState) -> list[OrderRequest]:
-        # 타이머 트리거 — 여기서 주기적 로직 실행 가능
+    async def on_timer(
+        self,
+        state: UserState,
+        market_stats: MarketStatsCache,
+    ) -> list[OrderRequest]:
         return []
 
-    async def on_start(self, state: UserState) -> None:
+    async def on_start(
+        self,
+        state: UserState,
+        market_stats: MarketStatsCache,
+    ) -> None:
         logger.info("sample_strategy_started")
 
     async def on_stop(self) -> None:

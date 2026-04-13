@@ -16,6 +16,8 @@ from strategy_flipster.execution.rest_client import FlipsterExecutionClient
 from strategy_flipster.market_data.aggregator import MarketDataAggregator
 from strategy_flipster.market_data.flipster_ipc import FlipsterIpcFeed
 from strategy_flipster.market_data.flipster_zmq import FlipsterZmqFeed
+from strategy_flipster.market_data.stats_cache import MarketStatsCache
+from strategy_flipster.market_data.stats_poller import FlipsterMarketStatsPoller
 from strategy_flipster.market_data.zmq_feed import ExchangeZmqFeed
 from strategy_flipster.strategy.sample import SampleStrategy
 from strategy_flipster.user_data.rest_client import FlipsterUserRestClient
@@ -95,6 +97,14 @@ async def run(config: AppConfig) -> None:
     exec_client = FlipsterExecutionClient(config.flipster_api)
     order_manager = OrderManager(exec_client, user_state, dry_run=False)
 
+    # Market Stats (주기 풀링 캐시)
+    market_stats = MarketStatsCache()
+    stats_poller = FlipsterMarketStatsPoller(
+        client=exec_client,
+        cache=market_stats,
+        interval_sec=config.market_stats.interval_ms / 1000.0,
+    )
+
     # Strategy
     strategy = SampleStrategy()
 
@@ -126,7 +136,15 @@ async def run(config: AppConfig) -> None:
     logger.info("starting_tasks", feed_count=len(feeds))
 
     await aggregator.start()
-    await strategy.on_start(user_state)
+    await strategy.on_start(user_state, market_stats)
+
+    # 초기 stats 1회 동기 로딩 (전략이 빈 캐시로 시작하지 않도록)
+    if config.market_stats.enabled:
+        try:
+            initial_count = await stats_poller.poll_once()
+            logger.info("market_stats_initial_loaded", count=initial_count)
+        except Exception:
+            logger.exception("market_stats_initial_load_failed")
 
     # Task 1: Market data → Strategy
     async def market_data_loop() -> None:
@@ -136,12 +154,11 @@ async def run(config: AppConfig) -> None:
                     aggregator.recv(),
                     timeout=config.strategy.tick_interval_ms / 1000.0,
                 )
-                orders = await strategy.on_book_ticker(ticker, user_state)
+                orders = await strategy.on_book_ticker(ticker, user_state, market_stats)
                 if orders:
                     await order_manager.submit_orders(orders)
             except asyncio.TimeoutError:
-                # 타이머 트리거 — bookticker 없어도 주기적 실행
-                orders = await strategy.on_timer(user_state)
+                orders = await strategy.on_timer(user_state, market_stats)
                 if orders:
                     await order_manager.submit_orders(orders)
             except asyncio.CancelledError:
@@ -156,16 +173,25 @@ async def run(config: AppConfig) -> None:
         except asyncio.CancelledError:
             await user_ws.stop()
 
-    # Task 3: Shutdown 대기
+    # Task 3: Market stats poller
+    async def stats_poll_loop() -> None:
+        try:
+            await stats_poller.start()
+        except asyncio.CancelledError:
+            await stats_poller.stop()
+
+    # Task 4: Shutdown 대기
     async def shutdown_watcher() -> None:
         await shutdown_event.wait()
         logger.info("shutdown_signal_received")
 
-    tasks = [
+    tasks: list[asyncio.Task[None]] = [
         asyncio.create_task(market_data_loop(), name="market_data"),
         asyncio.create_task(user_data_loop(), name="user_data"),
         asyncio.create_task(shutdown_watcher(), name="shutdown"),
     ]
+    if config.market_stats.enabled:
+        tasks.append(asyncio.create_task(stats_poll_loop(), name="stats_poller"))
 
     # shutdown_watcher가 완료되면 나머지 태스크 취소
     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -178,6 +204,7 @@ async def run(config: AppConfig) -> None:
     await strategy.on_stop()
     await aggregator.stop()
     await user_ws.stop()
+    await stats_poller.stop()
     await exec_client.stop()
     await user_rest.stop()
 

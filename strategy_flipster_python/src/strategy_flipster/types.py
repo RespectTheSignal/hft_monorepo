@@ -77,6 +77,28 @@ class BookTicker:
 
 
 @dataclass(frozen=True, slots=True)
+class MarketStats:
+    """주기적 시장 데이터 — REST ticker 폴링으로 갱신.
+
+    bookticker ZMQ 푸시와 별개. funding/OI/volume 등 느린 지표 포함.
+    """
+
+    symbol: str
+    bid_price: float
+    ask_price: float
+    last_price: float
+    mark_price: float
+    index_price: float
+    funding_rate: float
+    next_funding_time_ns: int   # ns (Flipster 응답 단위)
+    open_interest: float
+    volume_24h: float
+    turnover_24h: float
+    price_change_24h: float
+    updated_ns: int
+
+
+@dataclass(frozen=True, slots=True)
 class Trade:
     """정규화된 체결 데이터"""
 

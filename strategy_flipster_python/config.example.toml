@@ -40,3 +40,8 @@ topics = []
 
 [strategy]
 tick_interval_ms = 10
+
+[market_stats]
+# 전체 perpetual ticker 주기 풀링 (funding/OI/24h volume 등)
+enabled = true
+interval_ms = 10000

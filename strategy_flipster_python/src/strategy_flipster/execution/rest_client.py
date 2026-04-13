@@ -240,6 +240,13 @@ class FlipsterExecutionClient:
             return data[0]
         return data
 
+    async def get_all_tickers(self) -> list[dict]:
+        """전체 perpetual ticker 배열 (심볼 필터 없이 1회 호출)"""
+        data = await self._request("GET", "/api/v1/market/ticker")
+        if isinstance(data, list):
+            return data
+        return [data]
+
     # ── 파싱 ──
 
     @staticmethod

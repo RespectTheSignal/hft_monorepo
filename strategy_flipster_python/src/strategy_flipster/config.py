@@ -56,11 +56,19 @@ class StrategyConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class MarketStatsConfig:
+    """전체 심볼 ticker 주기 풀링 설정"""
+    enabled: bool = True
+    interval_ms: int = 10_000
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     flipster_api: FlipsterApiConfig
     flipster_feed: FlipsterFeedConfig
     exchange_feeds: list[ExchangeFeedConfig]
     strategy: StrategyConfig
+    market_stats: MarketStatsConfig
 
 
 # 거래소별 기본 포트
@@ -149,9 +157,17 @@ def load_config(path: Path | str) -> AppConfig:
         tick_interval_ms=strategy_raw.get("tick_interval_ms", 10),
     )
 
+    # ── Market Stats Poller ──
+    stats_raw = raw.get("market_stats", {})
+    market_stats = MarketStatsConfig(
+        enabled=stats_raw.get("enabled", True),
+        interval_ms=stats_raw.get("interval_ms", 10_000),
+    )
+
     return AppConfig(
         flipster_api=flipster_api,
         flipster_feed=flipster_feed,
         exchange_feeds=exchange_feeds,
         strategy=strategy,
+        market_stats=market_stats,
     )
