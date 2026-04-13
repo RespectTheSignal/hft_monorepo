@@ -1,0 +1,18 @@
+[flipster_api]
+base_url = "https://trading-api.flipster.io"
+ws_url = "wss://trading-api.flipster.io/api/v1/stream"
+# api_key, api_secret → 환경변수 FLIPSTER_API_KEY, FLIPSTER_API_SECRET 사용
+
+[flipster_feed]
+ipc_socket_path = "/tmp/flipster_data_subscriber.sock"
+symbols = ["BTC-USDT-PERP", "ETH-USDT-PERP"]
+process_id = "strategy_main"
+
+[binance_feed]
+zmq_address = "tcp://211.181.122.3:6000"
+# topics 빈 리스트 = 모든 심볼 구독
+topics = []
+
+[strategy]
+# 전략 실행 간격 (bookticker 없을 때 타이머 트리거, 밀리초)
+tick_interval_ms = 10
