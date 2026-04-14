@@ -14,6 +14,15 @@ target/
 *.swo
 *~
 
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Generated bundles
+.gate_bundle.js
+.gate_chunk2.js
+
 # OS
 .DS_Store
 Thumbs.db
