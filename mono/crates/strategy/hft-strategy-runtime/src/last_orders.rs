@@ -28,10 +28,9 @@ impl LastOrderStore {
         self.inner.insert(symbol.into(), order);
     }
 
-    /// 읽기 — `LastOrder` copy (Copy 가 아닌 경우 Clone) 로 dashmap guard 를
-    /// 빠르게 반환. LastOrder 는 작은 POD 이므로 clone 은 저렴.
+    /// 읽기 — 작은 POD 인 `LastOrder` 를 copy 하여 dashmap guard 를 빠르게 반환.
     pub fn get(&self, symbol: &str) -> Option<LastOrder> {
-        self.inner.get(symbol).map(|r| r.value().clone())
+        self.inner.get(symbol).map(|r| *r.value())
     }
 
     /// 엔트리 수.
@@ -64,7 +63,7 @@ mod tests {
             price: 10.0,
             timestamp_ms: 100,
         };
-        s.record("BTC_USDT", o.clone());
+        s.record("BTC_USDT", o);
         let got = s.get("BTC_USDT").unwrap();
         assert_eq!(got.level, OrderLevel::LimitOpen);
         assert_eq!(got.side, OrderSide::Buy);

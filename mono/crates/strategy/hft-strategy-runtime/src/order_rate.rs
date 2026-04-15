@@ -160,6 +160,11 @@ impl OrderRateTracker {
         self.queue.lock().len()
     }
 
+    /// 현재 buffer 가 비었는지.
+    pub fn is_empty(&self) -> bool {
+        self.queue.lock().is_empty()
+    }
+
     /// 누적 push 수.
     pub fn total_pushed(&self) -> i64 {
         self.total_pushed.load(Ordering::Relaxed)
