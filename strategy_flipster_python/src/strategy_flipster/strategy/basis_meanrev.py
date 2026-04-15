@@ -109,6 +109,13 @@ class BasisMeanRevParams:
     fee_bps_cost: float = 0.45              # per side (Flipster taker)
     spread_edge_safety: float = 1.0         # 안전 배율 (1.0 = 손익분기)
 
+    # Binance 가격 변화 후 cooldown — 방금 바뀐 구간에선 새 주문 skip
+    # open / close 분리, 각 0 = 끔.
+    # 경험상 Binance 가 leader 라서 cooldown 은 오히려 신호를 놓치게 만들어
+    # PnL 감소 → 기본 0. 실험적으로만 양수 설정 권장.
+    binance_open_cooldown_ms: int = 0
+    binance_close_cooldown_ms: int = 0
+
     # 기타
     warmup_samples: int = 200               # 최소 샘플
     cooldown_ms: int = 500                  # miss 재전송 cooldown
@@ -152,6 +159,7 @@ class BasisMeanRevStats:
     skips_below_z: int = 0
     skips_low_dev_bps: int = 0
     skips_spread_cost: int = 0             # spread + fee > edge 로 차단
+    skips_binance_cooldown: int = 0        # Binance 가격 변화 직후 cooldown
     skips_cooldown: int = 0
     skips_portfolio_cap: int = 0
     holds_hysteresis: int = 0
@@ -169,6 +177,9 @@ class BasisMeanRevStrategy:
         self._clock: Clock = clock if clock is not None else LiveClock()
         self._state: dict[str, _SymbolState] = {}
         self._stats: BasisMeanRevStats = BasisMeanRevStats()
+        # canonical → (last_bid, last_ask), last 변경 ns
+        self._bn_last_quote: dict[str, tuple[float, float]] = {}
+        self._bn_last_change_ns: dict[str, int] = {}
 
     @property
     def stats(self) -> BasisMeanRevStats:
@@ -299,7 +310,16 @@ class BasisMeanRevStrategy:
             self._stats.skips_no_data += 1
             return None
 
-        # 3. 목표 intent 결정 — z/필터/현재 intent 에 따라 결정
+        # 3. Binance 최신 호가 확인 → 변화 감지 (cooldown 용)
+        bn_ticker = latest.get(EXCHANGE_BINANCE, bn_sym)
+        if bn_ticker is not None:
+            cur_quote = (bn_ticker.bid_price, bn_ticker.ask_price)
+            prev_quote = self._bn_last_quote.get(canonical)
+            if prev_quote is None or prev_quote != cur_quote:
+                self._bn_last_quote[canonical] = cur_quote
+                self._bn_last_change_ns[canonical] = now_ns
+
+        # 4. 목표 intent 결정 — z/필터/현재 intent 에 따라 결정
         std_bps = (std / fl_mid) * 10000.0
         dev_bps = (abs(basis_now - mean) / fl_mid) * 10000.0
         fl_spread_bps = (
@@ -308,8 +328,21 @@ class BasisMeanRevStrategy:
         )
         z = (basis_now - mean) / std if std > 1e-12 else 0.0
 
+        # Binance cooldown 체크 — open/close 별도
+        bn_open_cooldown = False
+        bn_close_cooldown = False
+        last_chg = self._bn_last_change_ns.get(canonical, 0)
+        if last_chg > 0:
+            elapsed_ns = now_ns - last_chg
+            if self._p.binance_open_cooldown_ms > 0 and elapsed_ns < self._p.binance_open_cooldown_ms * 1_000_000:
+                bn_open_cooldown = True
+            if self._p.binance_close_cooldown_ms > 0 and elapsed_ns < self._p.binance_close_cooldown_ms * 1_000_000:
+                bn_close_cooldown = True
+
         new_intent = self._next_intent(
             sym_state.intent, z, dev_bps, std_bps, fl_spread_bps,
+            bn_open_cooldown=bn_open_cooldown,
+            bn_close_cooldown=bn_close_cooldown,
         )
 
         intent_changed = new_intent != sym_state.intent
@@ -450,12 +483,14 @@ class BasisMeanRevStrategy:
         dev_bps: float,
         std_bps: float,
         fl_spread_bps: float,
+        bn_open_cooldown: bool = False,
+        bn_close_cooldown: bool = False,
     ) -> Intent:
         """z / 필터 / 현재 intent 에 따라 다음 목표 포지션 결정.
 
         후보 intent 를 z 로 결정 후, 전환 방향에 따라 필터 적용:
-          → LONG/SHORT (open) : open filter + spread-aware cost filter
-          → FLAT (close)      : close filter
+          → LONG/SHORT (open) : open filter + spread-aware cost filter + open bn cooldown
+          → FLAT (close)      : close filter + close bn cooldown
         필터 실패 시 현 intent 유지.
         """
         # 후보 intent 결정
@@ -480,6 +515,9 @@ class BasisMeanRevStrategy:
             if dev_bps < self._p.min_close_dev_bps:
                 self._stats.skips_low_dev_bps += 1
                 return current
+            if bn_close_cooldown:
+                self._stats.skips_binance_cooldown += 1
+                return current
             return candidate
 
         # 진입 또는 flip — open 필터
@@ -497,6 +535,11 @@ class BasisMeanRevStrategy:
             if expected_edge_bps < required_cost_bps * self._p.spread_edge_safety:
                 self._stats.skips_spread_cost += 1
                 return current
+
+        # Binance 가격 변화 직후 cooldown (open)
+        if bn_open_cooldown:
+            self._stats.skips_binance_cooldown += 1
+            return current
 
         return candidate
 

@@ -1,0 +1,375 @@
+{
+  "uid": "flipster-variants",
+  "title": "5 · Pairs Variants — A/B Comparison",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "10s",
+  "time": { "from": "now-24h", "to": "now" },
+  "timezone": "utc",
+  "tags": ["flipster", "strategy", "variants"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Cumulative PnL by variant ($ Kelly-sized, open-position-adjusted)",
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": true
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max", "min"] }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT entry_time AS time, account_id AS metric, sum(pnl_bp*size/10000) OVER (PARTITION BY account_id ORDER BY entry_time) AS value FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) ORDER BY entry_time"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Variant summary ($ Kelly-adjusted)",
+      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 11 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "right" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "avg_$" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 3 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "red", "value": null },
+                { "color": "yellow", "value": -0.5 },
+                { "color": "green", "value": 0.5 }
+              ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "sum_$" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "red", "value": null },
+                { "color": "yellow", "value": 0 },
+                { "color": "green", "value": 10 }
+              ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "win_pct" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "decimals", "value": 1 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "avg_bp" },
+            "properties": [{ "id": "decimals", "value": 2 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "sum_bp" },
+            "properties": [{ "id": "decimals", "value": 1 }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT account_id AS variant, count() AS trades, round(avg(pnl_bp),2) AS avg_bp, round(sum(pnl_bp),1) AS sum_bp, round(avg(pnl_bp*size/10000),4) AS \"avg_$\", round(sum(pnl_bp*size/10000),2) AS \"sum_$\", round(sum(case when pnl_bp>0 then 1.0 else 0.0 end)/count()*100, 1) AS win_pct FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) GROUP BY account_id ORDER BY \"sum_$\" DESC"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Hourly $ rate per variant (Kelly-adjusted)",
+      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 11 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0 },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "" },
+        "graphMode": "area",
+        "colorMode": "background",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT account_id AS metric, sum(pnl_bp*size/10000) AS hourly_usd FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -1, now()) GROUP BY account_id"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Variant × exit_reason ($ Kelly-adjusted)",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "right" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "avg_$" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 3 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "red", "value": null },
+                { "color": "yellow", "value": -0.5 },
+                { "color": "green", "value": 0.5 }
+              ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "sum_$" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 2 }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT account_id AS variant, exit_reason, count() AS n, round(avg(pnl_bp*size/10000),4) AS \"avg_$\", round(sum(pnl_bp*size/10000),2) AS \"sum_$\" FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) GROUP BY account_id, exit_reason ORDER BY account_id, exit_reason"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Trade rate (per minute) by variant",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "bars", "fillOpacity": 50, "lineWidth": 1 }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT entry_time AS time, account_id AS metric, count() AS value FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) SAMPLE BY 1m ALIGN TO CALENDAR ORDER BY entry_time"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Top symbols across all variants ($ Kelly-adjusted)",
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 29 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "right" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "avg_$" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 3 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "red", "value": null },
+                { "color": "yellow", "value": -0.5 },
+                { "color": "green", "value": 0.5 }
+              ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "sum_$" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 2 }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT symbol, count() AS n, round(avg(pnl_bp*size/10000),4) AS \"avg_$\", round(sum(pnl_bp*size/10000),2) AS \"sum_$\" FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) GROUP BY symbol ORDER BY \"sum_$\" DESC LIMIT 30"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Recent trades — per variant (latest 100)",
+      "gridPos": { "h": 15, "w": 24, "x": 0, "y": 40 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "right", "cellOptions": { "type": "auto" } }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "exit_time" },
+            "properties": [
+              { "id": "custom.align", "value": "left" },
+              { "id": "custom.width", "value": 170 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "variant" },
+            "properties": [
+              { "id": "custom.align", "value": "left" },
+              { "id": "custom.width", "value": 150 },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "A_baseline":         { "color": "blue"    } } },
+                { "type": "value", "options": { "B_minstd2":          { "color": "purple"  } } },
+                { "type": "value", "options": { "C_minstd3":          { "color": "orange"  } } },
+                { "type": "value", "options": { "D_high_sig":         { "color": "yellow"  } } },
+                { "type": "value", "options": { "E_stop6":            { "color": "red"     } } },
+                { "type": "value", "options": { "F_minstd2_fix200":   { "color": "green"   } } },
+                { "type": "value", "options": { "G_minstd3_fix200":   { "color": "#00b3a1" } } },
+                { "type": "value", "options": { "H_minstd2_fix1000":  { "color": "#6cf"    } } }
+              ] }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "symbol" },
+            "properties": [
+              { "id": "custom.align", "value": "left" },
+              { "id": "custom.width", "value": 90 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "side" },
+            "properties": [
+              { "id": "custom.width", "value": 60 },
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "long":  { "color": "green" } } },
+                { "type": "value", "options": { "short": { "color": "red"   } } }
+              ] },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "notional_$" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 0 },
+              { "id": "custom.width", "value": 110 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "#333",   "value": null },
+                { "color": "#555",   "value": 50 },
+                { "color": "#06c",   "value": 500 },
+                { "color": "#a60",   "value": 5000 }
+              ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "entry_px" },
+            "properties": [{ "id": "decimals", "value": 6 }, { "id": "custom.width", "value": 110 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "exit_px" },
+            "properties": [{ "id": "decimals", "value": 6 }, { "id": "custom.width", "value": 110 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "pnl_bp" },
+            "properties": [
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.width", "value": 80 },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "red",    "value": null },
+                { "color": "yellow", "value": -0.5 },
+                { "color": "green",  "value": 0.5 }
+              ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "pnl_$" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 3 },
+              { "id": "custom.width", "value": 100 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "red",    "value": null },
+                { "color": "yellow", "value": -0.01 },
+                { "color": "green",  "value":  0.01 }
+              ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "hold_s" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "decimals", "value": 0 },
+              { "id": "custom.width", "value": 70 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "exit_reason" },
+            "properties": [
+              { "id": "custom.align", "value": "left" },
+              { "id": "custom.width", "value": 100 },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "converged": { "color": "green"  } } },
+                { "type": "value", "options": { "stoploss":  { "color": "red"    } } },
+                { "type": "value", "options": { "timeout":   { "color": "yellow" } } }
+              ] }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [{ "displayName": "exit_time", "desc": true }],
+        "footer": { "show": false }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT exit_time, account_id AS variant, symbol, side, round(size,0) AS \"notional_$\", round(entry_price,6) AS entry_px, round(exit_price,6) AS exit_px, round(pnl_bp,2) AS pnl_bp, round(pnl_bp*size/10000,4) AS \"pnl_$\", datediff('s', entry_time, exit_time) AS hold_s, exit_reason FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) ORDER BY exit_time DESC LIMIT 100"
+        }
+      ]
+    }
+  ]
+}

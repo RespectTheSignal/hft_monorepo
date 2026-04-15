@@ -95,6 +95,8 @@ async def main() -> None:
         beta_fl_assumption=float(os.environ.get("BETA_FL", "0.5")),
         fee_bps_cost=float(os.environ.get("FEE_BPS", "0.45")),
         spread_edge_safety=float(os.environ.get("SPREAD_EDGE_SAFETY", "1.0")),
+        binance_open_cooldown_ms=int(os.environ.get("BN_OPEN_COOLDOWN_MS", os.environ.get("BN_COOLDOWN_MS", "0"))),
+        binance_close_cooldown_ms=int(os.environ.get("BN_CLOSE_COOLDOWN_MS", "0")),
         cooldown_ms=int(os.environ.get("COOLDOWN_MS", "500")),
     )
     fee_bps = float(os.environ.get("FEE_BPS", "0.45"))
@@ -215,6 +217,7 @@ async def main() -> None:
     print(f"    skips_low_std    : {s.skips_low_std}")
     print(f"    skips_low_dev    : {s.skips_low_dev_bps}")
     print(f"    skips_spread_cost: {s.skips_spread_cost}")
+    print(f"    skips_bn_cooldown: {s.skips_binance_cooldown}")
     print(f"    skips_cooldown   : {s.skips_cooldown}")
     print(f"    skips_port_cap   : {s.skips_portfolio_cap}")
     print(f"    skips_no_data    : {s.skips_no_data}")
