@@ -44,3 +44,8 @@ subaccount_keys.json
 /go/**/bin/
 /go/**/*.exe
 /go/**/*.test
+
+# Local feed test tracks / assistant notes
+/feed/data_publisher/test/binance/
+/feed/data_publisher/test/flipster/
+/feed/data_publisher/test/**/CLAUDE.md
