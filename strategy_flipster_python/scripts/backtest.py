@@ -75,11 +75,10 @@ async def main() -> None:
         window_sec=float(os.environ.get("WINDOW_SEC", "30")),
         k_in=float(os.environ.get("K_IN", "2.0")),
         k_out=float(os.environ.get("K_OUT", "0.5")),
-        k_stop=float(os.environ.get("K_STOP", "4.0")),
-        timeout_sec=float(os.environ.get("TIMEOUT_SEC", "10")),
         notional_usd=float(os.environ.get("NOTIONAL", "20")),
         min_dev_bps=float(os.environ.get("MIN_DEV_BPS", "3.0")),
         min_std_bps=float(os.environ.get("MIN_STD_BPS", "0.5")),
+        cooldown_ms=int(os.environ.get("COOLDOWN_MS", "500")),
     )
     fee_bps = float(os.environ.get("FEE_BPS", "0.45"))
 
@@ -102,9 +101,10 @@ async def main() -> None:
     print(f"  binance    : {bn_symbols}")
     print(f"  range      : {sys.argv[2]} → {sys.argv[3]}")
     print(f"  duration   : {(end_ns - start_ns) / 1e9:.0f}s")
-    print(f"  params     : k_in={params.k_in} k_out={params.k_out} k_stop={params.k_stop}")
-    print(f"               window={params.window_sec}s timeout={params.timeout_sec}s notional=${params.notional_usd}")
+    print(f"  params     : k_in={params.k_in} k_out={params.k_out}")
+    print(f"               window={params.window_sec}s notional=${params.notional_usd}")
     print(f"  filters    : min_dev={params.min_dev_bps}bp min_std={params.min_std_bps}bp")
+    print(f"  cooldown   : {params.cooldown_ms}ms")
     print(f"  fee        : {fee_bps} bp\n")
 
     # QuestDB feed
@@ -166,15 +166,14 @@ async def main() -> None:
     # strategy 내부 통계
     s = strategy.stats
     print(f"\n  strategy stats:")
-    print(f"    entries       : {s.entries}")
-    print(f"    exits_target  : {s.exits_target}")
-    print(f"    exits_stop    : {s.exits_stop}")
-    print(f"    exits_timeout : {s.exits_timeout}")
     print(f"    signals       : {s.signals_seen}")
+    print(f"    intent_changes: {s.intent_changes}")
+    print(f"    longs/shorts/flats: {s.longs}/{s.shorts}/{s.flats}")
+    print(f"    orders_emitted: {s.orders_emitted}")
+    print(f"    reemits       : {s.reemits}")
+    print(f"    hysteresis_hold: {s.holds_hysteresis}")
+    print(f"    skips_cooldown: {s.skips_cooldown}")
     print(f"    skips_no_data : {s.skips_no_data}")
-    print(f"    skips_low_std : {s.skips_low_std}")
-    print(f"    skips_below_z : {s.skips_below_z}")
-    print(f"    skips_low_dev : {s.skips_low_dev_bps}")
 
 
 if __name__ == "__main__":
