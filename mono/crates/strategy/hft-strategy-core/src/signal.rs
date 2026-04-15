@@ -12,8 +12,6 @@
 //!   - is_binance_valid: buy 는 price < binance_bid, sell 은 price > binance_ask
 //!   - v8 추가: gate_last_trade 가 gate_web_bt.event_time 보다 새 것이면 가격 대체.
 
-use serde::{Deserialize, Serialize};
-
 /// 시그널 계산에 필요한 **최소한의 BookTicker 필드** 묶음.
 ///
 /// 레거시 `BookTickerC` (FFI struct) 는 exchange/symbol 을 고정 길이 바이트배열로

@@ -141,7 +141,7 @@ impl TimeRestrictionJitter {
 ///
 /// 실패 시 None 반환. 성공 시 `RiskCheck` 반환 — 실제 주문 사이즈가 확정된 상태.
 #[allow(clippy::too_many_arguments)]
-pub fn handle_chance<O: PositionOracle>(
+pub fn handle_chance<O: PositionOracle + ?Sized>(
     oracle: &O,
     chance: &Chance,
     trade_settings: &TradeSettings,
@@ -280,24 +280,27 @@ pub fn handle_chance<O: PositionOracle>(
         let expected_net = expected_long - expected_short;
         let denom = account_balance * risk_cfg.leverage;
         if denom > 0.0 {
-            if is_buy && expected_net > 0.0 {
-                if expected_net / denom > risk_cfg.max_position_side_ratio {
-                    return None;
-                }
+            if is_buy
+                && expected_net > 0.0
+                && expected_net / denom > risk_cfg.max_position_side_ratio
+            {
+                return None;
             }
-            if !is_buy && expected_net < 0.0 {
-                if expected_net.abs() / denom > risk_cfg.max_position_side_ratio {
-                    return None;
-                }
+            if !is_buy
+                && expected_net < 0.0
+                && expected_net.abs() / denom > risk_cfg.max_position_side_ratio
+            {
+                return None;
             }
         }
     }
 
     // 7) symbol max position 체크 (same-side 가 문제)
-    if is_same_side {
-        if pos_usdt.abs() + final_usdt > max_position_size && !bypass_max_position_size {
-            return None;
-        }
+    if is_same_side
+        && pos_usdt.abs() + final_usdt > max_position_size
+        && !bypass_max_position_size
+    {
+        return None;
     }
 
     // signed size
@@ -386,10 +389,11 @@ mod tests {
     }
 
     fn ts_basic() -> TradeSettings {
-        let mut t = TradeSettings::default();
-        t.order_size = 10.0;
-        t.max_position_size = 1_000.0;
-        t
+        TradeSettings {
+            order_size: 10.0,
+            max_position_size: 1_000.0,
+            ..TradeSettings::default()
+        }
     }
 
     #[test]

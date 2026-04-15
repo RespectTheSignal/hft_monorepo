@@ -7,6 +7,7 @@
 //!   * alloc 0. hot path 에서 String 해시/비교 없음.
 
 use hft_strategy_config::TradeSettings;
+use std::str::FromStr;
 
 use crate::signal::SignalResult;
 
@@ -19,14 +20,6 @@ pub enum OrderSide {
 
 impl OrderSide {
     #[inline]
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "buy" => Some(Self::Buy),
-            "sell" => Some(Self::Sell),
-            _ => None,
-        }
-    }
-    #[inline]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Buy => "buy",
@@ -36,6 +29,19 @@ impl OrderSide {
     #[inline]
     pub fn is_buy(self) -> bool {
         matches!(self, Self::Buy)
+    }
+}
+
+impl FromStr for OrderSide {
+    type Err = ();
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "buy" => Ok(Self::Buy),
+            "sell" => Ok(Self::Sell),
+            _ => Err(()),
+        }
     }
 }
 
@@ -109,7 +115,7 @@ pub fn decide_order(
         return None;
     }
     let side_str = signal.order_side?;
-    let side = OrderSide::from_str(side_str)?;
+    let side = side_str.parse::<OrderSide>().ok()?;
     let _price = signal.order_price?;
 
     // latency gate ― gate BT
@@ -271,7 +277,7 @@ pub fn decide_order_v8(
         return None;
     }
     let side_str = signal.order_side?;
-    let side = OrderSide::from_str(side_str)?;
+    let side = side_str.parse::<OrderSide>().ok()?;
     let _price = signal.order_price?;
 
     // ── 2) size_threshold_multiplier 결정 ─────────────────────────────────
@@ -445,7 +451,7 @@ pub fn decide_order_v6(
         return None;
     }
     let side_str = signal.order_side?;
-    let side = OrderSide::from_str(side_str)?;
+    let side = side_str.parse::<OrderSide>().ok()?;
     let order_price = signal.order_price?;
 
     // ── 2) size_threshold_multiplier (1x → 2x → 4x) ───────────────────────
@@ -534,9 +540,9 @@ pub fn decide_order_v6(
             && binance_data_is_updated
         {
             // profit exit — limit_close (방향 일치).
-            if has_long_position && side == OrderSide::Sell {
-                level = Some(OrderLevel::LimitClose);
-            } else if !has_long_position && side == OrderSide::Buy {
+            if (has_long_position && side == OrderSide::Sell)
+                || (!has_long_position && side == OrderSide::Buy)
+            {
                 level = Some(OrderLevel::LimitClose);
             }
         } else if should_exit_profit {
@@ -551,11 +557,9 @@ pub fn decide_order_v6(
                     let avail = signal.gate_bid + order_price_round;
                     let mid_gap = (order_price - gate_mid).abs();
                     let best_gap = (signal.gate_bid - order_price).abs();
-                    if avail >= order_price && order_price < gate_mid {
-                        level = Some(OrderLevel::LimitClose);
-                    } else if best_gap < mid_gap
-                        && order_price < gate_mid
-                        && is_order_net_position_close_side
+                    if order_price < gate_mid
+                        && (avail >= order_price
+                            || (best_gap < mid_gap && is_order_net_position_close_side))
                     {
                         level = Some(OrderLevel::LimitClose);
                     }
@@ -564,11 +568,9 @@ pub fn decide_order_v6(
                     let avail = signal.gate_ask - order_price_round;
                     let mid_gap = (order_price - gate_mid).abs();
                     let best_gap = (signal.gate_ask - order_price).abs();
-                    if avail <= order_price && order_price > gate_mid {
-                        level = Some(OrderLevel::LimitClose);
-                    } else if best_gap < mid_gap
-                        && order_price > gate_mid
-                        && is_order_net_position_close_side
+                    if order_price > gate_mid
+                        && (avail <= order_price
+                            || (best_gap < mid_gap && is_order_net_position_close_side))
                     {
                         level = Some(OrderLevel::LimitClose);
                     }
@@ -644,7 +646,7 @@ pub fn decide_order_v7(
         return None;
     }
     let side_str = signal.order_side?;
-    let side = OrderSide::from_str(side_str)?;
+    let side = side_str.parse::<OrderSide>().ok()?;
     let order_price = signal.order_price?;
 
     // ── 1) latency gate ──────────────────────────────────────────────────
@@ -712,9 +714,9 @@ pub fn decide_order_v7(
             && close_order_count_exceeded
             && binance_data_is_updated
         {
-            if has_long_position && side == OrderSide::Sell {
-                level = Some(OrderLevel::LimitClose);
-            } else if !has_long_position && side == OrderSide::Buy {
+            if (has_long_position && side == OrderSide::Sell)
+                || (!has_long_position && side == OrderSide::Buy)
+            {
                 level = Some(OrderLevel::LimitClose);
             }
         } else if should_exit_profit {
@@ -735,11 +737,9 @@ pub fn decide_order_v7(
                     let avail = signal.gate_bid + order_price_round;
                     let mid_gap = (order_price - gate_mid).abs();
                     let best_gap = (signal.gate_bid - order_price).abs();
-                    if avail >= order_price && order_price < gate_mid {
-                        level = Some(on_match);
-                    } else if best_gap < mid_gap
-                        && order_price < gate_mid
-                        && is_order_net_position_close_side
+                    if order_price < gate_mid
+                        && (avail >= order_price
+                            || (best_gap < mid_gap && is_order_net_position_close_side))
                     {
                         level = Some(on_match);
                     }
@@ -748,11 +748,9 @@ pub fn decide_order_v7(
                     let avail = signal.gate_ask - order_price_round;
                     let mid_gap = (order_price - gate_mid).abs();
                     let best_gap = (signal.gate_ask - order_price).abs();
-                    if avail <= order_price && order_price > gate_mid {
-                        level = Some(on_match);
-                    } else if best_gap < mid_gap
-                        && order_price > gate_mid
-                        && is_order_net_position_close_side
+                    if order_price > gate_mid
+                        && (avail <= order_price
+                            || (best_gap < mid_gap && is_order_net_position_close_side))
                     {
                         level = Some(on_match);
                     }
@@ -811,11 +809,12 @@ mod tests {
     }
 
     fn ts() -> TradeSettings {
-        let mut t = TradeSettings::default();
-        t.mid_gap_bp_threshold = 1.0;
-        t.spread_bp_threshold = 1.0;
-        t.close_raw_mid_profit_bp = 0.1;
-        t
+        TradeSettings {
+            mid_gap_bp_threshold: 1.0,
+            spread_bp_threshold: 1.0,
+            close_raw_mid_profit_bp: 0.1,
+            ..TradeSettings::default()
+        }
     }
 
     #[test]
@@ -896,9 +895,9 @@ mod tests {
 
     #[test]
     fn order_side_enum_roundtrip() {
-        assert_eq!(OrderSide::from_str("buy"), Some(OrderSide::Buy));
-        assert_eq!(OrderSide::from_str("sell"), Some(OrderSide::Sell));
-        assert_eq!(OrderSide::from_str("BOOM"), None);
+        assert_eq!("buy".parse::<OrderSide>(), Ok(OrderSide::Buy));
+        assert_eq!("sell".parse::<OrderSide>(), Ok(OrderSide::Sell));
+        assert!("BOOM".parse::<OrderSide>().is_err());
         assert_eq!(OrderSide::Buy.as_str(), "buy");
         assert!(OrderSide::Buy.is_buy());
     }
