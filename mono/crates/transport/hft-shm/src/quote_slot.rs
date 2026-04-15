@@ -140,13 +140,15 @@ impl QuoteSlotWriter {
             // seq atomic 은 `&AtomicU64` 참조로 다룬다 — AtomicU64 는 UnsafeCell 기반.
             let seq_atomic: &AtomicU64 = &(*slot).seq;
             let seq0 = seq_atomic.load(Ordering::Relaxed);
-            // even 이라고 간주 (writer 본인이 관리). 홀수면 이전 publish 가 중단됨 →
-            // 그냥 다음 짝수로 진행.
+            // seq0 이 짝수/홀수 어느 쪽이든, writing 은 항상 "쓰기 중" 을 뜻하는
+            // 홀수 값으로 맞춘다. 홀수였다면 이전 publish 가 중단된 상태로 보고
+            // 같은 홀수 marker 를 다시 사용해 현재 writer 가 이어서 덮어쓴다.
             let writing = (seq0 | 1).wrapping_add(2).wrapping_sub(2);
-            seq_atomic.store(writing, Ordering::Release);
+            // overwrite marker 가 payload store 보다 먼저 보이도록 phase-1 은
+            // SeqCst 로 고정한다. AArch64 에서도 torn-read 가능성을 줄인다.
+            seq_atomic.store(writing, Ordering::SeqCst);
 
-            // 필드 기록. atomic 으로 쓸 필요 없음 (seq 가 보호). 하지만 컴파일러의
-            // store reorder 를 막기 위해 fence 역할을 seq store(Release) 가 한다.
+            // 필드 기록. atomic 으로 쓸 필요 없음 (seq 가 보호).
             std::ptr::addr_of_mut!((*slot).exchange_id).write(update.exchange_id);
             std::ptr::addr_of_mut!((*slot).symbol_idx).write(slot_idx);
             std::ptr::addr_of_mut!((*slot).bid_price).write(update.bid_price);
