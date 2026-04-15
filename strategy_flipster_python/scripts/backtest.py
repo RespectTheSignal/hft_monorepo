@@ -70,12 +70,20 @@ async def main() -> None:
         print("end 가 start 이하"); sys.exit(1)
 
     # 파라미터 (env)
+    default_notional = os.environ.get("NOTIONAL", "20")
+    max_pos = float(os.environ.get("MAX_POSITION", default_notional))
+    open_size = float(os.environ.get("OPEN_ORDER_SIZE", default_notional))
+    close_size = float(os.environ.get("CLOSE_ORDER_SIZE", default_notional))
+    portfolio_max = float(os.environ.get("PORTFOLIO_MAX", "0"))  # 0 = 무제한
     params = BasisMeanRevParams(
         canonicals=canonicals,
         window_sec=float(os.environ.get("WINDOW_SEC", "30")),
-        k_in=float(os.environ.get("K_IN", "2.0")),
-        k_out=float(os.environ.get("K_OUT", "0.5")),
-        notional_usd=float(os.environ.get("NOTIONAL", "20")),
+        open_k=float(os.environ.get("OPEN_K", os.environ.get("K_IN", "2.0"))),
+        close_k=float(os.environ.get("CLOSE_K", os.environ.get("K_OUT", "0.5"))),
+        max_position_size=max_pos,
+        open_order_size=open_size,
+        close_order_size=close_size,
+        portfolio_max_size=portfolio_max,
         min_dev_bps=float(os.environ.get("MIN_DEV_BPS", "3.0")),
         min_std_bps=float(os.environ.get("MIN_STD_BPS", "0.5")),
         cooldown_ms=int(os.environ.get("COOLDOWN_MS", "500")),
@@ -101,8 +109,11 @@ async def main() -> None:
     print(f"  binance    : {bn_symbols}")
     print(f"  range      : {sys.argv[2]} → {sys.argv[3]}")
     print(f"  duration   : {(end_ns - start_ns) / 1e9:.0f}s")
-    print(f"  params     : k_in={params.k_in} k_out={params.k_out}")
-    print(f"               window={params.window_sec}s notional=${params.notional_usd}")
+    print(f"  thresholds : open_k={params.open_k} close_k={params.close_k}")
+    print(f"  window     : {params.window_sec}s")
+    print(f"  sizes      : max_position=${params.max_position_size}")
+    print(f"               open_order=${params.open_order_size} close_order=${params.close_order_size}")
+    print(f"               portfolio_max=${params.portfolio_max_size} (0=무제한)")
     print(f"  filters    : min_dev={params.min_dev_bps}bp min_std={params.min_std_bps}bp")
     print(f"  cooldown   : {params.cooldown_ms}ms")
     print(f"  fee        : {fee_bps} bp\n")
@@ -166,14 +177,15 @@ async def main() -> None:
     # strategy 내부 통계
     s = strategy.stats
     print(f"\n  strategy stats:")
-    print(f"    signals       : {s.signals_seen}")
-    print(f"    intent_changes: {s.intent_changes}")
-    print(f"    longs/shorts/flats: {s.longs}/{s.shorts}/{s.flats}")
-    print(f"    orders_emitted: {s.orders_emitted}")
-    print(f"    reemits       : {s.reemits}")
-    print(f"    hysteresis_hold: {s.holds_hysteresis}")
-    print(f"    skips_cooldown: {s.skips_cooldown}")
-    print(f"    skips_no_data : {s.skips_no_data}")
+    print(f"    signals          : {s.signals_seen}")
+    print(f"    intent_changes   : {s.intent_changes}  (L/S/F: {s.longs}/{s.shorts}/{s.flats})")
+    print(f"    orders_emitted   : {s.orders_emitted}  (open/close: {s.open_orders}/{s.close_orders})")
+    print(f"    builds (same-dir): {s.builds}")
+    print(f"    reemits          : {s.reemits}")
+    print(f"    hysteresis_hold  : {s.holds_hysteresis}")
+    print(f"    skips_cooldown   : {s.skips_cooldown}")
+    print(f"    skips_port_cap   : {s.skips_portfolio_cap}")
+    print(f"    skips_no_data    : {s.skips_no_data}")
 
 
 if __name__ == "__main__":
