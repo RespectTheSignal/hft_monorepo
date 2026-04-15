@@ -328,10 +328,7 @@ impl StrategyConfigLoader {
     pub fn current(&self) -> Option<Arc<StrategyConfig>> {
         // ArcSwap::load 는 Guard<Arc<Option<_>>>.
         let guard = self.cache.load();
-        match guard.as_ref() {
-            Some(cfg) => Some(Arc::new(cfg.clone())),
-            None => None,
-        }
+        guard.as_ref().as_ref().map(|cfg| Arc::new(cfg.clone()))
     }
 
     /// Supabase 에서 최신 전략 설정을 가져와 캐시에 저장. 실패 시 기존 값 유지.
@@ -459,16 +456,20 @@ mod tests {
 
     #[test]
     fn validate_rejects_bad_tif() {
-        let mut ts = TradeSettings::default();
-        ts.limit_open_tif = "lol".into();
+        let ts = TradeSettings {
+            limit_open_tif: "lol".into(),
+            ..TradeSettings::default()
+        };
         assert!(ts.validate().is_err());
     }
 
     #[test]
     fn validate_rejects_min_gt_max_time_restrictions() {
-        let mut ts = TradeSettings::default();
-        ts.same_side_price_time_restriction_ms_min = 999;
-        ts.same_side_price_time_restriction_ms_max = 100;
+        let ts = TradeSettings {
+            same_side_price_time_restriction_ms_min: 999,
+            same_side_price_time_restriction_ms_max: 100,
+            ..TradeSettings::default()
+        };
         let err = ts.validate().unwrap_err().to_string();
         assert!(err.contains("same_side_price_time_restriction"), "{err}");
     }
