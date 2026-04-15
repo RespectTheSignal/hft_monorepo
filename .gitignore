@@ -26,3 +26,21 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Monorepo additions (sigma13-K, 260415)
+Cargo.lock.orig
+*.pem
+*.key
+main_account_secrets.json
+subaccount_keys.json
+
+# runtime artifacts
+*.shm
+*.sock
+*.log
+/logs/
+
+# Go
+/go/**/bin/
+/go/**/*.exe
+/go/**/*.test

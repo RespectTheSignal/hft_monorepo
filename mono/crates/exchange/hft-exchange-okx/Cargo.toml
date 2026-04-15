@@ -1,0 +1,39 @@
+[package]
+name = "hft-exchange-okx"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# hft-exchange-okx — OKX SWAP (v5) feed.
+#
+# - typed borrow-based Deserialize (DOM `Value` 제거) 로 hot-path alloc 제거.
+# - `hft-exchange-common::SymbolCache` 로 Arc<str> intern.
+# - instId → canonical `Symbol` 매핑은 subscribe 시점에 precompute.
+# - WS text-only, 압축 없음.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[dependencies]
+hft-exchange-api = { workspace = true }
+hft-exchange-common = { workspace = true }
+# Phase 2 executor: 공통 REST/서명 helper.
+hft-exchange-rest = { workspace = true }
+# chrono: OKX timestamp 포맷은 ISO 8601 (`YYYY-MM-DDTHH:MM:SS.sssZ`).
+chrono = { workspace = true }
+hft-types = { workspace = true }
+hft-time = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+# raw_value: OKX 의 `arg` / `data` 를 지연 파싱하여 프레임 envelope 분기용.
+serde_json = { workspace = true, features = ["raw_value"] }
+reqwest = { workspace = true }
+url = { workspace = true }
+ahash = { workspace = true }
+tracing = { workspace = true }

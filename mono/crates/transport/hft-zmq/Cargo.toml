@@ -1,0 +1,17 @@
+[package]
+name = "hft-zmq"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+zmq = { workspace = true }
+bytes = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+hft-protocol = { workspace = true }
+hft-config = { workspace = true }
+hft-telemetry = { workspace = true }

@@ -1,0 +1,36 @@
+[package]
+name = "hft-strategy-shm-py"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+description = "PyO3 binding for hft-strategy-shm — Python strategy VM 이 Rust SharedRegion 에 붙어 quote/trade 를 읽고 order 를 publish."
+
+# cdylib: Python 확장 모듈 용 (.so/.pyd)
+# rlib: Rust 쪽 integration test / 다른 crate 에서 재사용 가능하도록.
+[lib]
+name = "hft_strategy_shm_py"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hft-strategy-shm.workspace = true
+hft-shm.workspace = true
+hft-types.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+# PyO3 — abi3-py39: Python 3.9+ 바이너리 하나로 forward-compatible.
+# extension-module: standalone .so 로 빌드 (libpython 링크 없음 → venv 독립).
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py39"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# maturin 으로 pip install ./crates/transport/hft-strategy-shm-py
+# Python 쪽 import: `import hft_strategy_shm`
+[package.metadata.maturin]
+python-source = "python"
+module-name = "hft_strategy_shm._core"

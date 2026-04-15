@@ -1,0 +1,38 @@
+# 기본 설정 — 모든 서비스가 이 파일을 먼저 로드한 뒤
+# 자신의 `{service_name}.toml` 로 override, 마지막에 env `HFT_*` 가 덮어쓴다.
+# (hft-config::load_with 의 toml_dir 이 이 파일이 있는 폴더를 가리키도록 설정.)
+
+# 서비스 식별자. 런타임에 env `HFT_SERVICE_NAME` 으로 override.
+service_name = "hft-service"
+hot_workers = 1
+bg_workers = 1
+
+[zmq]
+hwm = 100000
+linger_ms = 0
+drain_batch_cap = 512
+push_endpoint = "inproc://hft-push"
+pub_endpoint = "tcp://0.0.0.0:5555"
+sub_endpoint = "tcp://127.0.0.1:5555"
+
+[questdb]
+ilp_addr = ""
+batch_rows = 1000
+batch_ms = 500
+spool_dir = "./spool"
+
+[supabase]
+url = ""
+anon_key = ""
+refresh_interval_s = 300
+fetch_timeout_s = 5
+
+[telemetry]
+stdout_json = false
+default_level = "info"
+
+[warmup]
+enabled = true
+events = 5000
+
+# NOTE: exchanges 는 서비스별 TOML 에서 채운다.

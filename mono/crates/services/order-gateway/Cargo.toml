@@ -1,0 +1,45 @@
+[package]
+name = "order-gateway"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "order_gateway"
+path = "src/lib.rs"
+
+[[bin]]
+name = "order-gateway"
+path = "src/main.rs"
+
+[dependencies]
+hft-exchange-api = { workspace = true }
+# Phase 2: 실제 executor 들. Credentials 는 env var 에서 로드.
+hft-exchange-rest = { workspace = true }
+hft-exchange-gate = { workspace = true }
+hft-exchange-binance = { workspace = true }
+hft-exchange-bybit = { workspace = true }
+hft-exchange-bitget = { workspace = true }
+hft-exchange-okx = { workspace = true }
+hft-types = { workspace = true }
+hft-ipc = { workspace = true }
+hft-config = { workspace = true }
+hft-telemetry = { workspace = true }
+hft-time = { workspace = true }
+hft-shm = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+crossbeam-channel = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+mimalloc = { workspace = true }
+ctrlc = { workspace = true }
+
+[dev-dependencies]
+hft-testkit = { workspace = true }
+tempfile = "3"
+parking_lot = { workspace = true }

@@ -1,0 +1,91 @@
+; hft-publisher.service — infra VM 내부에서 hft-publisher 기동.
+;
+; ivshmem 기반 v2 multi-VM 토폴로지:
+;   - infra VM 이 ivshmem master. publisher 는 create_or_attach 로 SharedRegion
+;     초기화 + 퍼블리시 시작, heartbeat_ns tick 유지.
+;   - gateway 는 After=hft-publisher.service, Requires=hft-publisher.service 로
+;     publisher 준비 후에만 기동 (아래 hft-order-gateway.service 참조).
+;
+; 주의:
+;   - User= 는 사이트마다 다름 (보통 hft).
+;   - CPUAffinity 는 host isolcpus 와 겹치지 않는 infra VM 내부 논리 CPU.
+;   - Environment 의 HFT_CONFIG_DIR / HFT_LOG 는 사이트 편집 대상.
+;   - `User=` session 모드로 기동 시: /etc/systemd/system 대신
+;     ~/.config/systemd/user/ 에 배치 후 `systemctl --user enable ...`.
+;
+; 본 유닛은 template 이 아님 (단일 publisher). strategy 쪽 systemd 는 VM 당
+; 하나이므로 별도 launch_strategy_vm.sh + (guest 내부) 자체 유닛으로 관리.
+
+[Unit]
+Description=HFT v2 publisher (shm master)
+Documentation=https://internal/docs/architecture/MULTI_VM_TOPOLOGY.md
+After=network-online.target
+Wants=network-online.target
+; KVM infra VM 의 ivshmem PCI BAR2 디바이스가 열려야 의미가 있다.
+; (바인드 마운트/udev rule 로 readable 보장한다고 가정.)
+AssertPathExists=/sys/bus/pci/devices
+
+[Service]
+Type=simple
+; User/Group 은 사이트 고유. hft 계정이 ivshmem 디바이스 read/write 가능한
+; group (보통 kvm or 전용) 에 속해 있어야 함.
+User=hft
+Group=hft
+
+; ── 배포 경로 ──────────────────────────────────────────────────────────────
+; 빌드 산출물은 /opt/hft/bin/ 아래 설치한다고 가정. cargo install --root 로
+; 설치하거나 ansible 로 rsync 하거나, 사이트 정책 따라 편집.
+ExecStart=/opt/hft/bin/hft-publisher
+
+; ── 설정 ──────────────────────────────────────────────────────────────────
+; TOML 설정 디렉터리. hft_config::load_all 이 여기에서 publisher.toml 을 읽음.
+Environment=HFT_CONFIG_DIR=/etc/hft
+; 로그 레벨 (tracing EnvFilter). prod 기본은 info, 트러블슈팅 시 debug.
+Environment=HFT_LOG=info,hft=info,hft_transport=info
+; SHM backing — ivshmem PCI BAR 경로. guest kernel 이 resource2 로 노출.
+; 실제 값은 lspci | grep -i ivshmem 로 확인 후 사이트별 편집.
+Environment=HFT_SHM__BACKING=pci_bar
+Environment=HFT_SHM__PCI_BAR_PATH=/sys/bus/pci/devices/0000:00:04.0/resource2
+; LayoutSpec. CHANGES_v2_PHASE2.md §1 에 정의된 크기 계산과 일치해야 함.
+Environment=HFT_SHM__N_MAX=16
+Environment=HFT_SHM__QUOTE_SLOTS=8192
+Environment=HFT_SHM__TRADE_RING_CAPACITY=65536
+Environment=HFT_SHM__ORDER_RING_CAPACITY=4096
+; readiness — local health checker / ansible 이 이 포트 확인.
+Environment=HFT_PUBLISHER_READINESS_PORT=8188
+
+; ── 보안 ──────────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+; /opt/hft/state 는 hdr histogram / snapshot dump 용 writable 경로.
+ReadWritePaths=/opt/hft/state
+; ivshmem resource2 는 system path 이므로 system-call filter 완화 필요 시
+; SystemCallFilter=@system-service 대신 기본값 유지.
+
+; ── 성능 ──────────────────────────────────────────────────────────────────
+; hot path thread (ws_rx / parse / publish) 는 publisher 내부에서
+; pthread_setaffinity 로 추가 고정. 여기서는 프로세스 전체의 기본 affinity 만.
+CPUAffinity=4 5 6 7
+; mlock 전 메모리 포함 ivshmem BAR 영역을 페이지 잠금.
+LimitMEMLOCK=infinity
+; RT scheduling 은 권장 안 함 (park_timeout 기반으로 충분히 저지연).
+; 필요 시 아래 해제:
+; CPUSchedulingPolicy=rr
+; CPUSchedulingPriority=50
+
+; ── 재시작 정책 ────────────────────────────────────────────────────────────
+Restart=on-failure
+RestartSec=3s
+; SharedRegion 재초기화는 데이터 불연속을 동반한다. 따라서 재시작은
+; 드물어야 하며, StartLimit 으로 crash-loop 차단.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+; 정상 종료 시 publisher 는 heartbeat 를 마지막으로 한 번 더 touch 한 뒤 exit.
+; guest 쪽 HeartbeatWatcher 는 5s stale threshold 이므로 graceful shutdown 여유.
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

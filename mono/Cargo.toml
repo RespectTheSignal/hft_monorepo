@@ -1,0 +1,194 @@
+[workspace]
+resolver = "2"
+members = [
+    # core — 도메인 타입, 프로토콜, 설정, 시간 (의존 최소)
+    "crates/core/hft-types",
+    "crates/core/hft-protocol",
+    "crates/core/hft-config",
+    "crates/core/hft-time",
+
+    # observability
+    "crates/obs/hft-telemetry",
+
+    # transport
+    "crates/transport/hft-zmq",
+    "crates/transport/hft-shm",
+    "crates/transport/hft-ipc",
+    "crates/transport/hft-strategy-shm",
+    "crates/transport/hft-strategy-shm-py",
+
+    # storage
+    "crates/storage/hft-storage",
+
+    # exchange abstraction + per-exchange 구현
+    "crates/exchange/hft-exchange-api",
+    "crates/exchange/hft-exchange-common",
+    "crates/exchange/hft-exchange-rest",
+    "crates/exchange/hft-exchange-binance",
+    "crates/exchange/hft-exchange-gate",
+    "crates/exchange/hft-exchange-bybit",
+    "crates/exchange/hft-exchange-bitget",
+    "crates/exchange/hft-exchange-okx",
+
+    # strategy 코어 (Phase 2 A 트랙)
+    "crates/strategy/hft-strategy-config",
+    "crates/strategy/hft-strategy-core",
+    "crates/strategy/hft-strategy-runtime",
+
+    # services (실행 바이너리)
+    "crates/services/publisher",
+    "crates/services/subscriber",
+    "crates/services/strategy",
+    "crates/services/order-gateway",
+
+    # tools (1회성/분석용 CLI)
+    "crates/tools/latency-probe",
+    "crates/tools/questdb-export",
+    "crates/tools/futures-collector",
+
+    # testing
+    "crates/testing/hft-testkit",
+    "crates/testing/integration",
+]
+
+# feed/ 와 strategy_flipster_python/ 은 Flipster 전용 트랙 → workspace 에서 제외.
+# 각자 독립 cargo 빌드 유지.
+exclude = [
+    "feed",
+    "strategy_flipster_python",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["sigma13-K <sigma13@kaist.ac.kr>"]
+license = "UNLICENSED"
+rust-version = "1.80"
+
+[workspace.dependencies]
+# async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
+futures-util = "0.3"
+async-trait = "0.1"
+
+# serde / json
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+
+# errors
+anyhow = "1"
+thiserror = "1"
+
+# observability (tracing stack)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+tracing-futures = "0.2"
+opentelemetry = "0.24"
+opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic"] }
+tracing-opentelemetry = "0.25"
+hdrhistogram = "7"
+
+# zero-copy bytes + binary
+bytes = "1"
+byteorder = "1"
+
+# collections / concurrency
+ahash = "0.8"
+dashmap = "6"
+crossbeam = "0.8"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+arc-swap = "1"
+
+# net / ZMQ
+zmq = "0.10"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+url = "2"
+
+# time
+chrono = { version = "0.4", features = ["serde"] }
+
+# config
+dotenvy = "0.15"
+clap = { version = "4", features = ["derive"] }
+figment = { version = "0.10", features = ["env", "toml"] }
+toml = "0.8"
+
+# storage
+questdb-rs = "4"
+
+# allocator — 전체 바이너리에서 공유해 캐시 locality ↑
+mimalloc = { version = "0.1", default-features = false }
+
+# signals
+ctrlc = { version = "3", features = ["termination"] }
+
+# testing
+mockall = "0.12"
+proptest = "1"
+
+# compression (bybit/bitget binary frame decode)
+flate2 = "1"
+
+# REST executor signing — Phase 2.
+# 거래소 REST API 서명: Gate=HMAC-SHA512, Binance/Bybit/Bitget/OKX=HMAC-SHA256.
+# base64/hex 는 서명 인코딩용. 모두 순수 Rust 구현이라 cross-platform 안전.
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+
+# SHM / mmap (Phase 2 Track C)
+# memmap2: 안전한 mmap 래퍼. libc: raw flag (MAP_POPULATE, MAP_HUGETLB, MADV_*, mlock 등)
+memmap2 = "0.9"
+libc = "0.2"
+
+# 내부 crate 상호참조
+hft-types = { path = "crates/core/hft-types" }
+hft-protocol = { path = "crates/core/hft-protocol" }
+hft-config = { path = "crates/core/hft-config" }
+hft-time = { path = "crates/core/hft-time" }
+hft-telemetry = { path = "crates/obs/hft-telemetry" }
+hft-zmq = { path = "crates/transport/hft-zmq" }
+hft-shm = { path = "crates/transport/hft-shm" }
+hft-ipc = { path = "crates/transport/hft-ipc" }
+hft-strategy-shm = { path = "crates/transport/hft-strategy-shm" }
+hft-strategy-shm-py = { path = "crates/transport/hft-strategy-shm-py" }
+hft-strategy-config = { path = "crates/strategy/hft-strategy-config" }
+hft-strategy-core = { path = "crates/strategy/hft-strategy-core" }
+hft-strategy-runtime = { path = "crates/strategy/hft-strategy-runtime" }
+hft-storage = { path = "crates/storage/hft-storage" }
+hft-exchange-api = { path = "crates/exchange/hft-exchange-api" }
+hft-exchange-common = { path = "crates/exchange/hft-exchange-common" }
+hft-exchange-rest = { path = "crates/exchange/hft-exchange-rest" }
+hft-exchange-binance = { path = "crates/exchange/hft-exchange-binance" }
+hft-exchange-gate = { path = "crates/exchange/hft-exchange-gate" }
+hft-exchange-bybit = { path = "crates/exchange/hft-exchange-bybit" }
+hft-exchange-bitget = { path = "crates/exchange/hft-exchange-bitget" }
+hft-exchange-okx = { path = "crates/exchange/hft-exchange-okx" }
+hft-testkit = { path = "crates/testing/hft-testkit" }
+# service crate (lib + bin). strategy main 이 embed 하기 위해 lib 만 depend.
+subscriber = { path = "crates/services/subscriber" }
+
+# 공유 profile — HFT 핫패스에 맞춘 튜닝
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = 1
+strip = "none"
+panic = "abort"
+overflow-checks = false
+
+# 더 공격적인 최적화가 필요할 때만 사용 (배포용)
+[profile.release-fat]
+inherits = "release"
+lto = "fat"
+
+# dev 는 너무 느리면 전략 백테스트가 고통 → opt-level 1 로 타협
+[profile.dev]
+opt-level = 1
+debug = true

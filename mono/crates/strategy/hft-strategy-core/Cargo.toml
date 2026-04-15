@@ -1,0 +1,25 @@
+[package]
+name = "hft-strategy-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+description = "Strategy core — SignalCalculator (v0, v8), OrderDecision, handle_chance, risk checks. Zero-alloc hot path."
+
+[lib]
+name = "hft_strategy_core"
+path = "src/lib.rs"
+
+[dependencies]
+hft-types.workspace = true
+hft-strategy-config = { path = "../hft-strategy-config" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+parking_lot.workspace = true
+ahash.workspace = true
+
+[dev-dependencies]

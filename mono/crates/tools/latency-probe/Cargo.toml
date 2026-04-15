@@ -1,0 +1,30 @@
+[package]
+name = "latency-probe"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "latency-probe"
+path = "src/main.rs"
+
+[dependencies]
+hft-types = { workspace = true }
+hft-protocol = { workspace = true }
+hft-config = { workspace = true }
+hft-time = { workspace = true }
+hft-zmq = { workspace = true }
+hft-telemetry = { workspace = true }
+hft-exchange-api = { workspace = true }
+subscriber = { path = "../../services/subscriber" }
+hdrhistogram = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+mimalloc = { workspace = true }
+ctrlc = { workspace = true }

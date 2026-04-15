@@ -1,0 +1,26 @@
+[package]
+name = "hft-strategy-runtime"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "hft_strategy_runtime"
+path = "src/lib.rs"
+
+[dependencies]
+hft-types = { workspace = true }
+hft-strategy-core = { workspace = true }
+ahash = { workspace = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+arc-swap = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

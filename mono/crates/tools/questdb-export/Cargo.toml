@@ -1,0 +1,28 @@
+[package]
+name = "questdb-export"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "questdb-export"
+path = "src/main.rs"
+
+[dependencies]
+hft-storage = { workspace = true }
+hft-config = { workspace = true }
+hft-types = { workspace = true }
+hft-time = { workspace = true }
+hft-telemetry = { workspace = true }
+hft-exchange-api = { workspace = true }
+subscriber = { path = "../../services/subscriber" }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+crossbeam-channel = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+mimalloc = { workspace = true }
+ctrlc = { workspace = true }

@@ -1,0 +1,49 @@
+[package]
+name = "hft-exchange-rest"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# hft-exchange-rest — 거래소 REST API 공통 서명/클라이언트 helper.
+#
+# 범위
+# - HMAC-SHA256 / HMAC-SHA512 서명 (hex, base64 인코딩 둘 다 지원)
+# - `RestClient` — reqwest 래퍼 (timeout, retry, User-Agent, idempotency hint)
+# - `Credentials` — api_key / api_secret / passphrase 캡슐화
+# - `map_http_error` — 공통 status → `ApiError` 매핑
+#
+# 범위 밖
+# - 거래소별 서명 payload 조립 (각 executor 에서 담당, signing helper 만 호출)
+# - WebSocket (주문 스트림은 각 거래소 crate 에서 관리)
+# ─────────────────────────────────────────────────────────────────────────────
+
+[dependencies]
+hft-exchange-api = { workspace = true }
+
+# HTTP
+reqwest = { workspace = true }
+url = { workspace = true }
+
+# crypto
+hmac = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }
+
+# serde
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# errors / runtime
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# RFC 4231 HMAC 테스트 벡터 검증 등
+tokio = { workspace = true }

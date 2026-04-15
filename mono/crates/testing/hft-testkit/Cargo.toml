@@ -1,0 +1,17 @@
+[package]
+name = "hft-testkit"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hft-exchange-api = { workspace = true }
+hft-types = { workspace = true }
+hft-time = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+hdrhistogram = { workspace = true }

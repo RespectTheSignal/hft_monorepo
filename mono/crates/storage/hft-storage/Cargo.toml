@@ -1,0 +1,20 @@
+[package]
+name = "hft-storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+crossbeam-channel = { workspace = true }
+hft-types = { workspace = true }
+hft-time = { workspace = true }
+hft-config = { workspace = true }
+
+# NOTE: questdb-rs 의존은 Phase 2 에서 `QuestDbClient` 구현을 붙일 때 추가한다.
+# Phase 1 은 raw InfluxDB Line Protocol (TCP 9009) 으로 직접 쓰므로 외부 crate 불필요.

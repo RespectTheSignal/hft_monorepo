@@ -1,0 +1,723 @@
+//! hft-telemetry — tracing + OTel + HDR histogram + counters.
+//!
+//! # 설계 원칙
+//! - **Hot path 절대 불변**: `record_stage_nanos`, counter inc 는 lock-free atomic
+//!   또는 very-short critical section. tracing 매크로는 off-hot.
+//! - **비동기 로깅**: fmt layer 는 non_blocking writer (tracing-appender). hot thread 는
+//!   MPSC send 1회, bg thread 가 실제 write.
+//! - **verbose-trace feature**: `trace_verbose!` 가 off 기본 → `cargo build --release`
+//!   바이너리에는 trace! 호출이 완전히 사라짐.
+//!
+//! # 공개 API
+//! - [`init`]: tracing + otel subscriber 조립, `TelemetryHandle` 반환 (drop 시 flush).
+//! - [`record_stage_nanos`] / [`dump_hdr`]: HDR histogram.
+//! - [`counter_inc`] / [`counters_snapshot`]: prometheus-친화 atomic counter.
+//! - [`pin_current_thread`] / [`next_hot_core`]: 리눅스 CPU affinity.
+//! - [`trace_verbose!`] 매크로: feature-gated `tracing::trace!`.
+
+#![deny(rust_2018_idioms)]
+
+use anyhow::{anyhow, Result};
+use hdrhistogram::Histogram;
+use hft_time::Stage;
+use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use tracing_subscriber::prelude::*;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// init / TelemetryHandle
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// init() 호출 중복 방지.
+static INIT_DONE: AtomicBool = AtomicBool::new(false);
+
+/// telemetry 초기화 설정.
+#[derive(Debug, Clone)]
+pub struct TelemetryConfig {
+    /// OTLP exporter endpoint. None 이면 OTel 비활성.
+    pub otlp_endpoint: Option<String>,
+    /// 기본 log level. env `HFT_LOG` 이 있으면 그것이 우선.
+    pub default_level: String,
+    /// JSON vs Pretty.
+    pub json_logs: bool,
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self {
+            otlp_endpoint: None,
+            default_level: "info".into(),
+            json_logs: false,
+        }
+    }
+}
+
+/// init() 에서 반환되는 핸들. Drop 시 OTel flush.
+#[must_use = "TelemetryHandle must be held until process shutdown"]
+pub struct TelemetryHandle {
+    #[allow(dead_code)]
+    service_name: String,
+    /// OTLP 활성화 여부 — Drop 시 `global::shutdown_tracer_provider` 호출 필요 여부
+    /// 를 판정한다.
+    otlp_active: bool,
+}
+
+impl Drop for TelemetryHandle {
+    fn drop(&mut self) {
+        if self.otlp_active {
+            // BatchSpanProcessor 가 backend 로 남은 span 을 flush 하도록 block.
+            // 이 호출은 tokio runtime 없이도 안전하다 (내부에서 dedicated thread 사용).
+            opentelemetry::global::shutdown_tracer_provider();
+        }
+    }
+}
+
+/// tracing 서브스크라이버 조립. 프로세스 시작 시 1회만 호출.
+///
+/// # 동작
+/// - fmt layer: stdout (JSON 또는 pretty). `with_target + with_thread_ids` 로 hot-path
+///   스레드 디버깅을 돕는다.
+/// - EnvFilter: default `cfg.default_level`, env `HFT_LOG` override.
+/// - `cfg.otlp_endpoint` 가 `Some` 이면 **OTLP gRPC exporter + BatchSpanProcessor**
+///   을 구성해 tracing-opentelemetry layer 로 연결. 실패 시 warn 만 남기고 계속
+///   진행 (fmt 레이어는 동작) — observability 가 hot path 를 죽이면 안 되기 때문.
+///
+/// # 주의
+/// OTLP 경로는 tokio runtime 위에서 호출되어야 한다 (BatchSpanProcessor 의
+/// runtime::Tokio). 런타임 없이 호출되면 exporter init 이 실패 → warn 후 fmt 만
+/// 남고 계속.
+pub fn init(cfg: &TelemetryConfig, service_name: &str) -> Result<TelemetryHandle> {
+    if INIT_DONE.swap(true, Ordering::SeqCst) {
+        return Err(anyhow!("hft-telemetry already initialized"));
+    }
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_env("HFT_LOG")
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(cfg.default_level.clone()));
+
+    // OTLP tracer 를 조건부로 생성. 성공 시 Some(Tracer), 실패/비활성 시 None.
+    // `tracing_opentelemetry::layer().with_tracer(tracer)` 가 Layer<S> 를 구현하는
+    // `OpenTelemetryLayer<S, Tracer>` 를 만들어주며, `S` 는 `.with()` 호출 시점에
+    // 추론된다. `Option<L: Layer<S>> : Layer<S>` 이므로 `None` 은 no-op layer 로 동작.
+    let otlp_tracer = build_otlp_tracer(cfg.otlp_endpoint.as_deref(), service_name);
+    let otlp_active = otlp_tracer.is_some();
+
+    // 주의: Phase 1 은 blocking stdout. Phase 2 에서 tracing-appender::non_blocking 으로
+    // 교체 고려. hot path 는 tracing::trace! 를 쓰지 않으므로 현재는 병목이 아니다.
+    let res = if cfg.json_logs {
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_target(true)
+            .with_thread_ids(true);
+        let otel_layer = otlp_tracer.map(|t| tracing_opentelemetry::layer().with_tracer(t));
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt_layer)
+            .with(otel_layer)
+            .try_init()
+    } else {
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_target(true)
+            .with_thread_ids(true);
+        let otel_layer = otlp_tracer.map(|t| tracing_opentelemetry::layer().with_tracer(t));
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt_layer)
+            .with(otel_layer)
+            .try_init()
+    };
+    res.map_err(|e| anyhow!("tracing subscriber init: {e}"))?;
+
+    if otlp_active {
+        tracing::info!(
+            otlp_endpoint = %cfg.otlp_endpoint.as_deref().unwrap_or(""),
+            service = %service_name,
+            "OTLP exporter initialized"
+        );
+    }
+
+    Ok(TelemetryHandle {
+        service_name: service_name.to_owned(),
+        otlp_active,
+    })
+}
+
+/// OTLP gRPC exporter + BatchSpanProcessor 를 띄우고 `Tracer` 반환.
+///
+/// - `endpoint` 가 `None` 또는 빈 문자열이면 `None` (비활성).
+/// - 내부적으로 `install_batch(runtime::Tokio)` 를 사용하므로 현재 thread 는
+///   tokio runtime 위에 있어야 한다. 없으면 실패 → warn 후 `None`.
+/// - `opentelemetry_otlp::new_pipeline().install_batch(..)` 는 global tracer
+///   provider 에 BatchSpanProcessor 를 등록하는 side-effect 를 동반한다. 이 때문에
+///   `TelemetryHandle::Drop` 에서 `global::shutdown_tracer_provider()` 가 필요하다.
+fn build_otlp_tracer(
+    endpoint: Option<&str>,
+    service_name: &str,
+) -> Option<opentelemetry_sdk::trace::Tracer> {
+    let ep = endpoint?.trim();
+    if ep.is_empty() {
+        return None;
+    }
+
+    use opentelemetry::KeyValue;
+    use opentelemetry_otlp::WithExportConfig;
+    use opentelemetry_sdk::{runtime, trace as sdktrace, Resource};
+
+    let exporter = opentelemetry_otlp::new_exporter().tonic().with_endpoint(ep);
+
+    let trace_config = sdktrace::Config::default().with_resource(Resource::new(vec![
+        KeyValue::new("service.name", service_name.to_owned()),
+    ]));
+
+    match opentelemetry_otlp::new_pipeline()
+        .tracing()
+        .with_exporter(exporter)
+        .with_trace_config(trace_config)
+        .install_batch(runtime::Tokio)
+    {
+        Ok(tracer) => Some(tracer),
+        Err(e) => {
+            // tracing 이 아직 init 안 됐을 수 있으므로 stderr 로 병행 출력.
+            eprintln!(
+                "[hft-telemetry] OTLP exporter init failed (endpoint={ep}): {e}. Continuing without OTLP."
+            );
+            None
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HDR Histogram — stage 별 latency 집계
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// HDR 기본 설정: 1ns ~ 60s 범위, 3-digit precision.
+/// `new_with_bounds` 는 `low=1` 부터 시작해야 함 (nanos 단위).
+const HDR_LOW_NS: u64 = 1;
+const HDR_HIGH_NS: u64 = 60 * 1_000_000_000; // 60s
+const HDR_SIGFIG: u8 = 3;
+
+struct StageHistograms {
+    // Stage::ExchangeServer .. Stage::Consumed 7개.
+    slots: [Mutex<Histogram<u64>>; 7],
+}
+
+impl StageHistograms {
+    fn new() -> Self {
+        let mk = || {
+            Mutex::new(
+                Histogram::<u64>::new_with_bounds(HDR_LOW_NS, HDR_HIGH_NS, HDR_SIGFIG)
+                    .expect("hdr init"),
+            )
+        };
+        Self {
+            slots: [mk(), mk(), mk(), mk(), mk(), mk(), mk()],
+        }
+    }
+
+    fn idx(stage: Stage) -> usize {
+        match stage {
+            Stage::ExchangeServer => 0,
+            Stage::WsReceived => 1,
+            Stage::Serialized => 2,
+            Stage::Pushed => 3,
+            Stage::Published => 4,
+            Stage::Subscribed => 5,
+            Stage::Consumed => 6,
+        }
+    }
+}
+
+fn stage_hdrs() -> &'static StageHistograms {
+    use std::sync::OnceLock;
+    static INSTANCE: OnceLock<StageHistograms> = OnceLock::new();
+    INSTANCE.get_or_init(StageHistograms::new)
+}
+
+/// stage 간 delta 를 nanos 로 기록. lock-free 는 아니지만 uncontended 시 < 50ns.
+///
+/// 값이 HDR 범위를 벗어나면 `saturate`.
+pub fn record_stage_nanos(stage: Stage, nanos: u64) {
+    let idx = StageHistograms::idx(stage);
+    let hdrs = stage_hdrs();
+    let clamped = nanos.clamp(HDR_LOW_NS, HDR_HIGH_NS);
+    let mut g = hdrs.slots[idx].lock();
+    // record_correct 는 coordinated omission 보정. 여기서는 단순 record.
+    let _ = g.record(clamped);
+}
+
+/// HDR snapshot: 1 stage.
+#[derive(Debug, Clone)]
+pub struct HdrSnapshot {
+    /// 총 샘플 수.
+    pub count: u64,
+    /// 최소 nanos.
+    pub min: u64,
+    /// 최대 nanos.
+    pub max: u64,
+    /// 평균 nanos.
+    pub mean: f64,
+    /// p50.
+    pub p50: u64,
+    /// p90.
+    pub p90: u64,
+    /// p99.
+    pub p99: u64,
+    /// p99.9.
+    pub p999: u64,
+    /// p99.99.
+    pub p9999: u64,
+}
+
+impl HdrSnapshot {
+    fn from(h: &Histogram<u64>) -> Self {
+        Self {
+            count: h.len(),
+            min: h.min(),
+            max: h.max(),
+            mean: h.mean(),
+            p50: h.value_at_quantile(0.50),
+            p90: h.value_at_quantile(0.90),
+            p99: h.value_at_quantile(0.99),
+            p999: h.value_at_quantile(0.999),
+            p9999: h.value_at_quantile(0.9999),
+        }
+    }
+}
+
+/// stage 별 HDR snapshot 을 반환 (모든 stage).
+pub fn dump_hdr() -> [(Stage, HdrSnapshot); 7] {
+    const STAGES: [Stage; 7] = [
+        Stage::ExchangeServer,
+        Stage::WsReceived,
+        Stage::Serialized,
+        Stage::Pushed,
+        Stage::Published,
+        Stage::Subscribed,
+        Stage::Consumed,
+    ];
+    let hdrs = stage_hdrs();
+    std::array::from_fn(|i| {
+        let g = hdrs.slots[i].lock();
+        (STAGES[i], HdrSnapshot::from(&g))
+    })
+}
+
+/// 테스트용: HDR 전체 초기화. 프로덕션에서 호출하면 안 됨.
+pub fn reset_hdr_for_test() {
+    let hdrs = stage_hdrs();
+    for slot in &hdrs.slots {
+        slot.lock().reset();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Atomic counters — prometheus 친화적, hot-path safe
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 고정 key counter — 이름은 `&'static str` 만 허용해 hot path 에서 format 방지.
+struct Counters {
+    // 기명 counter 는 고정 슬롯 — 동적 key 는 Mutex<HashMap> 경로.
+    zmq_dropped: AtomicU64,
+    zmq_hwm_block: AtomicU64,
+    pipeline_event: AtomicU64,
+    serialization_fail: AtomicU64,
+    decode_fail: AtomicU64,
+    // SHM fast path (Phase 2 Track C).
+    shm_quote_published: AtomicU64,
+    shm_quote_dropped: AtomicU64,
+    shm_trade_published: AtomicU64,
+    shm_trade_lap_drop: AtomicU64,
+    shm_order_published: AtomicU64,
+    shm_order_full_drop: AtomicU64,
+    shm_intern_fail: AtomicU64,
+    // order-gateway SHM subscriber 측 (Python strategy → Rust 소비 경로).
+    shm_order_consumed: AtomicU64,
+    shm_order_invalid: AtomicU64,
+    shm_order_cancel_dispatched: AtomicU64,
+    // v2 multi-VM 전용.
+    shm_publisher_stale: AtomicU64,
+    shm_order_batch: AtomicU64,
+    shm_backoff_park: AtomicU64,
+    // 기타 ad-hoc 용 — rare.
+    extras: Mutex<ahash::AHashMap<&'static str, Arc<AtomicU64>>>,
+}
+
+fn counters() -> &'static Counters {
+    use std::sync::OnceLock;
+    static INSTANCE: OnceLock<Counters> = OnceLock::new();
+    INSTANCE.get_or_init(|| Counters {
+        zmq_dropped: AtomicU64::new(0),
+        zmq_hwm_block: AtomicU64::new(0),
+        pipeline_event: AtomicU64::new(0),
+        serialization_fail: AtomicU64::new(0),
+        decode_fail: AtomicU64::new(0),
+        shm_quote_published: AtomicU64::new(0),
+        shm_quote_dropped: AtomicU64::new(0),
+        shm_trade_published: AtomicU64::new(0),
+        shm_trade_lap_drop: AtomicU64::new(0),
+        shm_order_published: AtomicU64::new(0),
+        shm_order_full_drop: AtomicU64::new(0),
+        shm_intern_fail: AtomicU64::new(0),
+        shm_order_consumed: AtomicU64::new(0),
+        shm_order_invalid: AtomicU64::new(0),
+        shm_order_cancel_dispatched: AtomicU64::new(0),
+        shm_publisher_stale: AtomicU64::new(0),
+        shm_order_batch: AtomicU64::new(0),
+        shm_backoff_park: AtomicU64::new(0),
+        extras: Mutex::new(ahash::AHashMap::default()),
+    })
+}
+
+/// 알려진 counter 이름. 새로운 이름은 여기에 등록한 뒤 매칭.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CounterKey {
+    /// ZMQ queue full 로 drop 된 이벤트 수.
+    ZmqDropped,
+    /// ZMQ HWM blocking 발생 횟수.
+    ZmqHwmBlock,
+    /// 파이프라인 이벤트 처리 완료 수.
+    PipelineEvent,
+    /// 직렬화 실패.
+    SerializationFail,
+    /// 디코드 실패.
+    DecodeFail,
+    /// SHM quote slot 에 성공적으로 publish 된 이벤트 수.
+    ShmQuotePublished,
+    /// SHM quote publish 실패 (invalid index 등) 수.
+    ShmQuoteDropped,
+    /// SHM trade ring 에 성공적으로 publish 된 이벤트 수.
+    ShmTradePublished,
+    /// SHM trade ring lap (reader 가 뒤쳐져 slot 덮어씀) 횟수.
+    ShmTradeLapDrop,
+    /// SHM order ring 에 성공적으로 publish 된 이벤트 수.
+    ShmOrderPublished,
+    /// SHM order ring 이 full 이어서 publish 가 거부된 횟수.
+    ShmOrderFullDrop,
+    /// Symbol table intern 실패 (table full / too long) 수.
+    ShmInternFail,
+    /// order-gateway SHM subscriber 가 order ring 에서 소비한 frame 수.
+    ShmOrderConsumed,
+    /// 디코드/검증 실패한 OrderFrame 수 (unknown exchange, symbol resolve 실패 등).
+    ShmOrderInvalid,
+    /// Cancel 종류 OrderFrame 이 executor 에 dispatch 된 횟수.
+    ShmOrderCancelDispatched,
+    /// v2 multi-VM: gateway 가 publisher heartbeat stale (>5s) 감지한 횟수.
+    ShmPublisherStale,
+    /// v2 multi-VM: multi-ring fan-in batch 처리 횟수 (poll_batch >0 반환).
+    ShmOrderBatch,
+    /// v2 multi-VM: spin budget 소진 → park_timeout 진입 횟수.
+    ShmBackoffPark,
+}
+
+/// 알려진 counter 를 1 증가. hot path — atomic fetch_add 만.
+#[inline]
+pub fn counter_inc(k: CounterKey) {
+    counter_add(k, 1);
+}
+
+/// 알려진 counter 를 `n` 만큼 증가.
+#[inline]
+pub fn counter_add(k: CounterKey, n: u64) {
+    let c = counters();
+    let target = match k {
+        CounterKey::ZmqDropped => &c.zmq_dropped,
+        CounterKey::ZmqHwmBlock => &c.zmq_hwm_block,
+        CounterKey::PipelineEvent => &c.pipeline_event,
+        CounterKey::SerializationFail => &c.serialization_fail,
+        CounterKey::DecodeFail => &c.decode_fail,
+        CounterKey::ShmQuotePublished => &c.shm_quote_published,
+        CounterKey::ShmQuoteDropped => &c.shm_quote_dropped,
+        CounterKey::ShmTradePublished => &c.shm_trade_published,
+        CounterKey::ShmTradeLapDrop => &c.shm_trade_lap_drop,
+        CounterKey::ShmOrderPublished => &c.shm_order_published,
+        CounterKey::ShmOrderFullDrop => &c.shm_order_full_drop,
+        CounterKey::ShmInternFail => &c.shm_intern_fail,
+        CounterKey::ShmOrderConsumed => &c.shm_order_consumed,
+        CounterKey::ShmOrderInvalid => &c.shm_order_invalid,
+        CounterKey::ShmOrderCancelDispatched => &c.shm_order_cancel_dispatched,
+        CounterKey::ShmPublisherStale => &c.shm_publisher_stale,
+        CounterKey::ShmOrderBatch => &c.shm_order_batch,
+        CounterKey::ShmBackoffPark => &c.shm_backoff_park,
+    };
+    target.fetch_add(n, Ordering::Relaxed);
+}
+
+/// ad-hoc counter. static str 이므로 hot path 에서도 쓸 수 있지만
+/// 첫 호출은 Mutex lock — 가능하면 `CounterKey` 등록 쪽을 권장.
+pub fn extra_counter_inc(name: &'static str) {
+    let c = counters();
+    // 일반적으로 already-registered 경로가 매우 빠르도록 read-then-write 패턴.
+    // parking_lot Mutex 는 uncontended 시 cheap.
+    let mut map = c.extras.lock();
+    let entry = map
+        .entry(name)
+        .or_insert_with(|| Arc::new(AtomicU64::new(0)))
+        .clone();
+    drop(map);
+    entry.fetch_add(1, Ordering::Relaxed);
+}
+
+/// 모든 counter snapshot. tools/latency-probe, /metrics endpoint 등에서 사용.
+pub fn counters_snapshot() -> Vec<(String, u64)> {
+    let c = counters();
+    let mut out = vec![
+        ("zmq_dropped".into(), c.zmq_dropped.load(Ordering::Relaxed)),
+        ("zmq_hwm_block".into(), c.zmq_hwm_block.load(Ordering::Relaxed)),
+        ("pipeline_event".into(), c.pipeline_event.load(Ordering::Relaxed)),
+        ("serialization_fail".into(), c.serialization_fail.load(Ordering::Relaxed)),
+        ("decode_fail".into(), c.decode_fail.load(Ordering::Relaxed)),
+        (
+            "shm_quote_published".into(),
+            c.shm_quote_published.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_quote_dropped".into(),
+            c.shm_quote_dropped.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_trade_published".into(),
+            c.shm_trade_published.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_trade_lap_drop".into(),
+            c.shm_trade_lap_drop.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_order_published".into(),
+            c.shm_order_published.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_order_full_drop".into(),
+            c.shm_order_full_drop.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_intern_fail".into(),
+            c.shm_intern_fail.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_order_consumed".into(),
+            c.shm_order_consumed.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_order_invalid".into(),
+            c.shm_order_invalid.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_order_cancel_dispatched".into(),
+            c.shm_order_cancel_dispatched.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_publisher_stale".into(),
+            c.shm_publisher_stale.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_order_batch".into(),
+            c.shm_order_batch.load(Ordering::Relaxed),
+        ),
+        (
+            "shm_backoff_park".into(),
+            c.shm_backoff_park.load(Ordering::Relaxed),
+        ),
+    ];
+    for (k, v) in c.extras.lock().iter() {
+        out.push(((*k).to_string(), v.load(Ordering::Relaxed)));
+    }
+    out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CPU affinity
+// ─────────────────────────────────────────────────────────────────────────────
+
+static NEXT_HOT_CORE: AtomicU64 = AtomicU64::new(0);
+
+/// 다음 hot core 번호. linux CPU count 기준으로 순차 부여.
+/// Non-linux 또는 core 개수 판별 실패 시 None.
+pub fn next_hot_core() -> Option<usize> {
+    #[cfg(target_os = "linux")]
+    {
+        let n = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+        if n <= 0 {
+            return None;
+        }
+        let n = n as u64;
+        let idx = NEXT_HOT_CORE.fetch_add(1, Ordering::Relaxed) % n;
+        Some(idx as usize)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// 현재 스레드를 주어진 CPU 에 pin. Linux 한정, 다른 OS 는 no-op.
+pub fn pin_current_thread(core: usize) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        unsafe {
+            let mut cpuset: libc::cpu_set_t = std::mem::zeroed();
+            libc::CPU_ZERO(&mut cpuset);
+            libc::CPU_SET(core, &mut cpuset);
+            let rc = libc::sched_setaffinity(
+                0,
+                std::mem::size_of::<libc::cpu_set_t>(),
+                &cpuset as *const _,
+            );
+            if rc != 0 {
+                return Err(anyhow!(
+                    "sched_setaffinity(core={core}) failed: errno={}",
+                    *libc::__errno_location()
+                ));
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = core;
+        Ok(())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// verbose-trace 매크로 — off 기본, feature on 시 tracing::trace! 로 확장.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// hot path 용 verbose tracing. feature `verbose-trace` off 이면 완전히 사라짐.
+///
+/// ```ignore
+/// trace_verbose!(stage = ?Stage::Pushed, lat_ns = 123, "push complete");
+/// ```
+#[cfg(feature = "verbose-trace")]
+#[macro_export]
+macro_rules! trace_verbose {
+    ($($arg:tt)*) => {
+        ::tracing::trace!($($arg)*);
+    };
+}
+
+/// no-op 변형 — feature off.
+#[cfg(not(feature = "verbose-trace"))]
+#[macro_export]
+macro_rules! trace_verbose {
+    ($($arg:tt)*) => {};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 테스트
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 테스트 간 global state 공유 → serial 실행 보장 위해 mutex.
+    // cargo test 는 기본 병렬 → `--test-threads=1` 권장하지만, 여기서는 sub-lock.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn hdr_record_and_dump() {
+        let _g = TEST_LOCK.lock();
+        reset_hdr_for_test();
+
+        for v in [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000] {
+            record_stage_nanos(Stage::WsReceived, v);
+        }
+
+        let dump = dump_hdr();
+        let (stage, snap) = dump
+            .iter()
+            .find(|(s, _)| *s == Stage::WsReceived)
+            .unwrap()
+            .clone();
+        assert_eq!(stage, Stage::WsReceived);
+        assert_eq!(snap.count, 10);
+        assert!(snap.min <= 100);
+        assert!(snap.max >= 1000);
+        assert!(snap.p50 > 0);
+    }
+
+    #[test]
+    fn hdr_clamps_out_of_range() {
+        let _g = TEST_LOCK.lock();
+        reset_hdr_for_test();
+
+        // 0 (below low) 와 1e12 (above high) → clamp
+        record_stage_nanos(Stage::Pushed, 0);
+        record_stage_nanos(Stage::Pushed, 10_000_000_000_000);
+
+        let dump = dump_hdr();
+        let snap = dump.iter().find(|(s, _)| *s == Stage::Pushed).unwrap().1.clone();
+        assert_eq!(snap.count, 2);
+    }
+
+    #[test]
+    fn counter_inc_increments() {
+        // counter 는 전역 누적 → delta 기준 체크
+        let before = counters_snapshot()
+            .into_iter()
+            .find(|(k, _)| k == "zmq_dropped")
+            .map(|(_, v)| v)
+            .unwrap();
+        counter_inc(CounterKey::ZmqDropped);
+        counter_add(CounterKey::ZmqDropped, 4);
+        let after = counters_snapshot()
+            .into_iter()
+            .find(|(k, _)| k == "zmq_dropped")
+            .map(|(_, v)| v)
+            .unwrap();
+        assert_eq!(after - before, 5);
+    }
+
+    #[test]
+    fn extra_counter_registers_dynamically() {
+        extra_counter_inc("my_custom_counter");
+        extra_counter_inc("my_custom_counter");
+        let snap = counters_snapshot();
+        let v = snap
+            .iter()
+            .find(|(k, _)| k == "my_custom_counter")
+            .map(|(_, v)| *v)
+            .expect("registered");
+        assert!(v >= 2);
+    }
+
+    #[test]
+    fn trace_verbose_compiles_both_branches() {
+        // feature off 이면 macro 는 empty expansion → 부작용 없음.
+        // feature on 이면 tracing::trace! 로 확장 → tracing init 안 되어 있어도 일단 컴파일 OK.
+        trace_verbose!("hot path event {}", 42);
+    }
+
+    #[test]
+    fn next_hot_core_returns_option() {
+        // linux 아닌 환경에서는 None, linux 에서는 Some. 둘 다 OK.
+        let _ = next_hot_core();
+    }
+
+    #[test]
+    fn pin_current_thread_is_no_op_on_non_linux() {
+        // non-linux 에서는 Ok(()) 반환. linux 에서는 실제 pin 시도 → 실패할 수도 있어 skip.
+        #[cfg(not(target_os = "linux"))]
+        pin_current_thread(0).unwrap();
+    }
+
+    #[test]
+    fn init_twice_fails() {
+        // init 은 실제 subscriber 등록 → 한 번 성공하면 글로벌 상태가 바뀜.
+        // 이 테스트가 동작하려면 직전에 init 이 호출되지 않았어야 함.
+        // 단독 실행 시 성공, 다른 테스트와 함께 돌리면 `already initialized` 도 OK.
+        // 따라서 idempotent 하게 검증: 두 번째 호출은 반드시 Err.
+        let cfg = TelemetryConfig::default();
+        let first = init(&cfg, "test-a");
+        let second = init(&cfg, "test-b");
+        // 둘 중 적어도 하나는 Err ('already initialized') 이어야 함.
+        assert!(
+            first.is_err() || second.is_err(),
+            "second init must fail"
+        );
+        // cleanup: 성공한 handle 은 즉시 drop.
+        drop(first);
+        drop(second);
+    }
+}

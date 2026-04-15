@@ -1,0 +1,31 @@
+[package]
+name = "hft-shm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bytes = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+hft-types = { workspace = true }
+hft-protocol = { workspace = true }
+hft-time = { workspace = true }
+hft-telemetry = { workspace = true }
+
+# SHM-specific
+memmap2 = { workspace = true }
+libc = { workspace = true }
+# layout digest — wire 버전 잠금용 SHA-256.
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+# huge page + mlock 은 Linux 에서만 실제 효과. 다른 OS 는 stub.
+default = []

@@ -1,0 +1,43 @@
+[package]
+name = "strategy"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "strategy"
+path = "src/lib.rs"
+
+[[bin]]
+name = "strategy"
+path = "src/main.rs"
+
+[dependencies]
+hft-types = { workspace = true }
+hft-protocol = { workspace = true }
+hft-shm = { workspace = true }
+hft-ipc = { workspace = true }
+hft-config = { workspace = true }
+hft-telemetry = { workspace = true }
+hft-time = { workspace = true }
+hft-exchange-api = { workspace = true }
+# Phase 2 D: main.rs 에서 Gate REST account poller 를 직접 spawn.
+hft-exchange-gate = { workspace = true }
+hft-exchange-rest = { workspace = true }
+hft-strategy-shm = { workspace = true }
+hft-strategy-config = { workspace = true }
+hft-strategy-core = { workspace = true }
+hft-strategy-runtime = { workspace = true }
+# subscriber embed — InprocQueue / Downstream / start() 호출.
+subscriber = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+crossbeam-channel = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+mimalloc = { workspace = true }
+ctrlc = { workspace = true }

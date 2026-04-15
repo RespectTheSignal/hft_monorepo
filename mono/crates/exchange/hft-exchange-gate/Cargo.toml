@@ -1,0 +1,34 @@
+[package]
+name = "hft-exchange-gate"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hft-exchange-api = { workspace = true }
+hft-exchange-common = { workspace = true }
+# Phase 2: executor 구현을 위한 REST 공용 helper (HMAC 서명 / RestClient / 에러 매핑).
+hft-exchange-rest = { workspace = true }
+# Phase 2 D: account poller 가 `SymbolMetaProvider` / `PositionProvider` 트레잇을 구현하고
+# strategy 쪽에서 공유하는 `ContractMeta` / `PositionSnapshot` 타입을 그대로 사용한다.
+hft-strategy-runtime = { workspace = true }
+hft-types = { workspace = true }
+hft-time = { workspace = true }
+# BalanceSlot = `ArcSwap<AccountBalance>` — 전략이 lock-free 로 최신 잔고를 읽는다.
+arc-swap = { workspace = true }
+# PositionSnapshot 내부 맵 구현 (strategy runtime 과 해시 전략 일치 유지).
+ahash = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+# raw_value: channel 별 schema 가 달라 result 를 `&RawValue` 로 지연 파싱.
+serde_json = { workspace = true, features = ["raw_value"] }
+reqwest = { workspace = true }
+url = { workspace = true }
+tracing = { workspace = true }

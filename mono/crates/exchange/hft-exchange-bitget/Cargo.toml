@@ -1,0 +1,37 @@
+[package]
+name = "hft-exchange-bitget"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# hft-exchange-bitget — Bitget USDT-M Futures (v2) feed.
+#
+# - typed borrow-based Deserialize (DOM `Value` 제거) 로 hot-path alloc 제거.
+# - `hft-exchange-common::SymbolCache` 로 Arc<str> intern.
+# - `JsonScratch` 로 text frame 재사용; 별도 `Vec<u8>` 로 gzip/zlib decode.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[dependencies]
+hft-exchange-api = { workspace = true }
+hft-exchange-common = { workspace = true }
+# Phase 2 executor: 공통 REST/서명 helper.
+hft-exchange-rest = { workspace = true }
+hft-types = { workspace = true }
+hft-time = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+# raw_value: Bitget 의 `arg` / `data` 를 envelope 파싱 과정에서 지연 파싱하기 위함.
+serde_json = { workspace = true, features = ["raw_value"] }
+reqwest = { workspace = true }
+url = { workspace = true }
+ahash = { workspace = true }
+tracing = { workspace = true }
+flate2 = { workspace = true }

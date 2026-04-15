@@ -1,0 +1,14 @@
+[package]
+name = "hft-protocol"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hft-types = { workspace = true }
+bytes = { workspace = true }
+byteorder = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

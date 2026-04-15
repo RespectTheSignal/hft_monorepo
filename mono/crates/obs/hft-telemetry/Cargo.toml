@@ -1,0 +1,30 @@
+[package]
+name = "hft-telemetry"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# 활성화 시 `trace_verbose!` 매크로가 `tracing::trace!` 로 확장.
+# off (기본) 이면 아예 no-op 으로 컴파일되어 hot path 에 영향 없음.
+verbose-trace = []
+
+[dependencies]
+hft-time = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+hdrhistogram = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+ahash = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

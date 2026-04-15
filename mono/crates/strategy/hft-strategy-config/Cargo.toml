@@ -1,0 +1,28 @@
+[package]
+name = "hft-strategy-config"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+description = "Strategy TradeSettings + Supabase loader — Phase 2 port of legacy gate_hft_rust::config."
+
+[lib]
+name = "hft_strategy_config"
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+ahash.workspace = true
+parking_lot.workspace = true
+arc-swap.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

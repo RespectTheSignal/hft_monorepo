@@ -1,0 +1,79 @@
+; hft-order-gateway.service — infra VM 내부에서 hft-order-gateway 기동.
+;
+; 역할:
+;   - N_MAX 개 strategy VM 이 각자 OrderRing[vm_id] 에 쓴 OrderFrame 을
+;     round-robin 으로 fan-in, 거래소 REST/WS 로 전송.
+;   - publisher heartbeat_ns 를 관찰 (HeartbeatWatcher) — stale 시 경보.
+;
+; 의존성:
+;   - publisher 가 반드시 먼저 기동 (SharedRegion init + header magic 기록).
+;     그렇지 않으면 order-gateway 는 magic mismatch 로 fail-fast.
+;   - Requires + After + ConditionPathExists 조합으로 타이밍 보장.
+;
+; Environment 는 publisher 와 동일한 LayoutSpec / SHM backing 을 사용해야 한다.
+; 한 글자라도 다르면 layout_digest 체크에서 reject 된다.
+
+[Unit]
+Description=HFT v2 order gateway (shm consumer + venue client)
+Documentation=https://internal/docs/architecture/MULTI_VM_TOPOLOGY.md
+After=network-online.target hft-publisher.service
+Wants=network-online.target
+Requires=hft-publisher.service
+; publisher 가 만든 PCI BAR 디바이스 존재 확인.
+ConditionPathExists=/sys/bus/pci/devices
+
+[Service]
+Type=simple
+User=hft
+Group=hft
+
+ExecStart=/opt/hft/bin/hft-order-gateway
+
+; ── 설정 ──────────────────────────────────────────────────────────────────
+Environment=HFT_CONFIG_DIR=/etc/hft
+Environment=HFT_LOG=info,hft=info,hft_transport=info
+
+; SHM backing — publisher 와 동일해야 함.
+Environment=HFT_SHM__BACKING=pci_bar
+Environment=HFT_SHM__PCI_BAR_PATH=/sys/bus/pci/devices/0000:00:04.0/resource2
+Environment=HFT_SHM__N_MAX=16
+Environment=HFT_SHM__QUOTE_SLOTS=8192
+Environment=HFT_SHM__TRADE_RING_CAPACITY=65536
+Environment=HFT_SHM__ORDER_RING_CAPACITY=4096
+
+; ── 거래소 인증 ────────────────────────────────────────────────────────────
+; 절대 평문 저장 금지. systemd credential (LoadCredential=) 혹은
+; EnvironmentFile=-/etc/hft/secrets.env (mode 600) 사용. 아래는 예시이며
+; 실제 값은 배포 시 주입.
+EnvironmentFile=-/etc/hft/secrets.env
+; 예상 key 목록 (main.rs 의 HFT_{EX}_API_KEY 파싱 참조):
+;   HFT_GATE_API_KEY, HFT_GATE_API_SECRET
+;   HFT_BINANCE_API_KEY, HFT_BINANCE_API_SECRET
+;   HFT_OKX_API_KEY, HFT_OKX_API_SECRET, HFT_OKX_PASSPHRASE
+;   HFT_BITGET_API_KEY, HFT_BITGET_API_SECRET, HFT_BITGET_PASSPHRASE
+;   HFT_FLIPSTER_API_KEY, HFT_FLIPSTER_API_SECRET
+
+; ── 보안 ──────────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hft/state
+
+; ── 성능 ──────────────────────────────────────────────────────────────────
+; publisher 와 CPU 분리 — fan-in poller 가 publisher hot CPU 를 침범하지 않도록.
+CPUAffinity=8 9
+LimitMEMLOCK=infinity
+
+; ── 재시작 정책 ────────────────────────────────────────────────────────────
+; publisher 가 먼저 내려가면 systemd 가 이 유닛도 stop → publisher 재기동 →
+; 이 유닛 재기동 순서. HeartbeatWatcher 로 인한 crash 는 없고 warn 로그만 남김.
+Restart=on-failure
+RestartSec=3s
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

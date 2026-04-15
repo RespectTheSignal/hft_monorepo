@@ -1,0 +1,47 @@
+[package]
+name = "integration"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# integration — `tests/*.rs` 로 구성된 통합 테스트 전용 crate.
+#
+# lib 은 빈 껍데기 (SPEC 고정용) — 실제 검증은 모두 tests/ 에서.
+# 의존성은 주로 dev-dependencies 에 모아, production build 에 새지 않게 한다.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[dependencies]
+hft-testkit = { workspace = true }
+hft-exchange-api = { workspace = true }
+hft-types = { workspace = true }
+hft-protocol = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# 기본 async 런타임
+tokio = { workspace = true }
+
+# 파이프라인 다른 층들 — integration 에서만 사용.
+subscriber = { path = "../../services/subscriber" }
+strategy = { path = "../../services/strategy" }
+
+# config layering 검증
+hft-config = { workspace = true }
+# MockClock / LatencyStamps / Stage
+hft-time = { workspace = true }
+
+# hot-path primitives
+crossbeam-channel = { workspace = true }
+parking_lot = { workspace = true }
+
+# latency assertion
+hdrhistogram = { workspace = true }
+
+# wire_compat bit-level 검증
+byteorder = { workspace = true }

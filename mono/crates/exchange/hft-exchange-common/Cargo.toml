@@ -1,0 +1,37 @@
+[package]
+name = "hft-exchange-common"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# hft-exchange-common — 모든 거래소 구현이 공유하는 hot-path primitive.
+#
+# 설계 원칙
+# - **hot-path allocation 최소화**: WS text → typed struct → emit 과정에서
+#   event 당 0 heap allocation 을 목표. repeat symbol 은 `SymbolCache` 로 intern.
+# - **거래소 독립**: 여기엔 거래소별 schema 가 없다. 오직 공유 helper 만.
+# - **serde 지연 파싱**: `serde_json::value::RawValue` 를 쓸 수 있도록 serde_json
+#   `raw_value` feature 를 켠다 (typed top-level + 가변 sub-slice).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[dependencies]
+hft-types = { workspace = true }
+hft-time = { workspace = true }
+
+# lenient f64 / symbol intern 에 사용.
+serde = { workspace = true }
+# raw_value feature: `&RawValue` 로 sub-slice 를 지연 파싱.
+serde_json = { workspace = true, features = ["raw_value"] }
+
+# symbol intern pool — concurrent read-heavy.
+dashmap = { workspace = true }
+ahash = { workspace = true }
+
+tracing = { workspace = true }
+
+[dev-dependencies]
+# symbol intern 동시성 검증용.
+tokio = { workspace = true }

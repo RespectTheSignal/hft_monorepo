@@ -1,0 +1,28 @@
+# publisher-gate — Gate 거래소 전용 publisher 서비스 설정.
+# default.toml 위에 override.
+
+service_name = "publisher-gate"
+hot_workers = 2
+bg_workers = 2
+
+[zmq]
+# Gate feed 볼륨을 감안해 HWM 상향.
+hwm = 200000
+drain_batch_cap = 1024
+push_endpoint = "inproc://publisher-gate"
+pub_endpoint = "tcp://0.0.0.0:5556"
+sub_endpoint = "tcp://127.0.0.1:5556"
+
+[[exchanges]]
+id = "gate"
+role = "primary"
+symbols = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
+reconnect_backoff_ms = 500
+ping_interval_s = 15
+
+[[exchanges]]
+id = "gate"
+role = "web_order_book"
+symbols = ["BTC_USDT", "ETH_USDT"]
+reconnect_backoff_ms = 500
+ping_interval_s = 15

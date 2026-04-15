@@ -1,0 +1,22 @@
+[package]
+name = "hft-strategy-shm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+description = "Strategy VM side facade over v2 SharedRegion — quote + trade reader + self-vm order writer, with symbol lookup and polling helpers."
+
+[lib]
+name = "hft_strategy_shm"
+path = "src/lib.rs"
+
+[dependencies]
+hft-shm.workspace = true
+hft-types.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
