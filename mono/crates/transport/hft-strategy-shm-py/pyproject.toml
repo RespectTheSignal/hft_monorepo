@@ -22,4 +22,4 @@ classifiers = [
 #     python/hft_strategy_shm/_core.cpython-*.so 로 떨어진다.
 python-source = "python"
 module-name = "hft_strategy_shm._core"
-features = ["pyo3/extension-module"]
+features = ["extension-module"]

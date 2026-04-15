@@ -20,7 +20,6 @@
 use anyhow::{anyhow, Result};
 use hdrhistogram::Histogram;
 use hft_time::Stage;
-use opentelemetry::trace::TracerProvider as _;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
