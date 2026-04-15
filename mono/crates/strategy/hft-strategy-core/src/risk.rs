@@ -378,6 +378,10 @@ mod tests {
             symbol_risk_limit: 0.0,
             min_order_size: 1,
             last_order: last,
+            // close_stale 테스트에서는 사용하지 않으므로 0 (= "정보 없음") 으로 둔다.
+            position_update_time_sec: 0,
+            // USDT perp 기본값 1.0.
+            quanto_multiplier: 1.0,
         }
     }
 

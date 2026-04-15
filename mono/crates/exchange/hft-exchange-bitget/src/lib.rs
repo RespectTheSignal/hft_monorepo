@@ -455,9 +455,9 @@ struct BitgetArg<'a> {
 /// books1 의 한 snapshot/update 엔트리.
 #[derive(Deserialize)]
 struct BooksEntry<'a> {
-    #[serde(borrow, default)]
+    #[serde(default)]
     bids: Vec<BookLevel>,
-    #[serde(borrow, default)]
+    #[serde(default)]
     asks: Vec<BookLevel>,
     /// `ts` (ms) — string 또는 number.
     #[serde(default, deserialize_with = "deserialize_i64_lenient_opt")]

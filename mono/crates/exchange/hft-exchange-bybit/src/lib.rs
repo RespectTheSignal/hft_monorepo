@@ -491,10 +491,10 @@ struct BybitBook<'a> {
     #[serde(borrow, default)]
     s: &'a str,
     /// bid levels (orderbook.1 이면 1개).
-    #[serde(borrow, default)]
+    #[serde(default)]
     b: Vec<BookLevel>,
     /// ask levels.
-    #[serde(borrow, default)]
+    #[serde(default)]
     a: Vec<BookLevel>,
     /// data-scope timestamp (ms) — 일부 배포본.
     #[serde(default, deserialize_with = "deserialize_i64_lenient_opt")]

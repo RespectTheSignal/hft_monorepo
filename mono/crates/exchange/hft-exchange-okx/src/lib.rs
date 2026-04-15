@@ -508,9 +508,9 @@ struct OkxArg<'a> {
 /// `data[0]` — bbo-tbt entry.
 #[derive(Debug, Deserialize)]
 struct OkxBboEntry<'a> {
-    #[serde(borrow, default)]
+    #[serde(default)]
     bids: Vec<BookLevel>,
-    #[serde(borrow, default)]
+    #[serde(default)]
     asks: Vec<BookLevel>,
     #[serde(default, deserialize_with = "deserialize_i64_lenient_opt")]
     ts: Option<i64>,

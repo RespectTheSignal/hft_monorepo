@@ -281,16 +281,20 @@ impl PositionProvider for GateAccountClient {
 /// task 는 tokio `CancellationToken` 으로 중단된다. `PollerHandle::shutdown().await` 는
 /// 즉시 cancel 을 요청하고 task join 까지 기다린다.
 pub struct PollerHandle {
-    task: JoinHandle<()>,
+    /// `Option` 으로 감싸 `shutdown(self)` 에서 `.take()` 로 ownership 이전 가능하게 함
+    /// (`Drop` 구현 때문에 field move-out 이 금지됨 — E0509 회피).
+    task: Option<JoinHandle<()>>,
     cancel: hft_exchange_api::CancellationToken,
     stats: Arc<PollerStats>,
 }
 
 impl PollerHandle {
     /// cancel 신호 + join 대기.
-    pub async fn shutdown(self) {
+    pub async fn shutdown(mut self) {
         self.cancel.cancel();
-        let _ = self.task.await;
+        if let Some(task) = self.task.take() {
+            let _ = task.await;
+        }
     }
 
     /// 외부에서 cancel 만 요청 (task 는 계속 live — drop 시 abort).
@@ -309,7 +313,10 @@ impl Drop for PollerHandle {
         if !self.cancel.is_cancelled() {
             self.cancel.cancel();
         }
-        self.task.abort();
+        // shutdown(self) 이 이미 join 했다면 `task` 는 None. 그 외에는 abort.
+        if let Some(task) = self.task.as_ref() {
+            task.abort();
+        }
     }
 }
 
@@ -423,7 +430,7 @@ impl AccountPollerBuilder {
 
         let task = tokio::spawn(async move { runner.run(task_cancel).await });
         Ok(PollerHandle {
-            task,
+            task: Some(task),
             cancel,
             stats,
         })
