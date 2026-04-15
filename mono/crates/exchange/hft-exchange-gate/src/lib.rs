@@ -88,7 +88,7 @@ use hft_exchange_api::{Backoff, CancellationToken, Emitter, ExchangeFeed};
 use hft_exchange_common::{
     deserialize_f64_lenient, deserialize_i64_lenient_opt, stamps_with_ws, JsonScratch, SymbolCache,
 };
-use hft_time::{Clock, LatencyStamps, Stamp, SystemClock};
+use hft_time::{Clock, Stamp, SystemClock};
 use hft_types::{BookTicker, DataRole, ExchangeId, MarketEvent, Price, Size, Symbol, Trade};
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1029,7 +1029,7 @@ fn finalize_trade(w: TradeWire<'_>, outer_time_ms: i64, cache: &SymbolCache) -> 
         .create_time_ms
         .or_else(|| w.create_time.map(|s| s.saturating_mul(1000)))
         .unwrap_or(outer_time_ms);
-    let create_time_s = w.create_time.unwrap_or_else(|| create_time_ms / 1000);
+    let create_time_s = w.create_time.unwrap_or(create_time_ms / 1000);
     Trade {
         exchange: ExchangeId::Gate,
         symbol: cache.intern(w.contract),
@@ -1126,6 +1126,7 @@ fn _type_asserts() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hft_time::LatencyStamps;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // 실제 Gate.io futures.book_ticker 메시지 샘플 (raw JSON).

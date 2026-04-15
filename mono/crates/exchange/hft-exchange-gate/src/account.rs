@@ -62,7 +62,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ahash::AHashMap;
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use hft_exchange_api::ApiError;
 use hft_exchange_rest::{
@@ -77,7 +77,7 @@ use hft_types::Symbol;
 use reqwest::Method;
 use serde::{Deserialize, Deserializer};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Config

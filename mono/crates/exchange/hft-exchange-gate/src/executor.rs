@@ -303,6 +303,7 @@ impl ExchangeExecutor for GateExecutor {
 struct GatePlaceResp {
     #[serde(default)]
     id: serde_json::Value, // 숫자/문자열 양쪽 가능 — 관용적으로 받는다.
+    #[allow(dead_code)]
     #[serde(default)]
     finish_as: Option<String>,
     #[serde(default)]
