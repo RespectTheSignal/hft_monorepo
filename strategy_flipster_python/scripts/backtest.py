@@ -78,6 +78,8 @@ async def main() -> None:
         k_stop=float(os.environ.get("K_STOP", "4.0")),
         timeout_sec=float(os.environ.get("TIMEOUT_SEC", "10")),
         notional_usd=float(os.environ.get("NOTIONAL", "20")),
+        min_dev_bps=float(os.environ.get("MIN_DEV_BPS", "3.0")),
+        min_std_bps=float(os.environ.get("MIN_STD_BPS", "0.5")),
     )
     fee_bps = float(os.environ.get("FEE_BPS", "0.45"))
 
@@ -102,6 +104,7 @@ async def main() -> None:
     print(f"  duration   : {(end_ns - start_ns) / 1e9:.0f}s")
     print(f"  params     : k_in={params.k_in} k_out={params.k_out} k_stop={params.k_stop}")
     print(f"               window={params.window_sec}s timeout={params.timeout_sec}s notional=${params.notional_usd}")
+    print(f"  filters    : min_dev={params.min_dev_bps}bp min_std={params.min_std_bps}bp")
     print(f"  fee        : {fee_bps} bp\n")
 
     # QuestDB feed
@@ -163,13 +166,15 @@ async def main() -> None:
     # strategy 내부 통계
     s = strategy.stats
     print(f"\n  strategy stats:")
-    print(f"    entries      : {s.entries}")
-    print(f"    exits_target : {s.exits_target}")
-    print(f"    exits_stop   : {s.exits_stop}")
-    print(f"    exits_timeout: {s.exits_timeout}")
-    print(f"    signals      : {s.signals_seen}")
-    print(f"    skips_no_data: {s.skips_no_data}")
-    print(f"    skips_low_std: {s.skips_low_std}")
+    print(f"    entries       : {s.entries}")
+    print(f"    exits_target  : {s.exits_target}")
+    print(f"    exits_stop    : {s.exits_stop}")
+    print(f"    exits_timeout : {s.exits_timeout}")
+    print(f"    signals       : {s.signals_seen}")
+    print(f"    skips_no_data : {s.skips_no_data}")
+    print(f"    skips_low_std : {s.skips_low_std}")
+    print(f"    skips_below_z : {s.skips_below_z}")
+    print(f"    skips_low_dev : {s.skips_low_dev_bps}")
 
 
 if __name__ == "__main__":

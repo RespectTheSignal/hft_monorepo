@@ -54,16 +54,27 @@ logger = structlog.get_logger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class BasisMeanRevParams:
-    """전략 파라미터"""
+    """전략 파라미터.
+
+    진입 조건은 두 가지 필터를 AND 로 통과해야 함:
+      1. 통계적 이탈:  |z| >= k_in
+      2. 경제적 이탈:  |basis - mean| / fl_mid * 10000 >= min_dev_bps
+    추가로 std 가 min_std_bps (of price) 미만이면 drift 구간으로 간주해 skip.
+
+    기본값 근거 (fee 0.45bp, 왕복 0.9bp, edge 1.5배 안전 마진 가정):
+      - min_dev_bps = 3.0 bp  → |β_fl|=0.5 일 때 expected move 1.5bp > 0.9bp
+      - min_std_bps = 0.5 bp  → std 가 작아져 z 폭주 방지
+    """
 
     canonicals: tuple[str, ...]          # 거래 대상 (예: ("EPIC", "ETH"))
     window_sec: float = 30.0             # z-score 계산 윈도우
-    k_in: float = 2.0                    # 진입 threshold
+    k_in: float = 2.0                    # 진입 z-score threshold
     k_out: float = 0.5                   # 청산 threshold
     k_stop: float = 4.0                  # 손절 threshold
     timeout_sec: float = 10.0            # 시간 손절
     notional_usd: float = 20.0           # 1 주문 notional
-    min_std: float = 1e-8                # std 이하이면 skip
+    min_dev_bps: float = 3.0             # 진입 시 |basis − mean|/price 최소 (bp)
+    min_std_bps: float = 0.5             # std/price 하한 (bp), drift 방어
     warmup_samples: int = 200            # 최소 샘플
     max_concurrent_per_symbol: int = 1   # 심볼별 동시 포지션 상한
 
@@ -91,6 +102,8 @@ class BasisMeanRevStats:
     signals_seen: int = 0
     skips_no_data: int = 0
     skips_low_std: int = 0
+    skips_low_dev_bps: int = 0
+    skips_below_z: int = 0
     skips_already_active: int = 0
     last_log_ns: int = 0
 
@@ -215,24 +228,37 @@ class BasisMeanRevStrategy:
 
         mean = float(diff.mean())
         std = float(diff.std())
-        if std < self._p.min_std:
-            self._stats.skips_low_std += 1
-            return None
-
         basis_now = float(diff[-1])
-        z = (basis_now - mean) / std
 
-        if abs(z) < self._p.k_in:
-            return None  # 진입 threshold 미달
-
-        # 3. 현재 호가 필요 — Flipster 쪽
+        # 3. 현재 호가 필요 — Flipster 쪽 (price 필요, 이후 bp 계산에 사용)
         fl_ticker = latest.get(EXCHANGE_FLIPSTER, fl_sym)
         if fl_ticker is None:
             self._stats.skips_no_data += 1
             return None
         fl_mid = (fl_ticker.bid_price + fl_ticker.ask_price) * 0.5
         if fl_mid <= 0:
+            self._stats.skips_no_data += 1
             return None
+
+        # 필터 1: std 하한 (bp of price) — drift 구간 방어
+        std_bps = (std / fl_mid) * 10000.0 if fl_mid > 0 else 0.0
+        if std_bps < self._p.min_std_bps:
+            self._stats.skips_low_std += 1
+            return None
+
+        # 필터 2: z-score 임계
+        z = (basis_now - mean) / std
+        if abs(z) < self._p.k_in:
+            self._stats.skips_below_z += 1
+            return None
+
+        # 필터 3: 경제적 이탈 (|dev|/price bp)
+        abs_dev = abs(basis_now - mean)
+        dev_bps = (abs_dev / fl_mid) * 10000.0
+        if dev_bps < self._p.min_dev_bps:
+            self._stats.skips_low_dev_bps += 1
+            return None
+
         qty = Decimal(str(self._p.notional_usd / fl_mid))
         if qty <= 0:
             return None
@@ -262,9 +288,10 @@ class BasisMeanRevStrategy:
             canonical=canonical,
             side=side.value,
             z=round(z, 3),
+            dev_bps=round(dev_bps, 2),
+            std_bps=round(std_bps, 2),
             basis_now=round(basis_now, 6),
             basis_mean=round(mean, 6),
-            basis_std=round(std, 6),
             entry_price=entry_price,
             qty=str(qty),
         )
@@ -298,7 +325,7 @@ class BasisMeanRevStrategy:
         mean = float(diff.mean())
         std = float(diff.std())
         basis_now = float(diff[-1])
-        z = (basis_now - mean) / std if std > self._p.min_std else 0.0
+        z = (basis_now - mean) / std if std > 1e-12 else 0.0
 
         hold_ns = now_ns - active.entry_ns
         timeout_hit = hold_ns >= int(self._p.timeout_sec * 1e9)
