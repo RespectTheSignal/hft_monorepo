@@ -152,7 +152,6 @@ impl StrategyShmClient {
         step: Duration,
     ) -> Result<Self> {
         let deadline = Instant::now() + timeout;
-        let mut last_err: Option<anyhow::Error> = None;
         loop {
             match Self::attach(backing.clone(), spec, vm_id) {
                 Ok(c) => return Ok(c),
@@ -163,11 +162,10 @@ impl StrategyShmClient {
                         error = %e,
                         "attach retry"
                     );
-                    last_err = Some(e);
+                    if Instant::now() >= deadline {
+                        return Err(e);
+                    }
                 }
-            }
-            if Instant::now() >= deadline {
-                return Err(last_err.unwrap_or_else(|| anyhow!("attach_with_retry timed out")));
             }
             std::thread::sleep(step);
         }
