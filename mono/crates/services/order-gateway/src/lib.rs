@@ -762,7 +762,10 @@ mod tests {
     fn start_rejects_empty_routing() {
         let routing = RoutingTable::new();
         let (_tx, rx) = crossbeam_channel::bounded::<OrderRequest>(1);
-        let err = start(routing, rx, None).unwrap_err();
+        let err = match start(routing, rx, None) {
+            Ok(_) => panic!("start should reject empty routing"),
+            Err(err) => err,
+        };
         assert!(format!("{err}").contains("at least one route"));
     }
 }

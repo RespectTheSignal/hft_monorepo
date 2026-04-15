@@ -62,11 +62,9 @@ const MAX_PER_RING: usize = 32;
 const HEARTBEAT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// v2: publisher heartbeat stale 판정 임계 (ns). 5s.
 const HEARTBEAT_STALE_THRESHOLD_NS: u64 = 5 * 1_000_000_000;
-/// v2: heartbeat stale warn 중복 억제 — 같은 stale 구간에서 warn 을 1회로 제한.
-/// 복구되면 다시 arm. counter 는 매 체크마다 증가.
-///
-/// (상수 자체는 없음 — 상태가 `HeartbeatWatcher` 내부 bool 로 관리됨.)
-
+// v2: heartbeat stale warn 중복 억제 — 같은 stale 구간에서 warn 을 1회로 제한.
+// 복구되면 다시 arm. counter 는 매 체크마다 증가.
+// (상수 자체는 없음 — 상태가 `HeartbeatWatcher` 내부 bool 로 관리됨.)
 /// 현재 wall-clock ns. 테스트에서만 mock 하고, hot-path 는 SystemTime 한 번만 읽음.
 fn now_realtime_ns() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
