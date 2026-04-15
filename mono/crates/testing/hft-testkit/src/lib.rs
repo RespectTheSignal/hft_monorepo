@@ -605,11 +605,11 @@ mod tests {
 
     #[test]
     fn pipeline_harness_macro_runs_body() {
-        let mut ran = false;
+        let ran = std::cell::Cell::new(false);
         pipeline_harness!({
-            ran = true;
+            ran.set(true);
         });
-        assert!(ran);
+        assert!(ran.get());
     }
 
     #[test]
