@@ -255,7 +255,7 @@ fn escape_field_key(buf: &mut Vec<u8>, s: &str) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// TCP 연결 상태 + exponential backoff.
-struct IlpConnection {
+pub struct IlpConnection {
     addr: String,
     stream: Option<TcpStream>,
     next_backoff_ms: u64,
