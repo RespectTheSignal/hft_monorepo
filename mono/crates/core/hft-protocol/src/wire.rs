@@ -582,8 +582,13 @@ mod tests {
         encode_trade_into(&mut buf, &t);
         assert_eq!(buf[tr_off::IS_INTERNAL], 0);
         // padding 도 0 이어야 함
-        for i in (tr_off::IS_INTERNAL + 1)..tr_off::SERVER_TIME {
-            assert_eq!(buf[i], 0, "padding byte {i} not zero");
+        for (i, byte) in buf
+            .iter()
+            .enumerate()
+            .take(tr_off::SERVER_TIME)
+            .skip(tr_off::IS_INTERNAL + 1)
+        {
+            assert_eq!(*byte, 0, "padding byte {i} not zero");
         }
         let wire = decode_trade(&buf).unwrap();
         assert!(!wire.is_internal);
