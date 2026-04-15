@@ -323,6 +323,9 @@ mod tests {
         p.publish_trade(&tr, 100, 101, 102);
 
         let mut reader = TradeRingReader::open(&tp).unwrap();
+        // TradeRingReader 기본 cursor 는 "지금부터" 이므로, 방금 publish 한 1건을
+        // 검증하려면 처음부터 다시 읽게 rewind 한다.
+        reader.rewind_to_start();
         let mut got = Vec::new();
         reader.drain_into(&mut got, 10);
         assert_eq!(got.len(), 1);

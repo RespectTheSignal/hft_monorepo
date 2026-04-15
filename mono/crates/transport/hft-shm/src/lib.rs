@@ -35,28 +35,29 @@
 //!
 //! ```no_run
 //! use hft_shm::*;
+//! use std::path::Path;
 //! # fn main() -> anyhow::Result<()> {
 //! // quote slot
-//! let q_w = QuoteSlotWriter::create("/dev/shm/hft_quotes_v2", 10_000)?;
+//! let q_w = QuoteSlotWriter::create(Path::new("/dev/shm/hft_quotes_v2"), 10_000)?;
 //! q_w.publish(42, &QuoteUpdate { bid_price: 0, bid_size: 0, ask_price: 0, ask_size: 0,
 //!                                event_ns: 0, recv_ns: 0, pub_ns: 0, exchange_id: 1 });
-//! let q_r = QuoteSlotReader::open("/dev/shm/hft_quotes_v2")?;
+//! let q_r = QuoteSlotReader::open(Path::new("/dev/shm/hft_quotes_v2"))?;
 //! let _snap = q_r.read(42);
 //!
 //! // trade ring
-//! let t_w = TradeRingWriter::create("/dev/shm/hft_trades_v2", 1 << 20)?;
+//! let t_w = TradeRingWriter::create(Path::new("/dev/shm/hft_trades_v2"), 1 << 20)?;
 //! t_w.publish(&TradeFrame::default());
-//! let mut t_r = TradeRingReader::open("/dev/shm/hft_trades_v2")?;
+//! let mut t_r = TradeRingReader::open(Path::new("/dev/shm/hft_trades_v2"))?;
 //! while let Some(_f) = t_r.try_consume() {}
 //!
 //! // order ring
-//! let o_w = OrderRingWriter::create("/dev/shm/hft_orders_v2", 16_384)?;
+//! let o_w = OrderRingWriter::create(Path::new("/dev/shm/hft_orders_v2"), 16_384)?;
 //! o_w.publish(&OrderFrame::default());
-//! let mut o_r = OrderRingReader::open("/dev/shm/hft_orders_v2")?;
+//! let mut o_r = OrderRingReader::open(Path::new("/dev/shm/hft_orders_v2"))?;
 //! while let Some(_o) = o_r.try_consume() {}
 //!
 //! // symbol table
-//! let sym = SymbolTable::open_or_create("/dev/shm/hft_symtab_v2", 16_384)?;
+//! let sym = SymbolTable::open_or_create(Path::new("/dev/shm/hft_symtab_v2"), 16_384)?;
 //! let _idx = sym.get_or_intern(hft_types::ExchangeId::Gate, "BTC_USDT")?;
 //! # Ok(()) }
 //! ```

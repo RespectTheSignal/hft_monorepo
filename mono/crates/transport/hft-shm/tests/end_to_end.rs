@@ -1,7 +1,7 @@
 //! End-to-end 통합 테스트 — 3 영역(quote / trade / order) + symbol table 을
 //! 실제 사용 흐름처럼 엮어본다.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -101,18 +101,24 @@ fn e2e_publisher_writes_strategy_reads() {
 
 #[test]
 fn e2e_concurrent_publisher_and_two_readers() {
+    const CAPACITY: usize = 4096;
+    const WRITER_TARGET: i64 = 20_000;
+    const MIN_SEEN: usize = CAPACITY / 4;
+
     let dir = tempdir().unwrap();
     let tpath = dir.path().join("trades_v2");
-    let w = Arc::new(TradeRingWriter::create(&tpath, 4096).unwrap());
+    let w = Arc::new(TradeRingWriter::create(&tpath, CAPACITY as u64).unwrap());
     let mut r1 = TradeRingReader::open(&tpath).unwrap();
     let mut r2 = TradeRingReader::open(&tpath).unwrap();
     let stop = Arc::new(AtomicBool::new(false));
+    let writer_count = Arc::new(AtomicI64::new(0));
 
     let stop_w = stop.clone();
     let w_c = w.clone();
+    let writer_count_t = writer_count.clone();
     let writer_t = thread::spawn(move || {
         let mut i = 0i64;
-        while !stop_w.load(Ordering::Relaxed) && i < 20_000 {
+        while !stop_w.load(Ordering::Relaxed) && i < WRITER_TARGET {
             let f = TradeFrame {
                 seq: std::sync::atomic::AtomicU64::new(0),
                 exchange_id: 2,
@@ -130,21 +136,79 @@ fn e2e_concurrent_publisher_and_two_readers() {
             w_c.publish(&f);
             i += 1;
         }
+        writer_count_t.store(i, Ordering::Release);
     });
 
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut a = Vec::new();
     let mut b = Vec::new();
-    while Instant::now() < deadline && (a.len() < 15_000 || b.len() < 15_000) {
+    while Instant::now() < deadline
+        && (a.len() < WRITER_TARGET as usize || b.len() < WRITER_TARGET as usize)
+    {
         r1.drain_into(&mut a, 1024);
         r2.drain_into(&mut b, 1024);
     }
     stop.store(true, Ordering::Relaxed);
     writer_t.join().unwrap();
+    let published = writer_count.load(Ordering::Acquire) as u64;
 
-    assert!(a.len() >= 5000, "reader1 too few: {}", a.len());
-    assert!(b.len() >= 5000, "reader2 too few: {}", b.len());
-    // 둘 다 동일 seq 를 보고 있어야 하지만 각자 독립이라 subset 이어도 OK.
+    // 진행성: 각 reader 가 최소한 의미 있는 양을 소비해야 한다.
+    assert!(
+        a.len() >= MIN_SEEN,
+        "reader1 liveness fail: seen={}, drops={}, published={}, min={}",
+        a.len(),
+        r1.lap_drops(),
+        published,
+        MIN_SEEN,
+    );
+    assert!(
+        b.len() >= MIN_SEEN,
+        "reader2 liveness fail: seen={}, drops={}, published={}, min={}",
+        b.len(),
+        r2.lap_drops(),
+        published,
+        MIN_SEEN,
+    );
+
+    // 관측 범위: seen + lap_drops 는 writer 가 밀어 넣은 총량에 근접해야 한다.
+    let r1_cov = a.len() as u64 + r1.lap_drops();
+    let r2_cov = b.len() as u64 + r2.lap_drops();
+    let cov_margin = (CAPACITY / 8) as u64;
+    assert!(
+        r1_cov + cov_margin >= published && r1_cov <= published,
+        "reader1 coverage fail: seen={}, drops={}, total={}, published={}",
+        a.len(),
+        r1.lap_drops(),
+        r1_cov,
+        published,
+    );
+    assert!(
+        r2_cov + cov_margin >= published && r2_cov <= published,
+        "reader2 coverage fail: seen={}, drops={}, total={}, published={}",
+        b.len(),
+        r2.lap_drops(),
+        r2_cov,
+        published,
+    );
+
+    for i in 1..a.len() {
+        assert!(
+            a[i].price > a[i - 1].price,
+            "reader1 non-monotonic at {}: {} <= {}",
+            i,
+            a[i].price,
+            a[i - 1].price
+        );
+    }
+    for i in 1..b.len() {
+        assert!(
+            b[i].price > b[i - 1].price,
+            "reader2 non-monotonic at {}: {} <= {}",
+            i,
+            b[i].price,
+            b[i - 1].price
+        );
+    }
 }
 
 #[test]

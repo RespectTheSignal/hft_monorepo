@@ -334,6 +334,23 @@ mod tests {
         let sr =
             SharedRegion::create_or_attach(Backing::DevShm { path: path.to_path_buf() }, s, Role::Publisher)
                 .unwrap();
+        // Strategy attach 는 quote/trade/symtab/order ring 이 모두 초기화됐다고
+        // 가정하므로, 테스트 helper 도 publisher 부트 순서를 그대로 따른다.
+        let _ = hft_shm::QuoteSlotWriter::from_region(
+            sr.sub_region(SubKind::Quote).unwrap(),
+            s.quote_slot_count,
+        )
+        .unwrap();
+        let _ = hft_shm::TradeRingWriter::from_region(
+            sr.sub_region(SubKind::Trade).unwrap(),
+            s.trade_ring_capacity,
+        )
+        .unwrap();
+        let _ = hft_shm::SymbolTable::from_region(
+            sr.sub_region(SubKind::Symtab).unwrap(),
+            s.symtab_capacity,
+        )
+        .unwrap();
         // 각 order ring header 초기화.
         for vm_id in 0..s.n_max {
             let sub = sr.sub_region(SubKind::OrderRing { vm_id }).unwrap();

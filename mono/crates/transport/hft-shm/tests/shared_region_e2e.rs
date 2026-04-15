@@ -174,6 +174,9 @@ fn publisher_gateway_strategies_interact_on_single_region() {
 
     let mut tr = TradeRingReader::from_region(sr_ro.sub_region(SubKind::Trade).unwrap())
         .expect("TradeRingReader");
+    // TradeRingReader 기본 cursor 는 "지금부터" 이므로, 방금 publish 한 1건을
+    // 검증하려면 처음부터 다시 읽게 rewind 한다.
+    tr.rewind_to_start();
     let f = tr.try_consume().expect("trade consume");
     assert_eq!(f.trade_id, 777);
     assert_eq!(f.price, 100);

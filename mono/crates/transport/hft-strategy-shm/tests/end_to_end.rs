@@ -63,6 +63,21 @@ fn boot_publisher(path: &std::path::Path, s: LayoutSpec) -> SharedRegion {
         Role::Publisher,
     )
     .expect("create_or_attach publisher");
+    let _ = QuoteSlotWriter::from_region(
+        sr.sub_region(SubKind::Quote).unwrap(),
+        s.quote_slot_count,
+    )
+    .expect("init quote");
+    let _ = TradeRingWriter::from_region(
+        sr.sub_region(SubKind::Trade).unwrap(),
+        s.trade_ring_capacity,
+    )
+    .expect("init trade");
+    let _ = SymbolTable::from_region(
+        sr.sub_region(SubKind::Symtab).unwrap(),
+        s.symtab_capacity,
+    )
+    .expect("init symtab");
     for vm_id in 0..s.n_max {
         let sub = sr.sub_region(SubKind::OrderRing { vm_id }).unwrap();
         let _ = OrderRingWriter::from_region(sub, s.order_ring_capacity).unwrap();
@@ -97,7 +112,8 @@ fn full_pipeline_publisher_n_strategies_gateway_fanin() {
         .get_or_intern(ExchangeId::Gate, "BTC_USDT")
         .expect("intern BTC");
 
-    // Publisher 가 quote + trade 한 건씩 흘림.
+    // Publisher 가 quote 최신값을 먼저 흘린다. quote slot 은 snapshot 구조라
+    // strategy attach 이후에도 동일 값이 보인다.
     qw.publish(
         btc_idx,
         &QuoteUpdate {
@@ -112,6 +128,21 @@ fn full_pipeline_publisher_n_strategies_gateway_fanin() {
         },
     )
     .unwrap();
+
+    // ── N 개의 strategy attach ───────────────────────────────────────────────
+    let mut strategies: Vec<StrategyShmClient> = (0..s.n_max)
+        .map(|vm_id| {
+            StrategyShmClient::attach(
+                Backing::DevShm { path: path.clone() },
+                s,
+                vm_id,
+            )
+            .expect("strategy attach")
+        })
+        .collect();
+
+    // Trade ring reader 는 attach 시점부터 읽기 시작하므로, attach 후에 trade 를
+    // publish 해야 모든 strategy 가 같은 1건을 소비할 수 있다.
     tw.publish(&TradeFrame {
         seq: AtomicU64::new(0),
         exchange_id: 1,
@@ -126,18 +157,6 @@ fn full_pipeline_publisher_n_strategies_gateway_fanin() {
         flags: 0,
         _pad2: [0; 28],
     });
-
-    // ── N 개의 strategy attach ───────────────────────────────────────────────
-    let mut strategies: Vec<StrategyShmClient> = (0..s.n_max)
-        .map(|vm_id| {
-            StrategyShmClient::attach(
-                Backing::DevShm { path: path.clone() },
-                s,
-                vm_id,
-            )
-            .expect("strategy attach")
-        })
-        .collect();
 
     // 각 strategy 가 동일한 symbol 에 대해 3 건 publish.
     for client in strategies.iter() {
