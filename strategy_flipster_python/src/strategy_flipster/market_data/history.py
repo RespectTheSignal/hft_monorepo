@@ -23,6 +23,7 @@ import time
 import numpy as np
 import structlog
 
+from strategy_flipster.clock import Clock, LiveClock
 from strategy_flipster.market_data.latest_cache import LatestTickerCache
 
 logger = structlog.get_logger(__name__)
@@ -117,16 +118,28 @@ class SymbolRingBuffer:
 
 
 class SnapshotHistory:
-    """(exchange, symbol) → SymbolRingBuffer 맵 + 전략용 헬퍼"""
+    """(exchange, symbol) → SymbolRingBuffer 맵 + 전략용 헬퍼.
 
-    __slots__ = ("_interval_sec", "_max_age_sec", "_max_age_ns", "_capacity", "_buffers")
+    clock: now_ns() 소스. 라이브는 LiveClock, 백테스트는 SimClock 주입.
+    """
 
-    def __init__(self, interval_sec: float = 0.05, max_age_sec: float = 60.0) -> None:
+    __slots__ = (
+        "_interval_sec", "_max_age_sec", "_max_age_ns",
+        "_capacity", "_buffers", "_clock",
+    )
+
+    def __init__(
+        self,
+        interval_sec: float = 0.05,
+        max_age_sec: float = 60.0,
+        clock: Clock | None = None,
+    ) -> None:
         self._interval_sec: float = interval_sec
         self._max_age_sec: float = max_age_sec
         self._max_age_ns: int = int(max_age_sec * 1_000_000_000)
         self._capacity: int = _required_capacity(interval_sec, max_age_sec)
         self._buffers: dict[tuple[str, str], SymbolRingBuffer] = {}
+        self._clock: Clock = clock if clock is not None else LiveClock()
 
     @property
     def capacity(self) -> int:
@@ -164,7 +177,7 @@ class SnapshotHistory:
     def _cutoff_ns(self, duration_sec: float | None) -> int:
         if duration_sec is None:
             return 0
-        return time.time_ns() - int(duration_sec * 1_000_000_000)
+        return self._clock.now_ns() - int(duration_sec * 1_000_000_000)
 
     def mid_array(
         self, exchange: str, symbol: str, duration_sec: float | None = None,

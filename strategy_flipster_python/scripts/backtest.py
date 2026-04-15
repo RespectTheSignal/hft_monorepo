@@ -1,0 +1,176 @@
+"""백테스트 CLI — basis_meanrev 전략을 QuestDB 데이터로 리플레이.
+
+실행:
+    uv run python scripts/backtest.py <canonical_csv> <start_iso> <end_iso> [options]
+
+예:
+    # EPIC 1개, 2시간 구간
+    uv run python scripts/backtest.py EPIC 2026-04-14T00:00:00Z 2026-04-14T02:00:00Z
+
+    # EPIC + ETH 동시
+    uv run python scripts/backtest.py EPIC,ETH 2026-04-14T00:00:00Z 2026-04-14T02:00:00Z
+
+옵션 (환경변수):
+    K_IN=2.0 K_OUT=0.5 K_STOP=4.0 WINDOW_SEC=30 NOTIONAL=20 TIMEOUT_SEC=10 FEE_BPS=0.45
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+import structlog
+
+from strategy_flipster.backtest.fill_simulator import FillSimulator
+from strategy_flipster.backtest.pnl_tracker import PnlTracker
+from strategy_flipster.backtest.questdb_feed import (
+    QdbConfig,
+    make_binance_feed,
+    make_flipster_feed,
+)
+from strategy_flipster.backtest.runner import BacktestConfig, BacktestRunner
+from strategy_flipster.clock import SimClock
+from strategy_flipster.market_data.history import SnapshotHistory
+from strategy_flipster.market_data.latest_cache import LatestTickerCache
+from strategy_flipster.market_data.stats_cache import MarketStatsCache
+from strategy_flipster.market_data.symbol import (
+    EXCHANGE_BINANCE,
+    EXCHANGE_FLIPSTER,
+    to_exchange_symbol,
+)
+from strategy_flipster.strategy.basis_meanrev import (
+    BasisMeanRevParams,
+    BasisMeanRevStrategy,
+)
+from strategy_flipster.user_data.state import UserState
+
+
+def parse_iso_to_ns(s: str) -> int:
+    dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1_000_000_000)
+
+
+async def main() -> None:
+    if len(sys.argv) < 4:
+        print(__doc__)
+        sys.exit(1)
+
+    canonicals = tuple(s.strip().upper() for s in sys.argv[1].split(",") if s.strip())
+    start_ns = parse_iso_to_ns(sys.argv[2])
+    end_ns = parse_iso_to_ns(sys.argv[3])
+
+    if end_ns <= start_ns:
+        print("end 가 start 이하"); sys.exit(1)
+
+    # 파라미터 (env)
+    params = BasisMeanRevParams(
+        canonicals=canonicals,
+        window_sec=float(os.environ.get("WINDOW_SEC", "30")),
+        k_in=float(os.environ.get("K_IN", "2.0")),
+        k_out=float(os.environ.get("K_OUT", "0.5")),
+        k_stop=float(os.environ.get("K_STOP", "4.0")),
+        timeout_sec=float(os.environ.get("TIMEOUT_SEC", "10")),
+        notional_usd=float(os.environ.get("NOTIONAL", "20")),
+    )
+    fee_bps = float(os.environ.get("FEE_BPS", "0.45"))
+
+    # 로깅
+    structlog.configure(
+        processors=[
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.add_log_level,
+            structlog.dev.ConsoleRenderer(),
+        ],
+    )
+
+    # 심볼 매핑
+    fl_symbols = [to_exchange_symbol(EXCHANGE_FLIPSTER, c) for c in canonicals]
+    bn_symbols = [to_exchange_symbol(EXCHANGE_BINANCE, c) for c in canonicals]
+
+    print(f"backtest:")
+    print(f"  canonicals : {canonicals}")
+    print(f"  flipster   : {fl_symbols}")
+    print(f"  binance    : {bn_symbols}")
+    print(f"  range      : {sys.argv[2]} → {sys.argv[3]}")
+    print(f"  duration   : {(end_ns - start_ns) / 1e9:.0f}s")
+    print(f"  params     : k_in={params.k_in} k_out={params.k_out} k_stop={params.k_stop}")
+    print(f"               window={params.window_sec}s timeout={params.timeout_sec}s notional=${params.notional_usd}")
+    print(f"  fee        : {fee_bps} bp\n")
+
+    # QuestDB feed
+    qdb = QdbConfig()
+    bn_feed = make_binance_feed(qdb, bn_symbols, start_ns, end_ns)
+    fl_feed = make_flipster_feed(qdb, fl_symbols, start_ns, end_ns)
+
+    # 시뮬 컴포넌트
+    sim_clock = SimClock(start_ns=start_ns)
+    history = SnapshotHistory(
+        interval_sec=0.05,
+        max_age_sec=max(params.window_sec + 30.0, 60.0),
+        clock=sim_clock,
+    )
+    latest = LatestTickerCache()
+    user_state = UserState()
+    pnl = PnlTracker()
+    fill_sim = FillSimulator(user_state=user_state, pnl=pnl, fee_bps=fee_bps)
+    market_stats = MarketStatsCache()
+    strategy = BasisMeanRevStrategy(params, clock=sim_clock)
+
+    runner = BacktestRunner(
+        config=BacktestConfig(start_ns=start_ns, end_ns=end_ns),
+        event_streams=[bn_feed.iter_events(), fl_feed.iter_events()],
+        strategy=strategy,
+        clock=sim_clock,
+        history=history,
+        latest=latest,
+        user_state=user_state,
+        fill_sim=fill_sim,
+        pnl=pnl,
+        market_stats=market_stats,
+    )
+
+    result = await runner.run()
+
+    # 결과 출력
+    print(f"\n{'=' * 6} 백테스트 결과 {'=' * 50}")
+    print(f"  wall elapsed     : {result.wall_elapsed_sec:.1f}s")
+    print(f"  sim duration     : {(result.end_ns - result.start_ns) / 1e9:.0f}s")
+    print(f"  events processed : {result.events_processed:,}")
+    print(f"  snapshots        : {result.snapshots_taken:,}")
+    print(f"\n  orders submitted : {result.orders_submitted}")
+    print(f"  orders filled    : {result.orders_filled}")
+    print(f"  orders missed    : {result.orders_missed}")
+    fill_rate = (result.orders_filled / result.orders_submitted * 100) if result.orders_submitted else 0.0
+    print(f"  fill rate        : {fill_rate:.1f}%")
+    print(f"\n  trades           : {result.trades}")
+    print(f"  wins / losses    : {result.wins} / {result.losses}")
+    win_rate = (result.wins / (result.wins + result.losses) * 100) if (result.wins + result.losses) else 0.0
+    print(f"  win rate         : {win_rate:.1f}%")
+    print(f"  total volume     : ${result.total_volume:,.2f}")
+    print(f"\n  total realized   : ${result.total_realized:+.4f}")
+    print(f"  total fees       : ${result.total_fees:.4f}")
+    print(f"  NET PnL          : ${result.net_pnl:+.4f}")
+    print(f"  peak equity      : ${result.peak_equity:+.4f}")
+    print(f"  max drawdown     : ${result.max_drawdown:.4f}")
+
+    # strategy 내부 통계
+    s = strategy.stats
+    print(f"\n  strategy stats:")
+    print(f"    entries      : {s.entries}")
+    print(f"    exits_target : {s.exits_target}")
+    print(f"    exits_stop   : {s.exits_stop}")
+    print(f"    exits_timeout: {s.exits_timeout}")
+    print(f"    signals      : {s.signals_seen}")
+    print(f"    skips_no_data: {s.skips_no_data}")
+    print(f"    skips_low_std: {s.skips_low_std}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
