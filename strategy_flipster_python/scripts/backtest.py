@@ -184,7 +184,24 @@ async def main() -> None:
     print(f"  total fees       : ${result.total_fees:.4f}")
     print(f"  NET PnL          : ${result.net_pnl:+.4f}")
     print(f"  peak equity      : ${result.peak_equity:+.4f}")
-    print(f"  max drawdown     : ${result.max_drawdown:.4f}")
+    print(f"  max drawdown     : ${result.max_drawdown:.4f}  (realized only)")
+    print(f"\n  mark-to-market (unrealized 포함):")
+    print(f"    peak equity    : ${result.peak_equity_mtm:+.4f}")
+    print(f"    max drawdown   : ${result.max_drawdown_mtm:.4f}")
+    print(f"    worst unreal.  : ${result.worst_unrealized:+.4f}")
+
+    # 심볼별 PnL 분해
+    rows = pnl.per_symbol()
+    if rows:
+        print(f"\n{'=' * 6} 심볼별 PnL (NET 내림차순) {'=' * 35}")
+        hdr = f"  {'symbol':<20} {'trades':>7} {'volume':>12} {'realized':>10} {'fees':>9} {'net':>10} {'win%':>6}"
+        print(hdr)
+        print("  " + "-" * (len(hdr) - 2))
+        for r in rows:
+            print(
+                f"  {r.symbol:<20} {r.trades:>7} ${r.volume_usd:>10,.2f} "
+                f"${r.realized:>+9.4f} ${r.fees:>8.4f} ${r.net:>+9.4f} {r.win_rate:>5.1f}%"
+            )
 
     # strategy 내부 통계
     s = strategy.stats

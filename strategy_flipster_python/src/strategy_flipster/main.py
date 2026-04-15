@@ -20,13 +20,20 @@ from strategy_flipster.market_data.history import SnapshotHistory, SnapshotSampl
 from strategy_flipster.market_data.latest_cache import LatestTickerCache
 from strategy_flipster.market_data.stats_cache import MarketStatsCache
 from strategy_flipster.market_data.stats_poller import FlipsterMarketStatsPoller
+from strategy_flipster.backtest.pnl_tracker import PnlTracker
 from strategy_flipster.market_data.zmq_feed import ExchangeZmqFeed
+from strategy_flipster.strategy.basis_meanrev import (
+    BasisMeanRevParams,
+    BasisMeanRevStrategy,
+)
 from strategy_flipster.strategy.sample import SampleStrategy
 from strategy_flipster.user_data.rest_client import FlipsterUserRestClient
 from strategy_flipster.user_data.state import UserState
 from strategy_flipster.market_data.symbol import is_supported_symbol
 from strategy_flipster.types import BookTicker
 from strategy_flipster.user_data.ws_client import FlipsterUserWsClient
+
+import os
 
 logger = structlog.get_logger(__name__)
 
@@ -147,8 +154,22 @@ async def run(config: AppConfig) -> None:
     )
 
     # Execution
+    dry_run = os.environ.get("DRY_RUN", "1") != "0"
     exec_client = FlipsterExecutionClient(config.flipster_api)
-    order_manager = OrderManager(exec_client, user_state, dry_run=False)
+
+    # dry_run 모드에서는 가상 체결 + PnL 추적
+    dry_run_pnl: PnlTracker | None = None
+    if dry_run:
+        dry_run_pnl = PnlTracker()
+        logger.warning("DRY_RUN_MODE_ENABLED — 가상 체결, 실제 주문 안 나감")
+
+    order_manager = OrderManager(
+        exec_client, user_state,
+        dry_run=dry_run,
+        dry_run_latest=latest_cache if dry_run else None,
+        dry_run_pnl=dry_run_pnl,
+        dry_run_fee_bps=float(os.environ.get("FEE_BPS", "0.45")),
+    )
 
     # Market Stats (주기 풀링 캐시)
     market_stats = MarketStatsCache()
@@ -158,8 +179,44 @@ async def run(config: AppConfig) -> None:
         interval_sec=config.market_stats.interval_ms / 1000.0,
     )
 
-    # Strategy
-    strategy = SampleStrategy()
+    # Strategy — 환경변수 STRATEGY=basis_meanrev 면 실전략, 아니면 sample
+    strategy_name = os.environ.get("STRATEGY", "sample").lower()
+    strategy: Any
+    if strategy_name == "basis_meanrev":
+        canonicals_str = os.environ.get("CANONICALS", "EPIC,ETH")
+        canonicals = tuple(
+            s.strip().upper() for s in canonicals_str.split(",") if s.strip()
+        )
+        params = BasisMeanRevParams(
+            canonicals=canonicals,
+            window_sec=float(os.environ.get("WINDOW_SEC", "30")),
+            open_k=float(os.environ.get("OPEN_K", "2.0")),
+            close_k=float(os.environ.get("CLOSE_K", "0.5")),
+            max_position_size=float(os.environ.get("MAX_POSITION", "10")),
+            open_order_size=float(os.environ.get("OPEN_ORDER_SIZE", "10")),
+            close_order_size=float(os.environ.get("CLOSE_ORDER_SIZE", "10")),
+            portfolio_max_size=float(os.environ.get("PORTFOLIO_MAX", "50")),
+            min_open_dev_bps=float(os.environ.get("MIN_OPEN_DEV_BPS", "3.0")),
+            min_open_std_bps=float(os.environ.get("MIN_OPEN_STD_BPS", "0.5")),
+            min_close_dev_bps=float(os.environ.get("MIN_CLOSE_DEV_BPS", "1.0")),
+            min_close_std_bps=float(os.environ.get("MIN_CLOSE_STD_BPS", "0")),
+            spread_aware_filter=os.environ.get("SPREAD_FILTER", "1") != "0",
+            beta_fl_assumption=float(os.environ.get("BETA_FL", "0.5")),
+            fee_bps_cost=float(os.environ.get("FEE_BPS", "0.45")),
+            spread_edge_safety=float(os.environ.get("SPREAD_EDGE_SAFETY", "1.0")),
+            cooldown_ms=int(os.environ.get("COOLDOWN_MS", "500")),
+        )
+        strategy = BasisMeanRevStrategy(params)
+        logger.info(
+            "using_basis_meanrev",
+            canonicals=list(canonicals),
+            max_position=params.max_position_size,
+            portfolio_max=params.portfolio_max_size,
+            dry_run=dry_run,
+        )
+    else:
+        strategy = SampleStrategy()
+        logger.info("using_sample_strategy")
 
     # ── 초기화 ──
     logger.info("initializing")
@@ -232,7 +289,30 @@ async def run(config: AppConfig) -> None:
         except asyncio.CancelledError:
             await snapshot_sampler.stop()
 
-    # Task 5: Shutdown 대기
+    # Task 5: Dry-run 주기 stats (30초마다)
+    async def dry_run_stats_loop() -> None:
+        if dry_run_pnl is None:
+            return
+        try:
+            while not shutdown_event.is_set():
+                await asyncio.sleep(30.0)
+                p = dry_run_pnl.stats
+                net = p.total_realized - p.total_fees
+                logger.info(
+                    "dry_run_stats",
+                    trades=p.total_trades,
+                    wins=p.wins,
+                    losses=p.losses,
+                    realized=round(p.total_realized, 4),
+                    fees=round(p.total_fees, 4),
+                    net=round(net, 4),
+                    volume=round(p.total_volume_usd, 2),
+                    positions=len(user_state.positions),
+                )
+        except asyncio.CancelledError:
+            pass
+
+    # Task 6: Shutdown 대기
     async def shutdown_watcher() -> None:
         await shutdown_event.wait()
         logger.info("shutdown_signal_received")
@@ -246,6 +326,8 @@ async def run(config: AppConfig) -> None:
         tasks.append(asyncio.create_task(stats_poll_loop(), name="stats_poller"))
     if config.snapshot_history.enabled:
         tasks.append(asyncio.create_task(snapshot_sample_loop(), name="snapshot_sampler"))
+    if dry_run_pnl is not None:
+        tasks.append(asyncio.create_task(dry_run_stats_loop(), name="dry_run_stats"))
 
     # shutdown_watcher가 완료되면 나머지 태스크 취소
     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)

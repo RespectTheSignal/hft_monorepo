@@ -74,10 +74,38 @@ class PnlTrackerStats:
     total_realized: float = 0.0
     total_fees: float = 0.0
     total_volume_usd: float = 0.0
-    wins: int = 0           # realized > 0 인 청산 횟수
-    losses: int = 0         # realized < 0
-    max_drawdown: float = 0.0
+    wins: int = 0                      # realized > 0 인 청산 횟수
+    losses: int = 0                    # realized < 0
+
+    # Realized 기준 peak / drawdown
+    max_drawdown: float = 0.0          # realized - fees 기준
     peak_equity: float = 0.0
+
+    # Mark-to-market 기준 (unrealized 포함)
+    max_drawdown_mtm: float = 0.0      # realized - fees + unrealized
+    peak_equity_mtm: float = 0.0
+    last_unrealized: float = 0.0
+    worst_unrealized: float = 0.0      # 가장 컸던 미실현 손실 (음수 → 절대값 큰 것)
+
+
+@dataclass
+class SymbolPnlRow:
+    symbol: str
+    trades: int = 0
+    volume_usd: float = 0.0
+    realized: float = 0.0
+    fees: float = 0.0
+    wins: int = 0
+    losses: int = 0
+
+    @property
+    def net(self) -> float:
+        return self.realized - self.fees
+
+    @property
+    def win_rate(self) -> float:
+        total = self.wins + self.losses
+        return (self.wins / total * 100.0) if total > 0 else 0.0
 
 
 class PnlTracker:
@@ -87,6 +115,7 @@ class PnlTracker:
         self._books: dict[str, _SymbolBook] = {}
         self._trades: list[Trade] = []
         self._stats: PnlTrackerStats = PnlTrackerStats()
+        self._symbol_rows: dict[str, SymbolPnlRow] = {}
 
     @property
     def stats(self) -> PnlTrackerStats:
@@ -96,9 +125,51 @@ class PnlTracker:
     def trades(self) -> list[Trade]:
         return self._trades
 
+    def per_symbol(self) -> list[SymbolPnlRow]:
+        """심볼별 PnL 집계 (net 내림차순)"""
+        rows = list(self._symbol_rows.values())
+        rows.sort(key=lambda r: r.net, reverse=True)
+        return rows
+
     def equity(self) -> float:
         """실현 PnL − 누적 수수료 (현재 미실현 제외)"""
         return sum(b.realized - b.fees for b in self._books.values())
+
+    def unrealized(
+        self,
+        mark_prices: dict[str, float],
+    ) -> float:
+        """현재 포지션의 미실현 PnL (mark_prices 기준)
+
+        mark_prices: {symbol: mid_price}. 없는 심볼은 0 으로 취급.
+        """
+        total = 0.0
+        for sym, book in self._books.items():
+            if abs(book.position) < 1e-12:
+                continue
+            mark = mark_prices.get(sym, 0.0)
+            if mark <= 0:
+                continue
+            # long(+): mark - avg_entry, short(-): avg_entry - mark
+            total += book.position * (mark - book.avg_entry)
+        return total
+
+    def mark_to_market(
+        self,
+        mark_prices: dict[str, float],
+    ) -> None:
+        """현재 mid 로 mtm equity 계산 후 peak/DD 갱신"""
+        unrl = self.unrealized(mark_prices)
+        realized_net = self.equity()  # realized - fees
+        eq_mtm = realized_net + unrl
+        self._stats.last_unrealized = unrl
+        if unrl < self._stats.worst_unrealized:
+            self._stats.worst_unrealized = unrl
+        if eq_mtm > self._stats.peak_equity_mtm:
+            self._stats.peak_equity_mtm = eq_mtm
+        dd_mtm = self._stats.peak_equity_mtm - eq_mtm
+        if dd_mtm > self._stats.max_drawdown_mtm:
+            self._stats.max_drawdown_mtm = dd_mtm
 
     def on_fill(
         self,
@@ -116,14 +187,25 @@ class PnlTracker:
         realized_this = book.apply(side, qty, price)
         book.fees += fee
 
+        row = self._symbol_rows.get(symbol)
+        if row is None:
+            row = SymbolPnlRow(symbol=symbol)
+            self._symbol_rows[symbol] = row
+        row.trades += 1
+        row.volume_usd += qty * price
+        row.realized += realized_this
+        row.fees += fee
+
         self._stats.total_trades += 1
         self._stats.total_realized += realized_this
         self._stats.total_fees += fee
         self._stats.total_volume_usd += qty * price
         if realized_this > 1e-12:
             self._stats.wins += 1
+            row.wins += 1
         elif realized_this < -1e-12:
             self._stats.losses += 1
+            row.losses += 1
 
         eq = self.equity()
         if eq > self._stats.peak_equity:

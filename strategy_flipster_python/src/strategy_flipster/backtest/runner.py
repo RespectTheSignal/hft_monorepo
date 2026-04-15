@@ -62,6 +62,9 @@ class BacktestResult:
     max_drawdown: float
     wins: int
     losses: int
+    peak_equity_mtm: float = 0.0
+    max_drawdown_mtm: float = 0.0
+    worst_unrealized: float = 0.0
 
 
 def _merge_events(
@@ -151,6 +154,8 @@ class BacktestRunner:
             while next_snapshot_ns <= tick.recv_ts_ns:
                 self._take_snapshot(next_snapshot_ns)
                 snapshots += 1
+                # MTM equity 갱신 (스냅샷 경계마다 1회)
+                self._mark_to_market()
                 next_snapshot_ns += self._cfg.snapshot_interval_ns
 
             # 4. pending 주문 체결 시도
@@ -210,10 +215,29 @@ class BacktestRunner:
             max_drawdown=p.max_drawdown,
             wins=p.wins,
             losses=p.losses,
+            peak_equity_mtm=p.peak_equity_mtm,
+            max_drawdown_mtm=p.max_drawdown_mtm,
+            worst_unrealized=p.worst_unrealized,
         )
 
     def _take_snapshot(self, ns: int) -> None:
         """현재 latest_cache 상태를 history 에 sample. clock 은 이미 set 돼 있음."""
-        # snapshot 시각은 정확히 ns (interval 경계)
         for (exch, sym), ticker in self._latest.items():
             self._history.append(exch, sym, ns, ticker.bid_price, ticker.ask_price)
+
+    def _mark_to_market(self) -> None:
+        """현재 포지션을 Flipster mid 로 평가해 PnlTracker 에 반영"""
+        # positions 는 fl_sym 키 — Flipster latest 에서 mid 추출
+        if not self._user_state.positions:
+            return
+        from strategy_flipster.market_data.symbol import EXCHANGE_FLIPSTER
+        marks: dict[str, float] = {}
+        for sym in self._user_state.positions.keys():
+            t = self._latest.get(EXCHANGE_FLIPSTER, sym)
+            if t is None:
+                continue
+            mid = (t.bid_price + t.ask_price) * 0.5
+            if mid > 0:
+                marks[sym] = mid
+        if marks:
+            self._pnl.mark_to_market(marks)
