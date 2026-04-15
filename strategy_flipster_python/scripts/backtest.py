@@ -95,7 +95,7 @@ async def main() -> None:
         beta_fl_assumption=float(os.environ.get("BETA_FL", "0.5")),
         fee_bps_cost=float(os.environ.get("FEE_BPS", "0.45")),
         spread_edge_safety=float(os.environ.get("SPREAD_EDGE_SAFETY", "1.0")),
-        binance_open_cooldown_ms=int(os.environ.get("BN_OPEN_COOLDOWN_MS", os.environ.get("BN_COOLDOWN_MS", "0"))),
+        binance_open_cooldown_ms=int(os.environ.get("BN_OPEN_COOLDOWN_MS", os.environ.get("BN_COOLDOWN_MS", "200"))),
         binance_close_cooldown_ms=int(os.environ.get("BN_CLOSE_COOLDOWN_MS", "0")),
         cooldown_ms=int(os.environ.get("COOLDOWN_MS", "500")),
     )

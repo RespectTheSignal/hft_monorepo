@@ -109,11 +109,11 @@ class BasisMeanRevParams:
     fee_bps_cost: float = 0.45              # per side (Flipster taker)
     spread_edge_safety: float = 1.0         # 안전 배율 (1.0 = 손익분기)
 
-    # Binance 가격 변화 후 cooldown — 방금 바뀐 구간에선 새 주문 skip
-    # open / close 분리, 각 0 = 끔.
-    # 경험상 Binance 가 leader 라서 cooldown 은 오히려 신호를 놓치게 만들어
-    # PnL 감소 → 기본 0. 실험적으로만 양수 설정 권장.
-    binance_open_cooldown_ms: int = 0
+    # Binance 가격 변화 후 cooldown — 방금 바뀐 구간에선 새 주문 skip.
+    # 목적: 순수 PnL 최적화가 아니라 stealth — 너무 노골적으로 Binance lead 를
+    # 따라가면 Flipster 가 arb 로 판단해 API 차단할 위험. open 에만 기본 200ms.
+    # 0 으로 설정하면 최대 PnL 모드 (감지 위험 상승).
+    binance_open_cooldown_ms: int = 200
     binance_close_cooldown_ms: int = 0
 
     # 기타
