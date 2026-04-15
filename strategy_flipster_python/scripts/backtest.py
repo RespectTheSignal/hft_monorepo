@@ -75,6 +75,9 @@ async def main() -> None:
     open_size = float(os.environ.get("OPEN_ORDER_SIZE", default_notional))
     close_size = float(os.environ.get("CLOSE_ORDER_SIZE", default_notional))
     portfolio_max = float(os.environ.get("PORTFOLIO_MAX", "0"))  # 0 = 무제한
+    # min_*_bps: open 우선, 없으면 legacy MIN_DEV_BPS/MIN_STD_BPS 사용
+    legacy_dev = os.environ.get("MIN_DEV_BPS", "3.0")
+    legacy_std = os.environ.get("MIN_STD_BPS", "0.5")
     params = BasisMeanRevParams(
         canonicals=canonicals,
         window_sec=float(os.environ.get("WINDOW_SEC", "30")),
@@ -84,8 +87,14 @@ async def main() -> None:
         open_order_size=open_size,
         close_order_size=close_size,
         portfolio_max_size=portfolio_max,
-        min_dev_bps=float(os.environ.get("MIN_DEV_BPS", "3.0")),
-        min_std_bps=float(os.environ.get("MIN_STD_BPS", "0.5")),
+        min_open_dev_bps=float(os.environ.get("MIN_OPEN_DEV_BPS", legacy_dev)),
+        min_open_std_bps=float(os.environ.get("MIN_OPEN_STD_BPS", legacy_std)),
+        min_close_dev_bps=float(os.environ.get("MIN_CLOSE_DEV_BPS", "1.0")),
+        min_close_std_bps=float(os.environ.get("MIN_CLOSE_STD_BPS", "0")),
+        spread_aware_filter=os.environ.get("SPREAD_FILTER", "1") != "0",
+        beta_fl_assumption=float(os.environ.get("BETA_FL", "0.5")),
+        fee_bps_cost=float(os.environ.get("FEE_BPS", "0.45")),
+        spread_edge_safety=float(os.environ.get("SPREAD_EDGE_SAFETY", "1.0")),
         cooldown_ms=int(os.environ.get("COOLDOWN_MS", "500")),
     )
     fee_bps = float(os.environ.get("FEE_BPS", "0.45"))
@@ -114,7 +123,10 @@ async def main() -> None:
     print(f"  sizes      : max_position=${params.max_position_size}")
     print(f"               open_order=${params.open_order_size} close_order=${params.close_order_size}")
     print(f"               portfolio_max=${params.portfolio_max_size} (0=무제한)")
-    print(f"  filters    : min_dev={params.min_dev_bps}bp min_std={params.min_std_bps}bp")
+    print(f"  filters    : open_dev={params.min_open_dev_bps}bp open_std={params.min_open_std_bps}bp")
+    print(f"               close_dev={params.min_close_dev_bps}bp close_std={params.min_close_std_bps}bp")
+    spread_on = "on" if params.spread_aware_filter else "off"
+    print(f"  spread     : filter={spread_on} β_fl={params.beta_fl_assumption} safety={params.spread_edge_safety}")
     print(f"  cooldown   : {params.cooldown_ms}ms")
     print(f"  fee        : {fee_bps} bp\n")
 
@@ -183,6 +195,9 @@ async def main() -> None:
     print(f"    builds (same-dir): {s.builds}")
     print(f"    reemits          : {s.reemits}")
     print(f"    hysteresis_hold  : {s.holds_hysteresis}")
+    print(f"    skips_low_std    : {s.skips_low_std}")
+    print(f"    skips_low_dev    : {s.skips_low_dev_bps}")
+    print(f"    skips_spread_cost: {s.skips_spread_cost}")
     print(f"    skips_cooldown   : {s.skips_cooldown}")
     print(f"    skips_port_cap   : {s.skips_portfolio_cap}")
     print(f"    skips_no_data    : {s.skips_no_data}")

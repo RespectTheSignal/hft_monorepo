@@ -97,9 +97,17 @@ class BasisMeanRevParams:
     close_order_size: float = 20.0          # 청산/축소 1주문 상한
     portfolio_max_size: float = 0.0         # 전체 포트폴리오 한도 (0=무제한)
 
-    # 필터
-    min_dev_bps: float = 3.0                # |dev|/price 하한 (bp)
-    min_std_bps: float = 0.5                # std/price 하한 (bp), drift 방어
+    # 필터 — open (진입/확장) 과 close (청산) 분리
+    min_open_dev_bps: float = 3.0           # 진입 시 |dev|/price 하한 (bp)
+    min_open_std_bps: float = 0.5           # 진입 시 std/price 하한 (drift 방어)
+    min_close_dev_bps: float = 1.0          # 청산 시 |dev|/price 하한 (noise 방어)
+    min_close_std_bps: float = 0.0          # 청산 시 std/price 하한
+
+    # 스프레드 인식 진입 필터
+    spread_aware_filter: bool = True        # 스프레드 + 수수료 대비 edge 확인
+    beta_fl_assumption: float = 0.5         # Flipster 기여 가정 (0..1)
+    fee_bps_cost: float = 0.45              # per side (Flipster taker)
+    spread_edge_safety: float = 1.0         # 안전 배율 (1.0 = 손익분기)
 
     # 기타
     warmup_samples: int = 200               # 최소 샘플
@@ -143,6 +151,7 @@ class BasisMeanRevStats:
     skips_low_std: int = 0
     skips_below_z: int = 0
     skips_low_dev_bps: int = 0
+    skips_spread_cost: int = 0             # spread + fee > edge 로 차단
     skips_cooldown: int = 0
     skips_portfolio_cap: int = 0
     holds_hysteresis: int = 0
@@ -188,8 +197,10 @@ class BasisMeanRevStrategy:
             open_order_size=self._p.open_order_size,
             close_order_size=self._p.close_order_size,
             portfolio_max_size=self._p.portfolio_max_size,
-            min_dev_bps=self._p.min_dev_bps,
-            min_std_bps=self._p.min_std_bps,
+            min_open_dev_bps=self._p.min_open_dev_bps,
+            min_open_std_bps=self._p.min_open_std_bps,
+            min_close_dev_bps=self._p.min_close_dev_bps,
+            min_close_std_bps=self._p.min_close_std_bps,
         )
 
     async def on_stop(self) -> None:
@@ -288,16 +299,18 @@ class BasisMeanRevStrategy:
             self._stats.skips_no_data += 1
             return None
 
-        # 3. 목표 intent 결정
+        # 3. 목표 intent 결정 — z/필터/현재 intent 에 따라 결정
         std_bps = (std / fl_mid) * 10000.0
         dev_bps = (abs(basis_now - mean) / fl_mid) * 10000.0
-        filters_ok = (
-            std_bps >= self._p.min_std_bps
-            and dev_bps >= self._p.min_dev_bps
+        fl_spread_bps = (
+            (fl_ticker.ask_price - fl_ticker.bid_price) / fl_mid * 10000.0
+            if fl_mid > 0 else 0.0
         )
-
         z = (basis_now - mean) / std if std > 1e-12 else 0.0
-        new_intent = self._next_intent(sym_state.intent, z, filters_ok)
+
+        new_intent = self._next_intent(
+            sym_state.intent, z, dev_bps, std_bps, fl_spread_bps,
+        )
 
         intent_changed = new_intent != sym_state.intent
 
@@ -434,25 +447,58 @@ class BasisMeanRevStrategy:
         self,
         current: Intent,
         z: float,
-        filters_ok: bool,
+        dev_bps: float,
+        std_bps: float,
+        fl_spread_bps: float,
     ) -> Intent:
-        """z 와 필터로부터 다음 목표 포지션 결정.
+        """z / 필터 / 현재 intent 에 따라 다음 목표 포지션 결정.
 
-        필터 실패: 현 상태 유지.
+        후보 intent 를 z 로 결정 후, 전환 방향에 따라 필터 적용:
+          → LONG/SHORT (open) : open filter + spread-aware cost filter
+          → FLAT (close)      : close filter
+        필터 실패 시 현 intent 유지.
         """
-        if not filters_ok:
+        # 후보 intent 결정
+        if z <= -self._p.open_k:
+            candidate = Intent.LONG
+        elif z >= self._p.open_k:
+            candidate = Intent.SHORT
+        elif abs(z) <= self._p.close_k:
+            candidate = Intent.FLAT
+        else:
             self._stats.holds_hysteresis += 1
             return current
 
-        if z <= -self._p.open_k:
-            return Intent.LONG
-        if z >= self._p.open_k:
-            return Intent.SHORT
-        if abs(z) <= self._p.close_k:
-            return Intent.FLAT
+        if candidate == current:
+            return current
 
-        self._stats.holds_hysteresis += 1
-        return current
+        # 방향별 필터
+        if candidate == Intent.FLAT:
+            if std_bps < self._p.min_close_std_bps:
+                self._stats.skips_low_std += 1
+                return current
+            if dev_bps < self._p.min_close_dev_bps:
+                self._stats.skips_low_dev_bps += 1
+                return current
+            return candidate
+
+        # 진입 또는 flip — open 필터
+        if std_bps < self._p.min_open_std_bps:
+            self._stats.skips_low_std += 1
+            return current
+        if dev_bps < self._p.min_open_dev_bps:
+            self._stats.skips_low_dev_bps += 1
+            return current
+
+        # 스프레드 인식 비용 필터
+        if self._p.spread_aware_filter:
+            expected_edge_bps = dev_bps * self._p.beta_fl_assumption
+            required_cost_bps = fl_spread_bps + 2.0 * self._p.fee_bps_cost
+            if expected_edge_bps < required_cost_bps * self._p.spread_edge_safety:
+                self._stats.skips_spread_cost += 1
+                return current
+
+        return candidate
 
     def _target_qty(self, intent: Intent, fl_mid: float) -> float:
         if intent == Intent.FLAT or fl_mid <= 0:
