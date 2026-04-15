@@ -297,8 +297,8 @@ fn bookticker_symbol_too_long_is_truncated_preserving_null_terminator() {
         symbol_region[31], 0,
         "last byte of symbol field must be null terminator"
     );
-    for i in 0..31 {
-        assert_eq!(symbol_region[i], b'A', "truncated symbol byte {i}");
+    for (i, byte) in symbol_region.iter().enumerate().take(31) {
+        assert_eq!(*byte, b'A', "truncated symbol byte {i}");
     }
 
     // decode 는 null 까지만 읽음.
