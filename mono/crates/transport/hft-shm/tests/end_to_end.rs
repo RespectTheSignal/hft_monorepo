@@ -34,9 +34,9 @@ fn e2e_publisher_writes_strategy_reads() {
         idx_btc,
         &QuoteUpdate {
             exchange_id: exchange_to_u8(ExchangeId::Gate),
-            bid_price: 50_000_00,
+            bid_price: 5_000_000,
             bid_size: 10,
-            ask_price: 50_001_00,
+            ask_price: 5_000_100,
             ask_size: 11,
             event_ns: 1_000,
             recv_ns: 1_001,
@@ -48,9 +48,9 @@ fn e2e_publisher_writes_strategy_reads() {
         idx_eth,
         &QuoteUpdate {
             exchange_id: exchange_to_u8(ExchangeId::Gate),
-            bid_price: 2500_00,
+            bid_price: 250_000,
             bid_size: 100,
-            ask_price: 2501_00,
+            ask_price: 250_100,
             ask_size: 110,
             event_ns: 2_000,
             recv_ns: 2_001,
@@ -66,7 +66,7 @@ fn e2e_publisher_writes_strategy_reads() {
             exchange_id: exchange_to_u8(ExchangeId::Gate),
             _pad1: [0; 3],
             symbol_idx: idx_btc,
-            price: 50_000_00 + i,
+            price: 5_000_000 + i,
             size: 1 + i,
             trade_id: 10_000 + i,
             event_ns: i as u64 + 1000,
@@ -80,17 +80,17 @@ fn e2e_publisher_writes_strategy_reads() {
 
     // read back
     let s_btc = qr.read(idx_btc).unwrap();
-    assert_eq!(s_btc.bid_price, 50_000_00);
+    assert_eq!(s_btc.bid_price, 5_000_000);
     assert_eq!(s_btc.ask_size, 11);
 
     let s_eth = qr.read(idx_eth).unwrap();
-    assert_eq!(s_eth.bid_price, 2500_00);
+    assert_eq!(s_eth.bid_price, 250_000);
 
     let mut got = Vec::new();
     tr.drain_into(&mut got, 10);
     assert_eq!(got.len(), 5);
-    assert_eq!(got[0].price, 50_000_00);
-    assert_eq!(got[4].price, 50_000_04);
+    assert_eq!(got[0].price, 5_000_000);
+    assert_eq!(got[4].price, 5_000_004);
 
     // symbol table roundtrip
     assert_eq!(symtab_r.lookup(ExchangeId::Gate, "BTC_USDT"), Some(idx_btc));

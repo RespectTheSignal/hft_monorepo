@@ -17,7 +17,6 @@ use std::hint;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Instant;
 
 use hft_shm::*;
 use tempfile::tempdir;
@@ -219,14 +218,13 @@ fn bench_uds_dgram_1hop() {
 
 #[inline(always)]
 fn monotonic_ns() -> u64 {
-    let inst = Instant::now();
     // Instant 를 u64 ns 로 근사: std 에는 직접 접근이 없으므로 delta 계산용.
     // 여기선 절댓값 시각이 필요하므로 CLOCK_MONOTONIC_RAW 를 libc 로 읽는다.
     #[cfg(target_os = "linux")]
     unsafe {
         let mut ts: libc::timespec = std::mem::zeroed();
         libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts);
-        return ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64;
+        ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
     }
     #[cfg(not(target_os = "linux"))]
     {

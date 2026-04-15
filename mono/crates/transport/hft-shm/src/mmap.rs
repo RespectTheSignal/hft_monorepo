@@ -617,7 +617,13 @@ mod tests {
     fn check_fd_size_covers_ok_when_equal() {
         let dir = tempdir().unwrap();
         let p = dir.path().join("fd1");
-        let f = OpenOptions::new().read(true).write(true).create(true).open(&p).unwrap();
+        let f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&p)
+            .unwrap();
         f.set_len(4096).unwrap();
         assert!(check_fd_size_covers(&f, 4096, &p).is_ok());
         assert!(check_fd_size_covers(&f, 2048, &p).is_ok());
@@ -627,7 +633,13 @@ mod tests {
     fn check_fd_size_covers_err_when_short() {
         let dir = tempdir().unwrap();
         let p = dir.path().join("fd2");
-        let f = OpenOptions::new().read(true).write(true).create(true).open(&p).unwrap();
+        let f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&p)
+            .unwrap();
         f.set_len(1024).unwrap();
         assert!(check_fd_size_covers(&f, 2048, &p).is_err());
     }

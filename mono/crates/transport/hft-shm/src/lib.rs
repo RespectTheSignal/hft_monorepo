@@ -26,10 +26,10 @@
 //! - **Cache-line (64B) aware**: 모든 핫 atomic 필드는 64B 로 padding 분리.
 //! - **Huge page first**: 가능한 영역은 2MB huge page 로 매핑해 TLB miss 감소.
 //! - **Legacy parity**: Price/Size 는 `hft-types::{Price,Size}::raw()` 의 i64
-//!    scaled 표현을 그대로 Copy — serializer 가 필요 없음.
+//!   scaled 표현을 그대로 Copy — serializer 가 필요 없음.
 //! - **No `unsafe` leaks across API**: 내부는 raw pointer 를 쓰지만 공개 API 는
-//!    `&self` / `&mut self` 로 래핑되어 있고 `Send`/`Sync` 는 문서화된 invariant
-//!    (writer 가 유일) 를 지키는 한에서만 구현.
+//!   `&self` / `&mut self` 로 래핑되어 있고 `Send`/`Sync` 는 문서화된 invariant
+//!   (writer 가 유일) 를 지키는 한에서만 구현.
 //!
 //! ## 공개 API 요약
 //!
