@@ -159,6 +159,7 @@ fn build_otlp_tracer(
         return None;
     }
 
+    use opentelemetry::trace::TracerProvider as _; // `.tracer()` 메서드용 trait import
     use opentelemetry::KeyValue;
     use opentelemetry_otlp::WithExportConfig;
     use opentelemetry_sdk::{runtime, trace as sdktrace, Resource};
@@ -169,13 +170,16 @@ fn build_otlp_tracer(
         KeyValue::new("service.name", service_name.to_owned()),
     ]));
 
+    // opentelemetry_otlp 0.17+ 에서 `install_batch` 는 `TracerProvider` 를 반환한다.
+    // `tracing-opentelemetry::layer().with_tracer(..)` 는 `Tracer` 를 요구하므로
+    // provider 에서 named tracer 를 뽑아낸다. (service_name 을 그대로 tracer name 으로 사용)
     match opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(exporter)
         .with_trace_config(trace_config)
         .install_batch(runtime::Tokio)
     {
-        Ok(tracer) => Some(tracer),
+        Ok(provider) => Some(provider.tracer(service_name.to_owned())),
         Err(e) => {
             // tracing 이 아직 init 안 됐을 수 있으므로 stderr 로 병행 출력.
             eprintln!(

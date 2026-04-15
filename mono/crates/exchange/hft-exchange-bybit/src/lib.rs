@@ -1391,7 +1391,7 @@ mod tests {
         let clock: Arc<dyn Clock> = mock.clone();
         let f = BybitFeed::with_clock(BybitConfig::default(), clock.clone());
         // mock 이 injection 됐는지 stamp 로 검증.
-        let s = Stamp::now(&*f.clock());
+        let s = Stamp::now(&**f.clock());
         assert_eq!(s.wall_ms, 42);
     }
 
@@ -1415,7 +1415,7 @@ mod tests {
             clock.clone(),
             shared.clone(),
         );
-        let s = Stamp::now(&*f.clock());
+        let s = Stamp::now(&**f.clock());
         assert_eq!(s.wall_ms, 100);
         assert!(Arc::ptr_eq(f.symbol_cache(), &shared));
     }

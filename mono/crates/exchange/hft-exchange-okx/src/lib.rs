@@ -1283,7 +1283,7 @@ mod tests {
         let mock = MockClock::new(42, 7);
         let clock: Arc<dyn Clock> = mock.clone();
         let f = OkxFeed::with_clock(OkxConfig::default(), clock.clone());
-        let s = Stamp::now(&*f.clock());
+        let s = Stamp::now(&**f.clock());
         assert_eq!(s.wall_ms, 42);
     }
 
@@ -1307,7 +1307,7 @@ mod tests {
             clock.clone(),
             shared.clone(),
         );
-        let s = Stamp::now(&*f.clock());
+        let s = Stamp::now(&**f.clock());
         assert_eq!(s.wall_ms, 100);
         assert!(Arc::ptr_eq(f.symbol_cache(), &shared));
     }
