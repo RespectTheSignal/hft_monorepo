@@ -57,6 +57,9 @@
 //! ```
 
 #![deny(rust_2018_idioms)]
+// PyO3 `#[pymethods]` 가 생성하는 래퍼에서 `PyResult<T>` 변환이 중복으로 보이는
+// false positive 가 반복 발생한다. 바인딩 계층 전용 crate 이므로 이 lint 만 한정 허용한다.
+#![allow(clippy::useless_conversion)]
 #![warn(missing_docs)]
 
 use std::path::PathBuf;
@@ -216,7 +219,7 @@ impl Default for PyOrderBuilder {
 
 impl PyOrderBuilder {
     /// 내부 OrderFrame composite — exchange 는 u8 로 미리 변환.
-    fn into_frame(&self, exchange_u8: u8) -> OrderFrame {
+    fn to_frame(&self, exchange_u8: u8) -> OrderFrame {
         OrderFrame {
             seq: 0,
             kind: self.kind,
@@ -370,6 +373,9 @@ pub struct PyStrategyClient {
     inner: StrategyShmClient,
 }
 
+// PyO3 `#[pymethods]` 가 생성하는 래퍼에서 `PyResult<T>` 변환이 중복으로 보이는
+// false positive 가 발생한다. 바인딩 계층 한정으로만 허용한다.
+#[allow(clippy::useless_conversion)]
 #[pymethods]
 impl PyStrategyClient {
     // ───────────────────────────── 생성자 ────────────────────────────────────
@@ -390,6 +396,8 @@ impl PyStrategyClient {
         order_ring_capacity, n_max, vm_id,
     ))]
     #[allow(clippy::too_many_arguments)]
+    // PyO3 `#[pymethods]` 래퍼가 생성하는 변환 코드에서 false positive 가 나므로 함수 단위로만 허용.
+    #[allow(clippy::useless_conversion)]
     fn open_dev_shm(
         _cls: &Bound<'_, PyType>,
         path: String,
@@ -419,6 +427,8 @@ impl PyStrategyClient {
         order_ring_capacity, n_max, vm_id,
     ))]
     #[allow(clippy::too_many_arguments)]
+    // PyO3 `#[pymethods]` 래퍼가 생성하는 변환 코드에서 false positive 가 나므로 함수 단위로만 허용.
+    #[allow(clippy::useless_conversion)]
     fn open_hugetlbfs(
         _cls: &Bound<'_, PyType>,
         path: String,
@@ -448,6 +458,8 @@ impl PyStrategyClient {
         order_ring_capacity, n_max, vm_id,
     ))]
     #[allow(clippy::too_many_arguments)]
+    // PyO3 `#[pymethods]` 래퍼가 생성하는 변환 코드에서 false positive 가 나므로 함수 단위로만 허용.
+    #[allow(clippy::useless_conversion)]
     fn open_pci_bar(
         _cls: &Bound<'_, PyType>,
         path: String,
@@ -480,6 +492,8 @@ impl PyStrategyClient {
         order_ring_capacity, n_max, vm_id, timeout_ms = 10_000, step_ms = 100,
     ))]
     #[allow(clippy::too_many_arguments)]
+    // PyO3 `#[pymethods]` 래퍼가 생성하는 변환 코드에서 false positive 가 나므로 함수 단위로만 허용.
+    #[allow(clippy::useless_conversion)]
     fn open_dev_shm_with_retry(
         _cls: &Bound<'_, PyType>,
         py: Python<'_>,
@@ -533,6 +547,8 @@ impl PyStrategyClient {
     ///
     /// 같은 `(exchange, symbol)` 조합은 항상 같은 idx. hot path 전 pre-intern
     /// 용으로 유용.
+    // PyO3 `#[pymethods]` 래퍼가 생성하는 변환 코드에서 false positive 가 나므로 함수 단위로만 허용.
+    #[allow(clippy::useless_conversion)]
     fn intern_symbol(&self, exchange: &str, symbol: &str) -> PyResult<u32> {
         let (_, ex_u8) = parse_exchange(exchange)?;
         let ex = exchange_from_u8(ex_u8).ok_or_else(|| {
@@ -560,12 +576,14 @@ impl PyStrategyClient {
     /// `PyOrderBuilder` 의 현재 필드로 주문 publish.
     ///
     /// 반환: ring push 성공=True, ring full=False, symbol intern 실패=False+warn.
+    // PyO3 `#[pymethods]` 래퍼가 생성하는 변환 코드에서 false positive 가 나므로 함수 단위로만 허용.
+    #[allow(clippy::useless_conversion)]
     fn publish_order(&self, builder: &PyOrderBuilder) -> PyResult<bool> {
         if builder.symbol.is_empty() {
             return Err(PyValueError::new_err("symbol is empty"));
         }
         let (ex, ex_u8) = parse_exchange(&builder.exchange)?;
-        let frame = builder.into_frame(ex_u8);
+        let frame = builder.to_frame(ex_u8);
         Ok(self.inner.publish_order(ex, &builder.symbol, frame))
     }
 
@@ -578,6 +596,8 @@ impl PyStrategyClient {
         client_id, ts_ns,
     ))]
     #[allow(clippy::too_many_arguments)]
+    // PyO3 `#[pymethods]` 래퍼가 생성하는 변환 코드에서 false positive 가 나므로 함수 단위로만 허용.
+    #[allow(clippy::useless_conversion)]
     fn publish_simple(
         &self,
         exchange: &str,
@@ -617,6 +637,8 @@ impl PyStrategyClient {
 
     /// 클래스레벨 정적 유틸: u8 → 거래소 문자열. Unknown 이면 `ValueError`.
     #[staticmethod]
+    // PyO3 `#[pymethods]` 래퍼가 생성하는 변환 코드에서 false positive 가 나므로 함수 단위로만 허용.
+    #[allow(clippy::useless_conversion)]
     fn exchange_from_u8(v: u8) -> PyResult<String> {
         exchange_from_u8(v)
             .map(|e| e.as_str().to_string())
@@ -625,6 +647,8 @@ impl PyStrategyClient {
 
     /// 클래스레벨 정적 유틸: 거래소 문자열 → u8.
     #[staticmethod]
+    // PyO3 `#[pymethods]` 래퍼가 생성하는 변환 코드에서 false positive 가 나므로 함수 단위로만 허용.
+    #[allow(clippy::useless_conversion)]
     fn exchange_to_u8_str(s: &str) -> PyResult<u8> {
         parse_exchange(s).map(|(_, u)| u)
     }
@@ -718,25 +742,26 @@ mod tests {
 
     #[test]
     fn order_builder_into_frame_preserves_fields() {
-        let mut b = PyOrderBuilder::default();
-        b.exchange = "gate".into();
-        b.symbol = "BTC_USDT".into();
-        b.kind = ORDER_KIND_PLACE;
-        b.side = SIDE_SELL;
-        b.tif = TIF_IOC;
-        b.ord_type = ORD_TYPE_LIMIT;
-        b.price_raw = 50_000_00000;
-        b.size_raw = 10;
-        b.client_id = 42;
-        b.ts_ns = 1_234_567_890;
-        b.aux = [1, 2, 3, 4, 5];
+        let b = PyOrderBuilder {
+            exchange: "gate".into(),
+            symbol: "BTC_USDT".into(),
+            kind: ORDER_KIND_PLACE,
+            side: SIDE_SELL,
+            tif: TIF_IOC,
+            ord_type: ORD_TYPE_LIMIT,
+            price_raw: 5_000_000_000,
+            size_raw: 10,
+            client_id: 42,
+            ts_ns: 1_234_567_890,
+            aux: [1, 2, 3, 4, 5],
+        };
 
-        let f = b.into_frame(exchange_to_u8(ExchangeId::Gate));
+        let f = b.to_frame(exchange_to_u8(ExchangeId::Gate));
         assert_eq!(f.kind, ORDER_KIND_PLACE);
         assert_eq!(f.side, SIDE_SELL);
         assert_eq!(f.tif, TIF_IOC);
         assert_eq!(f.ord_type, ORD_TYPE_LIMIT);
-        assert_eq!(f.price, 50_000_00000);
+        assert_eq!(f.price, 5_000_000_000);
         assert_eq!(f.size, 10);
         assert_eq!(f.client_id, 42);
         assert_eq!(f.ts_ns, 1_234_567_890);

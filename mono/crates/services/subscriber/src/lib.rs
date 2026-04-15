@@ -38,7 +38,7 @@ use hft_protocol::{
 use hft_telemetry::{counter_inc, CounterKey};
 use hft_time::{Clock, LatencyStamps, Stage, SystemClock};
 use hft_types::{BookTicker, ExchangeId, MarketEvent, Price, Size, Symbol, Trade};
-use hft_zmq::{SubSocket, TopicPayload, ZmqContext};
+use hft_zmq::{Context as ZmqContext, SubSocket, TopicPayload};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
@@ -335,9 +335,10 @@ impl<D: Downstream> SubTask<D> {
             self.scratch.clear();
             let got = self.sub.drain_batch(self.drain_cap, &mut self.scratch);
             if got > 0 {
-                for (topic, payload) in self.scratch.drain(..) {
-                    self.handle_one(&topic, &payload);
+                for (topic, payload) in &self.scratch {
+                    self.handle_one(topic.as_slice(), payload.as_slice());
                 }
+                self.scratch.clear();
                 // drain 성공 턴에는 바로 다음 루프로.
                 tokio::task::yield_now().await;
                 continue;
@@ -683,7 +684,7 @@ mod tests {
 
         task.handle_one(topic.as_bytes(), &buf);
 
-        let got = captured.lock().clone().expect("downstream received");
+        let got = (*captured.lock()).expect("downstream received");
         // MockClock 은 1_000_000_000_000 으로 시작; mark(Subscribed) → subscribed.wall_ms
         assert_eq!(got.subscribed.wall_ms, 1_000_000_000_000);
     }
@@ -742,7 +743,10 @@ mod tests {
     fn build_sub_socket_rejects_empty_exchanges() {
         let ctx = ZmqContext::new();
         let zcfg = ZmqConfig::default();
-        let err = build_sub_socket(&ctx, &zcfg, &[]).unwrap_err();
+        let err = match build_sub_socket(&ctx, &zcfg, &[]) {
+            Ok(_) => panic!("build_sub_socket should reject empty exchanges"),
+            Err(err) => err,
+        };
         let msg = format!("{err}");
         assert!(msg.contains("at least one exchange"), "got: {msg}");
     }
