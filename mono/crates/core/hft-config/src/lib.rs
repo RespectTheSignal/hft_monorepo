@@ -249,7 +249,7 @@ impl Default for QuestDbConfig {
 ///
 /// 실제 service role 키는 env `HFT_SUPABASE_SERVICE_KEY` 로만 공급한다.
 /// TOML 에는 절대 넣지 말 것.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SupabaseConfig {
     /// Supabase project URL. 빈 문자열이면 비활성.
     #[serde(default)]
@@ -275,6 +275,18 @@ fn default_supabase_refresh() -> u64 {
 }
 fn default_supabase_timeout() -> u64 {
     5
+}
+
+impl Default for SupabaseConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            anon_key: String::new(),
+            service_key: String::new(),
+            refresh_interval_s: default_supabase_refresh(),
+            fetch_timeout_s: default_supabase_timeout(),
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
