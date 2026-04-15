@@ -11,7 +11,7 @@
     uv run python scripts/backtest.py EPIC,ETH 2026-04-14T00:00:00Z 2026-04-14T02:00:00Z
 
 옵션 (환경변수):
-    K_IN=2.0 K_OUT=0.5 K_STOP=4.0 WINDOW_SEC=30 NOTIONAL=20 TIMEOUT_SEC=10 FEE_BPS=0.45
+    EXEC_EXCHANGE=flipster|gate SIGNAL_MODE=basis|leadlag WINDOW_SEC=30 OPEN_K=2.0 CLOSE_K=0.5 FEE_BPS=0.45
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from strategy_flipster.backtest.questdb_feed import (
     QdbConfig,
     make_binance_feed,
     make_flipster_feed,
+    make_gate_feed,
 )
 from strategy_flipster.backtest.runner import BacktestConfig, BacktestRunner
 from strategy_flipster.clock import SimClock
@@ -41,6 +42,7 @@ from strategy_flipster.market_data.stats_cache import MarketStatsCache
 from strategy_flipster.market_data.symbol import (
     EXCHANGE_BINANCE,
     EXCHANGE_FLIPSTER,
+    EXCHANGE_GATE,
     to_exchange_symbol,
 )
 from strategy_flipster.strategy.basis_meanrev import (
@@ -65,9 +67,26 @@ async def main() -> None:
     canonicals = tuple(s.strip().upper() for s in sys.argv[1].split(",") if s.strip())
     start_ns = parse_iso_to_ns(sys.argv[2])
     end_ns = parse_iso_to_ns(sys.argv[3])
+    execution_exchange = os.environ.get("EXEC_EXCHANGE", EXCHANGE_FLIPSTER).strip().lower()
 
     if end_ns <= start_ns:
         print("end 가 start 이하"); sys.exit(1)
+    if execution_exchange not in {EXCHANGE_FLIPSTER, EXCHANGE_GATE}:
+        print(f"지원하지 않는 EXEC_EXCHANGE: {execution_exchange}")
+        sys.exit(1)
+
+    default_signal_mode = "leadlag" if execution_exchange == EXCHANGE_GATE else "basis"
+    default_signal_horizon_sec = "1.0"
+    default_bn_open_cooldown_ms = "200" if execution_exchange == EXCHANGE_FLIPSTER else "0"
+    default_bn_close_cooldown_ms = "0"
+    default_cooldown_ms = "500" if execution_exchange == EXCHANGE_FLIPSTER else "0"
+    default_allow_same_intent_reemit = "1" if execution_exchange == EXCHANGE_FLIPSTER else "0"
+    default_same_intent_rearm_price_bps = "0.0" if execution_exchange == EXCHANGE_FLIPSTER else "0.5"
+    default_same_intent_rearm_z_delta = "0.0" if execution_exchange == EXCHANGE_FLIPSTER else "0.75"
+    default_open_k = "2.3" if execution_exchange == EXCHANGE_GATE else "2.0"
+    default_min_open_dev_bps = "5.0" if execution_exchange == EXCHANGE_GATE else "3.0"
+    default_min_close_dev_bps = "2.0" if execution_exchange == EXCHANGE_GATE else "1.0"
+    default_fee_bps = "1.0" if execution_exchange == EXCHANGE_GATE else "0.45"
 
     # 파라미터 (env)
     default_notional = os.environ.get("NOTIONAL", "20")
@@ -76,12 +95,15 @@ async def main() -> None:
     close_size = float(os.environ.get("CLOSE_ORDER_SIZE", default_notional))
     portfolio_max = float(os.environ.get("PORTFOLIO_MAX", "0"))  # 0 = 무제한
     # min_*_bps: open 우선, 없으면 legacy MIN_DEV_BPS/MIN_STD_BPS 사용
-    legacy_dev = os.environ.get("MIN_DEV_BPS", "3.0")
+    legacy_dev = os.environ.get("MIN_DEV_BPS", default_min_open_dev_bps)
     legacy_std = os.environ.get("MIN_STD_BPS", "0.5")
     params = BasisMeanRevParams(
         canonicals=canonicals,
+        execution_exchange=execution_exchange,
+        signal_mode=os.environ.get("SIGNAL_MODE", default_signal_mode),
+        signal_horizon_sec=float(os.environ.get("SIGNAL_HORIZON_SEC", default_signal_horizon_sec)),
         window_sec=float(os.environ.get("WINDOW_SEC", "30")),
-        open_k=float(os.environ.get("OPEN_K", os.environ.get("K_IN", "2.0"))),
+        open_k=float(os.environ.get("OPEN_K", os.environ.get("K_IN", default_open_k))),
         close_k=float(os.environ.get("CLOSE_K", os.environ.get("K_OUT", "0.5"))),
         max_position_size=max_pos,
         open_order_size=open_size,
@@ -89,17 +111,34 @@ async def main() -> None:
         portfolio_max_size=portfolio_max,
         min_open_dev_bps=float(os.environ.get("MIN_OPEN_DEV_BPS", legacy_dev)),
         min_open_std_bps=float(os.environ.get("MIN_OPEN_STD_BPS", legacy_std)),
-        min_close_dev_bps=float(os.environ.get("MIN_CLOSE_DEV_BPS", "1.0")),
+        min_close_dev_bps=float(os.environ.get("MIN_CLOSE_DEV_BPS", default_min_close_dev_bps)),
         min_close_std_bps=float(os.environ.get("MIN_CLOSE_STD_BPS", "0")),
         spread_aware_filter=os.environ.get("SPREAD_FILTER", "1") != "0",
         beta_fl_assumption=float(os.environ.get("BETA_FL", "0.5")),
-        fee_bps_cost=float(os.environ.get("FEE_BPS", "0.45")),
+        fee_bps_cost=float(os.environ.get("FEE_BPS", default_fee_bps)),
         spread_edge_safety=float(os.environ.get("SPREAD_EDGE_SAFETY", "1.0")),
-        binance_open_cooldown_ms=int(os.environ.get("BN_OPEN_COOLDOWN_MS", os.environ.get("BN_COOLDOWN_MS", "200"))),
-        binance_close_cooldown_ms=int(os.environ.get("BN_CLOSE_COOLDOWN_MS", "0")),
-        cooldown_ms=int(os.environ.get("COOLDOWN_MS", "500")),
+        binance_open_cooldown_ms=int(
+            os.environ.get(
+                "BN_OPEN_COOLDOWN_MS",
+                os.environ.get("BN_COOLDOWN_MS", default_bn_open_cooldown_ms),
+            )
+        ),
+        binance_close_cooldown_ms=int(
+            os.environ.get("BN_CLOSE_COOLDOWN_MS", default_bn_close_cooldown_ms)
+        ),
+        cooldown_ms=int(os.environ.get("COOLDOWN_MS", default_cooldown_ms)),
+        allow_same_intent_reemit=os.environ.get(
+            "ALLOW_SAME_INTENT_REEMIT",
+            default_allow_same_intent_reemit,
+        ) != "0",
+        same_intent_rearm_price_bps=float(
+            os.environ.get("SAME_INTENT_REARM_PRICE_BPS", default_same_intent_rearm_price_bps)
+        ),
+        same_intent_rearm_z_delta=float(
+            os.environ.get("SAME_INTENT_REARM_Z_DELTA", default_same_intent_rearm_z_delta)
+        ),
     )
-    fee_bps = float(os.environ.get("FEE_BPS", "0.45"))
+    fee_bps = float(os.environ.get("FEE_BPS", default_fee_bps))
 
     # 로깅
     structlog.configure(
@@ -111,12 +150,14 @@ async def main() -> None:
     )
 
     # 심볼 매핑
-    fl_symbols = [to_exchange_symbol(EXCHANGE_FLIPSTER, c) for c in canonicals]
+    exec_symbols = [to_exchange_symbol(execution_exchange, c) for c in canonicals]
     bn_symbols = [to_exchange_symbol(EXCHANGE_BINANCE, c) for c in canonicals]
 
     print(f"backtest:")
     print(f"  canonicals : {canonicals}")
-    print(f"  flipster   : {fl_symbols}")
+    print(f"  execution  : {execution_exchange}")
+    print(f"  signal     : {params.signal_mode} (horizon={params.signal_horizon_sec}s)")
+    print(f"  exec_syms  : {exec_symbols}")
     print(f"  binance    : {bn_symbols}")
     print(f"  range      : {sys.argv[2]} → {sys.argv[3]}")
     print(f"  duration   : {(end_ns - start_ns) / 1e9:.0f}s")
@@ -129,13 +170,18 @@ async def main() -> None:
     print(f"               close_dev={params.min_close_dev_bps}bp close_std={params.min_close_std_bps}bp")
     spread_on = "on" if params.spread_aware_filter else "off"
     print(f"  spread     : filter={spread_on} β_fl={params.beta_fl_assumption} safety={params.spread_edge_safety}")
-    print(f"  cooldown   : {params.cooldown_ms}ms")
+    print(f"  cooldown   : order={params.cooldown_ms}ms bn_open={params.binance_open_cooldown_ms}ms bn_close={params.binance_close_cooldown_ms}ms")
+    print(f"  reemit     : same_intent={'on' if params.allow_same_intent_reemit else 'off'}")
+    print(f"               rearm_price={params.same_intent_rearm_price_bps}bp rearm_z={params.same_intent_rearm_z_delta}")
     print(f"  fee        : {fee_bps} bp\n")
 
     # QuestDB feed
     qdb = QdbConfig()
     bn_feed = make_binance_feed(qdb, bn_symbols, start_ns, end_ns)
-    fl_feed = make_flipster_feed(qdb, fl_symbols, start_ns, end_ns)
+    if execution_exchange == EXCHANGE_FLIPSTER:
+        exec_feed = make_flipster_feed(qdb, exec_symbols, start_ns, end_ns)
+    else:
+        exec_feed = make_gate_feed(qdb, exec_symbols, start_ns, end_ns)
 
     # 시뮬 컴포넌트
     sim_clock = SimClock(start_ns=start_ns)
@@ -147,13 +193,18 @@ async def main() -> None:
     latest = LatestTickerCache()
     user_state = UserState()
     pnl = PnlTracker()
-    fill_sim = FillSimulator(user_state=user_state, pnl=pnl, fee_bps=fee_bps)
+    fill_sim = FillSimulator(
+        user_state=user_state,
+        pnl=pnl,
+        execution_exchange=execution_exchange,
+        fee_bps=fee_bps,
+    )
     market_stats = MarketStatsCache()
     strategy = BasisMeanRevStrategy(params, clock=sim_clock)
 
     runner = BacktestRunner(
         config=BacktestConfig(start_ns=start_ns, end_ns=end_ns),
-        event_streams=[bn_feed.iter_events(), fl_feed.iter_events()],
+        event_streams=[bn_feed.iter_events(), exec_feed.iter_events()],
         strategy=strategy,
         clock=sim_clock,
         history=history,
@@ -162,6 +213,7 @@ async def main() -> None:
         fill_sim=fill_sim,
         pnl=pnl,
         market_stats=market_stats,
+        execution_exchange=execution_exchange,
     )
 
     result = await runner.run()
@@ -185,24 +237,30 @@ async def main() -> None:
     print(f"\n  total realized   : ${result.total_realized:+.4f}")
     print(f"  total fees       : ${result.total_fees:.4f}")
     print(f"  NET PnL          : ${result.net_pnl:+.4f}")
+    print(f"  realized / fee / net bps : {result.realized_bps:+.2f} / {result.fee_bps:.2f} / {result.net_bps:+.2f}")
     print(f"  peak equity      : ${result.peak_equity:+.4f}")
     print(f"  max drawdown     : ${result.max_drawdown:.4f}  (realized only)")
     print(f"\n  mark-to-market (unrealized 포함):")
     print(f"    peak equity    : ${result.peak_equity_mtm:+.4f}")
     print(f"    max drawdown   : ${result.max_drawdown_mtm:.4f}")
     print(f"    worst unreal.  : ${result.worst_unrealized:+.4f}")
+    print(f"\n  execution diagnostics:")
+    print(f"    filled notional: ${result.filled_notional:,.2f}")
+    print(f"    missed notional: ${result.missed_notional:,.2f}")
+    print(f"    fill improve   : ${result.fill_price_improve_usd:+.4f} ({result.fill_price_improve_bps:+.2f} bp on filled)")
+    print(f"    miss adverse   : {result.miss_adverse_bps:.2f} bp on missed")
 
     # 심볼별 PnL 분해
     rows = pnl.per_symbol()
     if rows:
         print(f"\n{'=' * 6} 심볼별 PnL (NET 내림차순) {'=' * 35}")
-        hdr = f"  {'symbol':<20} {'trades':>7} {'volume':>12} {'realized':>10} {'fees':>9} {'net':>10} {'win%':>6}"
+        hdr = f"  {'symbol':<20} {'trades':>7} {'volume':>12} {'realized':>10} {'fees':>9} {'net':>10} {'netbp':>7} {'win%':>6}"
         print(hdr)
         print("  " + "-" * (len(hdr) - 2))
         for r in rows:
             print(
                 f"  {r.symbol:<20} {r.trades:>7} ${r.volume_usd:>10,.2f} "
-                f"${r.realized:>+9.4f} ${r.fees:>8.4f} ${r.net:>+9.4f} {r.win_rate:>5.1f}%"
+                f"${r.realized:>+9.4f} ${r.fees:>8.4f} ${r.net:>+9.4f} {r.net_bps:>+6.2f} {r.win_rate:>5.1f}%"
             )
 
     # strategy 내부 통계
@@ -213,6 +271,8 @@ async def main() -> None:
     print(f"    orders_emitted   : {s.orders_emitted}  (open/close: {s.open_orders}/{s.close_orders})")
     print(f"    builds (same-dir): {s.builds}")
     print(f"    reemits          : {s.reemits}")
+    reemit_rate = (s.reemits / s.orders_emitted * 100.0) if s.orders_emitted else 0.0
+    print(f"    reemit_rate      : {reemit_rate:.1f}%")
     print(f"    hysteresis_hold  : {s.holds_hysteresis}")
     print(f"    skips_low_std    : {s.skips_low_std}")
     print(f"    skips_low_dev    : {s.skips_low_dev_bps}")

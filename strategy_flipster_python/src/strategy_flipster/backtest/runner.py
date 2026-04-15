@@ -65,6 +65,14 @@ class BacktestResult:
     peak_equity_mtm: float = 0.0
     max_drawdown_mtm: float = 0.0
     worst_unrealized: float = 0.0
+    realized_bps: float = 0.0
+    fee_bps: float = 0.0
+    net_bps: float = 0.0
+    filled_notional: float = 0.0
+    missed_notional: float = 0.0
+    fill_price_improve_usd: float = 0.0
+    fill_price_improve_bps: float = 0.0
+    miss_adverse_bps: float = 0.0
 
 
 def _merge_events(
@@ -106,6 +114,7 @@ class BacktestRunner:
         fill_sim: FillSimulator,
         pnl: PnlTracker,
         market_stats: MarketStatsCache,
+        execution_exchange: str,
     ) -> None:
         self._cfg: BacktestConfig = config
         self._streams: list[Iterator[BookTicker]] = event_streams
@@ -117,6 +126,7 @@ class BacktestRunner:
         self._fill_sim: FillSimulator = fill_sim
         self._pnl: PnlTracker = pnl
         self._market_stats: MarketStatsCache = market_stats
+        self._execution_exchange: str = execution_exchange
 
     async def run(self) -> BacktestResult:
         wall_t0 = time.monotonic()
@@ -218,6 +228,20 @@ class BacktestRunner:
             peak_equity_mtm=p.peak_equity_mtm,
             max_drawdown_mtm=p.max_drawdown_mtm,
             worst_unrealized=p.worst_unrealized,
+            realized_bps=p.realized_bps,
+            fee_bps=p.fee_bps,
+            net_bps=p.net_bps,
+            filled_notional=s.filled_notional_usd,
+            missed_notional=s.missed_notional_usd,
+            fill_price_improve_usd=s.fill_price_improve_usd,
+            fill_price_improve_bps=(
+                s.fill_price_improve_bps_x_notional / s.filled_notional_usd
+                if s.filled_notional_usd > 0 else 0.0
+            ),
+            miss_adverse_bps=(
+                s.miss_adverse_bps_x_notional / s.missed_notional_usd
+                if s.missed_notional_usd > 0 else 0.0
+            ),
         )
 
     def _take_snapshot(self, ns: int) -> None:
@@ -226,14 +250,13 @@ class BacktestRunner:
             self._history.append(exch, sym, ns, ticker.bid_price, ticker.ask_price)
 
     def _mark_to_market(self) -> None:
-        """현재 포지션을 Flipster mid 로 평가해 PnlTracker 에 반영"""
-        # positions 는 fl_sym 키 — Flipster latest 에서 mid 추출
+        """현재 포지션을 execution venue mid 로 평가해 PnlTracker 에 반영"""
+        # positions 는 execution venue 심볼 키
         if not self._user_state.positions:
             return
-        from strategy_flipster.market_data.symbol import EXCHANGE_FLIPSTER
         marks: dict[str, float] = {}
         for sym in self._user_state.positions.keys():
-            t = self._latest.get(EXCHANGE_FLIPSTER, sym)
+            t = self._latest.get(self._execution_exchange, sym)
             if t is None:
                 continue
             mid = (t.bid_price + t.ask_price) * 0.5

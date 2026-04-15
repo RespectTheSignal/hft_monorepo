@@ -13,7 +13,11 @@ from dataclasses import dataclass
 
 import psycopg
 
-from strategy_flipster.market_data.symbol import EXCHANGE_BINANCE, EXCHANGE_FLIPSTER
+from strategy_flipster.market_data.symbol import (
+    EXCHANGE_BINANCE,
+    EXCHANGE_FLIPSTER,
+    EXCHANGE_GATE,
+)
 from strategy_flipster.types import BookTicker
 
 
@@ -162,6 +166,22 @@ def make_flipster_feed(
         config=config,
         table="flipster_bookticker",
         exchange=EXCHANGE_FLIPSTER,
+        symbols=symbols,
+        start_ns=start_ns,
+        end_ns=end_ns,
+    )
+
+
+def make_gate_feed(
+    config: QdbConfig,
+    symbols: list[str],
+    start_ns: int,
+    end_ns: int,
+) -> QuestDBFeed:
+    return QuestDBFeed(
+        config=config,
+        table="gate_bookticker",
+        exchange=EXCHANGE_GATE,
         symbols=symbols,
         start_ns=start_ns,
         end_ns=end_ns,

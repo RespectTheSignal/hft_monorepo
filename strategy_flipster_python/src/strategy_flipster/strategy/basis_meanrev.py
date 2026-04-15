@@ -85,6 +85,9 @@ class BasisMeanRevParams:
     """
 
     canonicals: tuple[str, ...]             # 거래 대상
+    execution_exchange: str = EXCHANGE_FLIPSTER
+    signal_mode: str = "basis"              # basis | leadlag
+    signal_horizon_sec: float = 1.0         # lead-lag return horizon
     window_sec: float = 30.0                # z-score 계산 윈도우
 
     # Threshold (독립)
@@ -92,7 +95,7 @@ class BasisMeanRevParams:
     close_k: float = 0.5                    # 청산 z-score
 
     # 사이즈 (독립)
-    max_position_size: float = 20.0         # 심볼당 포지션 한도 notional
+    max_position_size: float = 100.0         # 심볼당 포지션 한도 notional
     open_order_size: float = 20.0           # 진입/확장 1주문 상한
     close_order_size: float = 20.0          # 청산/축소 1주문 상한
     portfolio_max_size: float = 0.0         # 전체 포트폴리오 한도 (0=무제한)
@@ -119,6 +122,9 @@ class BasisMeanRevParams:
     # 기타
     warmup_samples: int = 200               # 최소 샘플
     cooldown_ms: int = 500                  # miss 재전송 cooldown
+    allow_same_intent_reemit: bool = True   # fill 진전 없으면 같은 intent 재전송 허용 여부
+    same_intent_rearm_price_bps: float = 0.0  # 같은 intent 재시도 최소 가격 개선 폭
+    same_intent_rearm_z_delta: float = 0.0    # 같은 intent 재시도 최소 |z| 강화 폭
     qty_epsilon: float = 1e-9               # delta 무시 임계
 
 
@@ -138,6 +144,8 @@ class _SymbolState:
     target_qty: float = 0.0                  # 현재 intent 목표 (고정)
     last_emit_ns: int = 0
     actual_at_last_emit: float = 0.0
+    last_emit_price: float = 0.0
+    last_emit_abs_z: float = 0.0
 
 
 @dataclass
@@ -201,6 +209,9 @@ class BasisMeanRevStrategy:
         logger.info(
             "basis_meanrev_started",
             canonicals=list(self._p.canonicals),
+            execution_exchange=self._p.execution_exchange,
+            signal_mode=self._p.signal_mode,
+            signal_horizon_sec=self._p.signal_horizon_sec,
             window_sec=self._p.window_sec,
             open_k=self._p.open_k,
             close_k=self._p.close_k,
@@ -212,6 +223,9 @@ class BasisMeanRevStrategy:
             min_open_std_bps=self._p.min_open_std_bps,
             min_close_dev_bps=self._p.min_close_dev_bps,
             min_close_std_bps=self._p.min_close_std_bps,
+            allow_same_intent_reemit=self._p.allow_same_intent_reemit,
+            same_intent_rearm_price_bps=self._p.same_intent_rearm_price_bps,
+            same_intent_rearm_z_delta=self._p.same_intent_rearm_z_delta,
         )
 
     async def on_stop(self) -> None:
@@ -261,11 +275,11 @@ class BasisMeanRevStrategy:
         orders: list[OrderRequest] = []
         now_ns = self._clock.now_ns()
         for canonical in self._p.canonicals:
-            fl_sym = to_exchange_symbol(EXCHANGE_FLIPSTER, canonical)
+            exec_sym = to_exchange_symbol(self._p.execution_exchange, canonical)
             bn_sym = to_exchange_symbol(EXCHANGE_BINANCE, canonical)
             self._stats.signals_seen += 1
             order = self._evaluate_symbol(
-                canonical, fl_sym, bn_sym, now_ns, user_state, latest, history,
+                canonical, exec_sym, bn_sym, now_ns, user_state, latest, history,
             )
             if order is not None:
                 orders.append(order)
@@ -274,39 +288,31 @@ class BasisMeanRevStrategy:
     def _evaluate_symbol(
         self,
         canonical: str,
-        fl_sym: str,
+        exec_sym: str,
         bn_sym: str,
         now_ns: int,
         user_state: UserState,
         latest: LatestTickerCache,
         history: SnapshotHistory,
     ) -> OrderRequest | None:
-        sym_state = self._state.get(fl_sym)
+        sym_state = self._state.get(exec_sym)
         if sym_state is None:
             sym_state = _SymbolState()
-            self._state[fl_sym] = sym_state
+            self._state[exec_sym] = sym_state
 
-        # 1. Basis 시계열
-        diff = history.cross_mid_diff_array(
-            EXCHANGE_FLIPSTER, fl_sym,
-            EXCHANGE_BINANCE, bn_sym,
-            duration_sec=self._p.window_sec,
-        )
-        if diff.size < self._p.warmup_samples:
+        # 1. 현재 호가 (가격 기준으로 bp 계산 + 주문 가격)
+        exec_ticker = latest.get(self._p.execution_exchange, exec_sym)
+        if exec_ticker is None:
+            self._stats.skips_no_data += 1
+            return None
+        exec_mid = (exec_ticker.bid_price + exec_ticker.ask_price) * 0.5
+        if exec_mid <= 0:
             self._stats.skips_no_data += 1
             return None
 
-        mean = float(diff.mean())
-        std = float(diff.std())
-        basis_now = float(diff[-1])
-
-        # 2. 현재 호가 (가격 기준으로 bp 계산 + 주문 가격)
-        fl_ticker = latest.get(EXCHANGE_FLIPSTER, fl_sym)
-        if fl_ticker is None:
-            self._stats.skips_no_data += 1
-            return None
-        fl_mid = (fl_ticker.bid_price + fl_ticker.ask_price) * 0.5
-        if fl_mid <= 0:
+        # 2. Signal 시계열
+        z, dev_bps, std_bps = self._signal_inputs(history, exec_sym, bn_sym, exec_mid)
+        if z is None or dev_bps is None or std_bps is None:
             self._stats.skips_no_data += 1
             return None
 
@@ -320,13 +326,10 @@ class BasisMeanRevStrategy:
                 self._bn_last_change_ns[canonical] = now_ns
 
         # 4. 목표 intent 결정 — z/필터/현재 intent 에 따라 결정
-        std_bps = (std / fl_mid) * 10000.0
-        dev_bps = (abs(basis_now - mean) / fl_mid) * 10000.0
-        fl_spread_bps = (
-            (fl_ticker.ask_price - fl_ticker.bid_price) / fl_mid * 10000.0
-            if fl_mid > 0 else 0.0
+        exec_spread_bps = (
+            (exec_ticker.ask_price - exec_ticker.bid_price) / exec_mid * 10000.0
+            if exec_mid > 0 else 0.0
         )
-        z = (basis_now - mean) / std if std > 1e-12 else 0.0
 
         # Binance cooldown 체크 — open/close 별도
         bn_open_cooldown = False
@@ -340,7 +343,7 @@ class BasisMeanRevStrategy:
                 bn_close_cooldown = True
 
         new_intent = self._next_intent(
-            sym_state.intent, z, dev_bps, std_bps, fl_spread_bps,
+            sym_state.intent, z, dev_bps, std_bps, exec_spread_bps,
             bn_open_cooldown=bn_open_cooldown,
             bn_close_cooldown=bn_close_cooldown,
         )
@@ -355,11 +358,11 @@ class BasisMeanRevStrategy:
                 self._stats.shorts += 1
             else:
                 self._stats.flats += 1
-            sym_state.target_qty = self._target_qty(new_intent, fl_mid)
+            sym_state.target_qty = self._target_qty(new_intent, exec_mid)
             sym_state.intent = new_intent
 
         target_qty = sym_state.target_qty
-        actual_qty = self._actual_qty(user_state, fl_sym)
+        actual_qty = self._actual_qty(user_state, exec_sym)
         delta = target_qty - actual_qty
 
         # 5. delta 무시할 수준이면 skip
@@ -378,6 +381,17 @@ class BasisMeanRevStrategy:
         # 7. Cooldown — intent 변경 / fill 진행 시 즉시 허용
         cooldown_ns = self._p.cooldown_ms * 1_000_000
         fill_progressed = abs(actual_qty - sym_state.actual_at_last_emit) > self._p.qty_epsilon
+        side = OrderSide.BUY if delta > 0 else OrderSide.SELL
+        current_price = exec_ticker.ask_price if side == OrderSide.BUY else exec_ticker.bid_price
+        if current_price <= 0:
+            return None
+        if (
+            not intent_changed
+            and not fill_progressed
+            and not self._p.allow_same_intent_reemit
+        ):
+            if not self._same_intent_rearm_ready(sym_state, side, current_price, z):
+                return None
         if (
             not intent_changed
             and not fill_progressed
@@ -390,7 +404,7 @@ class BasisMeanRevStrategy:
         order_size_notional = (
             self._p.open_order_size if mode_open else self._p.close_order_size
         )
-        max_order_qty = order_size_notional / fl_mid if fl_mid > 0 else 0.0
+        max_order_qty = order_size_notional / exec_mid if exec_mid > 0 else 0.0
         if max_order_qty <= 0:
             return None
         order_qty = min(abs(delta), max_order_qty)
@@ -404,21 +418,20 @@ class BasisMeanRevStrategy:
             if remaining <= 0:
                 self._stats.skips_portfolio_cap += 1
                 return None
-            capped_notional = min(order_qty * fl_mid, remaining)
-            order_qty = capped_notional / fl_mid
+            capped_notional = min(order_qty * exec_mid, remaining)
+            order_qty = capped_notional / exec_mid
             if order_qty <= self._p.qty_epsilon:
                 self._stats.skips_portfolio_cap += 1
                 return None
 
         # 10. 주문 생성
-        side = OrderSide.BUY if delta > 0 else OrderSide.SELL
         qty = Decimal(str(order_qty))
-        price = fl_ticker.ask_price if side == OrderSide.BUY else fl_ticker.bid_price
-        if price <= 0:
-            return None
+        price = current_price
 
         sym_state.last_emit_ns = now_ns
         sym_state.actual_at_last_emit = actual_qty
+        sym_state.last_emit_price = price
+        sym_state.last_emit_abs_z = abs(z)
         self._stats.orders_emitted += 1
         if mode_open:
             self._stats.open_orders += 1
@@ -449,12 +462,41 @@ class BasisMeanRevStrategy:
         )
 
         return OrderRequest(
-            symbol=fl_sym,
+            symbol=exec_sym,
             side=side,
             order_type=OrderType.LIMIT,
             quantity=qty,
             price=Decimal(str(price)),
             time_in_force=TimeInForce.IOC,
+        )
+
+    def _same_intent_rearm_ready(
+        self,
+        sym_state: _SymbolState,
+        side: OrderSide,
+        current_price: float,
+        z: float,
+    ) -> bool:
+        if sym_state.last_emit_ns <= 0:
+            return True
+
+        price_improved_bps = 0.0
+        if sym_state.last_emit_price > 0:
+            if side == OrderSide.BUY:
+                price_improved_bps = max(
+                    0.0,
+                    (sym_state.last_emit_price - current_price) / sym_state.last_emit_price * 10000.0,
+                )
+            else:
+                price_improved_bps = max(
+                    0.0,
+                    (current_price - sym_state.last_emit_price) / sym_state.last_emit_price * 10000.0,
+                )
+
+        z_improved = abs(z) - sym_state.last_emit_abs_z
+        return (
+            price_improved_bps >= self._p.same_intent_rearm_price_bps
+            or z_improved >= self._p.same_intent_rearm_z_delta
         )
 
     def _portfolio_notional(
@@ -465,7 +507,7 @@ class BasisMeanRevStrategy:
         """현재 보유 포지션의 총 notional (절대값) 합산"""
         total = 0.0
         for sym, pos in user_state.positions.items():
-            ticker = latest.get(EXCHANGE_FLIPSTER, sym)
+            ticker = latest.get(self._p.execution_exchange, sym)
             if ticker is None:
                 continue
             mid = (ticker.bid_price + ticker.ask_price) * 0.5
@@ -482,7 +524,7 @@ class BasisMeanRevStrategy:
         z: float,
         dev_bps: float,
         std_bps: float,
-        fl_spread_bps: float,
+        exec_spread_bps: float,
         bn_open_cooldown: bool = False,
         bn_close_cooldown: bool = False,
     ) -> Intent:
@@ -531,7 +573,7 @@ class BasisMeanRevStrategy:
         # 스프레드 인식 비용 필터
         if self._p.spread_aware_filter:
             expected_edge_bps = dev_bps * self._p.beta_fl_assumption
-            required_cost_bps = fl_spread_bps + 2.0 * self._p.fee_bps_cost
+            required_cost_bps = exec_spread_bps + 2.0 * self._p.fee_bps_cost
             if expected_edge_bps < required_cost_bps * self._p.spread_edge_safety:
                 self._stats.skips_spread_cost += 1
                 return current
@@ -543,15 +585,75 @@ class BasisMeanRevStrategy:
 
         return candidate
 
-    def _target_qty(self, intent: Intent, fl_mid: float) -> float:
-        if intent == Intent.FLAT or fl_mid <= 0:
+    def _target_qty(self, intent: Intent, exec_mid: float) -> float:
+        if intent == Intent.FLAT or exec_mid <= 0:
             return 0.0
-        unit = self._p.max_position_size / fl_mid
+        unit = self._p.max_position_size / exec_mid
         return unit if intent == Intent.LONG else -unit
 
+    def _signal_inputs(
+        self,
+        history: SnapshotHistory,
+        exec_sym: str,
+        bn_sym: str,
+        exec_mid: float,
+    ) -> tuple[float | None, float | None, float | None]:
+        if self._p.signal_mode == "leadlag":
+            return self._leadlag_signal_inputs(history, exec_sym, bn_sym)
+        return self._basis_signal_inputs(history, exec_sym, bn_sym, exec_mid)
+
+    def _basis_signal_inputs(
+        self,
+        history: SnapshotHistory,
+        exec_sym: str,
+        bn_sym: str,
+        exec_mid: float,
+    ) -> tuple[float | None, float | None, float | None]:
+        diff = history.cross_mid_diff_array(
+            self._p.execution_exchange, exec_sym,
+            EXCHANGE_BINANCE, bn_sym,
+            duration_sec=self._p.window_sec,
+        )
+        if diff.size < self._p.warmup_samples:
+            return None, None, None
+        mean = float(diff.mean())
+        std = float(diff.std())
+        basis_now = float(diff[-1])
+        std_bps = (std / exec_mid) * 10000.0
+        dev_bps = (abs(basis_now - mean) / exec_mid) * 10000.0
+        z = (basis_now - mean) / std if std > 1e-12 else 0.0
+        return z, dev_bps, std_bps
+
+    def _leadlag_signal_inputs(
+        self,
+        history: SnapshotHistory,
+        exec_sym: str,
+        bn_sym: str,
+    ) -> tuple[float | None, float | None, float | None]:
+        exec_mid = history.mid_array(self._p.execution_exchange, exec_sym, self._p.window_sec)
+        bn_mid = history.mid_array(EXCHANGE_BINANCE, bn_sym, self._p.window_sec)
+        n = min(exec_mid.size, bn_mid.size)
+        if n == 0:
+            return None, None, None
+        exec_mid = exec_mid[-n:]
+        bn_mid = bn_mid[-n:]
+        lag_steps = max(1, int(self._p.signal_horizon_sec / 0.05))
+        needed = max(self._p.warmup_samples, lag_steps + 2)
+        if n < needed:
+            return None, None, None
+        exec_ret_bps = (exec_mid[lag_steps:] / exec_mid[:-lag_steps] - 1.0) * 10000.0
+        bn_ret_bps = (bn_mid[lag_steps:] / bn_mid[:-lag_steps] - 1.0) * 10000.0
+        residual_bps = bn_ret_bps - exec_ret_bps
+        mean = float(residual_bps.mean())
+        std = float(residual_bps.std())
+        now = float(residual_bps[-1])
+        raw_z = (now - mean) / std if std > 1e-12 else 0.0
+        # Binance가 execution venue보다 먼저 움직였으면 Gate catch-up 방향으로 진입.
+        return -raw_z, abs(now - mean), std
+
     @staticmethod
-    def _actual_qty(user_state: UserState, fl_sym: str) -> float:
-        pos = user_state.get_position(fl_sym)
+    def _actual_qty(user_state: UserState, exec_sym: str) -> float:
+        pos = user_state.get_position(exec_sym)
         if pos is None:
             return 0.0
         return float(pos.position_amount)

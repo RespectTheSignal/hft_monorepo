@@ -43,6 +43,11 @@ class FillSimulatorStats:
     submitted: int = 0
     filled: int = 0
     missed: int = 0
+    filled_notional_usd: float = 0.0
+    missed_notional_usd: float = 0.0
+    fill_price_improve_usd: float = 0.0
+    fill_price_improve_bps_x_notional: float = 0.0
+    miss_adverse_bps_x_notional: float = 0.0
 
 
 class FillSimulator:
@@ -52,11 +57,13 @@ class FillSimulator:
         self,
         user_state: UserState,
         pnl: PnlTracker,
+        execution_exchange: str = EXCHANGE_FLIPSTER,
         fee_bps: float = 0.45,
         latency_ns: int = 100_000_000,  # 100ms
     ) -> None:
         self._user_state: UserState = user_state
         self._pnl: PnlTracker = pnl
+        self._execution_exchange: str = execution_exchange
         self._fee_bps: float = fee_bps
         self._latency_ns: int = latency_ns
         self._pending: list[_Pending] = []
@@ -97,13 +104,14 @@ class FillSimulator:
         latest: LatestTickerCache,
     ) -> None:
         req = pending.request
-        # Flipster 만 매매 (현재 전략 가정)
-        ticker = latest.get(EXCHANGE_FLIPSTER, req.symbol)
+        ticker = latest.get(self._execution_exchange, req.symbol)
         if ticker is None:
             self._stats.missed += 1
             return
         limit_price = float(req.price) if req.price is not None else 0.0
         qty = req.quantity if req.quantity is not None else Decimal("0")
+        qty_f = float(qty)
+        req_notional = qty_f * limit_price
         if qty <= 0 or limit_price <= 0:
             self._stats.missed += 1
             return
@@ -114,27 +122,41 @@ class FillSimulator:
                 fill_price = ticker.ask_price
             else:
                 self._stats.missed += 1
+                self._stats.missed_notional_usd += req_notional
+                if ticker.ask_price > 0:
+                    adverse_bps = max(0.0, (ticker.ask_price - limit_price) / limit_price * 10000.0)
+                    self._stats.miss_adverse_bps_x_notional += adverse_bps * req_notional
                 return
         else:  # SELL
             if ticker.bid_price >= limit_price and ticker.bid_price > 0:
                 fill_price = ticker.bid_price
             else:
                 self._stats.missed += 1
+                self._stats.missed_notional_usd += req_notional
+                if ticker.bid_price > 0:
+                    adverse_bps = max(0.0, (limit_price - ticker.bid_price) / limit_price * 10000.0)
+                    self._stats.miss_adverse_bps_x_notional += adverse_bps * req_notional
                 return
 
         # 체결 처리
         self._stats.filled += 1
-        fee = float(qty) * fill_price * self._fee_bps * 1e-4
+        fill_notional = qty_f * fill_price
+        self._stats.filled_notional_usd += fill_notional
+        fee = qty_f * fill_price * self._fee_bps * 1e-4
+        improve_usd = max(0.0, (limit_price - fill_price) * qty_f) if req.side == OrderSide.BUY else max(0.0, (fill_price - limit_price) * qty_f)
+        improve_bps = (improve_usd / req_notional * 10000.0) if req_notional > 0 else 0.0
+        self._stats.fill_price_improve_usd += improve_usd
+        self._stats.fill_price_improve_bps_x_notional += improve_bps * fill_notional
         self._pnl.on_fill(
             symbol=req.symbol,
             side=req.side,
-            qty=float(qty),
+            qty=qty_f,
             price=fill_price,
             fee=fee,
             ts_ns=now_ns,
         )
         # UserState 포지션 갱신 (simple net position)
-        self._update_position(req.symbol, req.side, float(qty), fill_price, now_ns)
+        self._update_position(req.symbol, req.side, qty_f, fill_price, now_ns)
 
     def _update_position(
         self,

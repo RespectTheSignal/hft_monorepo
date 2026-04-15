@@ -87,6 +87,18 @@ class PnlTrackerStats:
     last_unrealized: float = 0.0
     worst_unrealized: float = 0.0      # 가장 컸던 미실현 손실 (음수 → 절대값 큰 것)
 
+    @property
+    def realized_bps(self) -> float:
+        return (self.total_realized / self.total_volume_usd * 10000.0) if self.total_volume_usd > 0 else 0.0
+
+    @property
+    def fee_bps(self) -> float:
+        return (self.total_fees / self.total_volume_usd * 10000.0) if self.total_volume_usd > 0 else 0.0
+
+    @property
+    def net_bps(self) -> float:
+        return self.realized_bps - self.fee_bps
+
 
 @dataclass
 class SymbolPnlRow:
@@ -106,6 +118,18 @@ class SymbolPnlRow:
     def win_rate(self) -> float:
         total = self.wins + self.losses
         return (self.wins / total * 100.0) if total > 0 else 0.0
+
+    @property
+    def realized_bps(self) -> float:
+        return (self.realized / self.volume_usd * 10000.0) if self.volume_usd > 0 else 0.0
+
+    @property
+    def fee_bps(self) -> float:
+        return (self.fees / self.volume_usd * 10000.0) if self.volume_usd > 0 else 0.0
+
+    @property
+    def net_bps(self) -> float:
+        return self.realized_bps - self.fee_bps
 
 
 class PnlTracker:

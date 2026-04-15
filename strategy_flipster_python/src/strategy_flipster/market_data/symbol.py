@@ -15,6 +15,7 @@ from __future__ import annotations
 # 지원 거래소 상수 — Rust enum Exchange로 대응
 EXCHANGE_FLIPSTER: str = "flipster"
 EXCHANGE_BINANCE: str = "binance"
+EXCHANGE_GATE: str = "gate"
 
 _FLIPSTER_PERP_SUFFIX: str = "USDT.PERP"
 _BINANCE_USDT_SUFFIX: str = "_USDT"
@@ -29,6 +30,8 @@ def to_exchange_symbol(exchange: str, canonical: str) -> str:
     if exchange == EXCHANGE_FLIPSTER:
         return f"{base}{_FLIPSTER_PERP_SUFFIX}"
     if exchange == EXCHANGE_BINANCE:
+        return f"{base}{_BINANCE_USDT_SUFFIX}"
+    if exchange == EXCHANGE_GATE:
         return f"{base}{_BINANCE_USDT_SUFFIX}"
     return canonical
 
@@ -48,6 +51,10 @@ def to_canonical(exchange: str, symbol: str) -> str | None:
         if symbol.endswith(_BINANCE_USDT_SUFFIX):
             return symbol[: -len(_BINANCE_USDT_SUFFIX)] or None
         return None
+    if exchange == EXCHANGE_GATE:
+        if symbol.endswith(_BINANCE_USDT_SUFFIX):
+            return symbol[: -len(_BINANCE_USDT_SUFFIX)] or None
+        return None
     return None
 
 
@@ -64,4 +71,5 @@ def symbols_for(canonical: str) -> dict[str, str]:
     return {
         EXCHANGE_FLIPSTER: to_exchange_symbol(EXCHANGE_FLIPSTER, canonical),
         EXCHANGE_BINANCE: to_exchange_symbol(EXCHANGE_BINANCE, canonical),
+        EXCHANGE_GATE: to_exchange_symbol(EXCHANGE_GATE, canonical),
     }
