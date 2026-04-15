@@ -178,21 +178,26 @@ pub enum OrderType {
 }
 
 /// TimeInForce — Phase 1 최소 3종.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TimeInForce {
     /// Good Till Cancel (default).
+    #[default]
     Gtc,
     /// Immediate Or Cancel — 체결 안 되는 수량은 즉시 cancel.
     Ioc,
     /// Fill Or Kill — 전량 즉시 체결 아니면 전체 reject.
     Fok,
-}
-
-impl Default for TimeInForce {
-    fn default() -> Self {
-        Self::Gtc
-    }
 }
 
 /// 주문 요청 — `order-gateway` 가 exchange executor 에 전달.
