@@ -72,7 +72,6 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{de, Deserialize, Deserializer};
 use serde_json::value::RawValue;
 use serde_json::Value;
-use std::hash::{BuildHasher, Hash, Hasher};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, error, info, trace, warn};
 use url::Url;
@@ -244,12 +243,11 @@ impl ExchangeFeed for OkxFeed {
             if item.get("state").and_then(|v| v.as_str()) != Some("live") {
                 continue;
             }
-            if !self.cfg.settle_ccy.is_empty() {
-                if item.get("settleCcy").and_then(|v| v.as_str())
+            if !self.cfg.settle_ccy.is_empty()
+                && item.get("settleCcy").and_then(|v| v.as_str())
                     != Some(self.cfg.settle_ccy.as_str())
-                {
-                    continue;
-                }
+            {
+                continue;
             }
             let base = item.get("baseCcy").and_then(|v| v.as_str());
             let quote = item.get("quoteCcy").and_then(|v| v.as_str());
@@ -761,11 +759,8 @@ fn handle_trades_frame(
         };
 
         let signed_size = match e.side {
-            Some(s) => match s {
-                "sell" | "SELL" | "Sell" => -e.sz,
-                _ => e.sz,
-            },
-            None => e.sz,
+            Some("sell" | "SELL" | "Sell") => -e.sz,
+            Some(_) | None => e.sz,
         };
 
         let create_time_ms = e.ts.unwrap_or(0);
@@ -813,11 +808,9 @@ fn parse_or_hash_trade_id(s: &str) -> i64 {
     const K0: u64 = 0xDEAD_BEEF_CAFE_BABE;
     const K1: u64 = 0x0123_4567_89AB_CDEF;
     const K2: u64 = 0xFEDC_BA98_7654_3210;
-    const K3: u64 = 0xBADF_00D_0C0F_FEE0;
+    const K3: u64 = 0x0BAD_F00D_0C0F_FEE0;
     let state = ahash::RandomState::with_seeds(K0, K1, K2, K3);
-    let mut h = state.build_hasher();
-    s.hash(&mut h);
-    (h.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
+    (state.hash_one(s) & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
 /// text `"ping"`/`"pong"` 프레임을 빠르게 분기. 매칭되면 reply 결정을 포함한
@@ -1283,7 +1276,7 @@ mod tests {
         let mock = MockClock::new(42, 7);
         let clock: Arc<dyn Clock> = mock.clone();
         let f = OkxFeed::with_clock(OkxConfig::default(), clock.clone());
-        let s = Stamp::now(&**f.clock());
+        let s = Stamp::now(f.clock().as_ref());
         assert_eq!(s.wall_ms, 42);
     }
 
@@ -1307,7 +1300,7 @@ mod tests {
             clock.clone(),
             shared.clone(),
         );
-        let s = Stamp::now(&**f.clock());
+        let s = Stamp::now(f.clock().as_ref());
         assert_eq!(s.wall_ms, 100);
         assert!(Arc::ptr_eq(f.symbol_cache(), &shared));
     }

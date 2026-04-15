@@ -263,6 +263,7 @@ struct OkxEnvelope {
 struct OkxOrderResult {
     #[serde(rename = "ordId", default)]
     ord_id: Option<String>,
+    #[allow(dead_code)]
     #[serde(rename = "clOrdId", default)]
     cl_ord_id: Option<String>,
     #[serde(rename = "sCode", default)]
