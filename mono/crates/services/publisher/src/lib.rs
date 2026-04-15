@@ -51,11 +51,11 @@
 pub mod shm_pub;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context as _, Result};
-use hft_config::{AppConfig, ExchangeConfig, ZmqConfig};
+use hft_config::{AppConfig, ExchangeConfig};
 use hft_exchange_api::{CancellationToken, Emitter, ExchangeFeed};
 use hft_exchange_binance::{BinanceConfig, BinanceFeed};
 use hft_exchange_bitget::{BitgetConfig, BitgetFeed};
@@ -200,7 +200,7 @@ impl TopicCache {
 /// 있는데 큐만 계속 찬다" 패턴을 방지한다.
 pub struct Worker {
     clock: Arc<dyn Clock>,
-    push: PushSocket,
+    push: Mutex<PushSocket>,
     topics: Arc<TopicCache>,
     /// SHM sidecar — cfg.shm.enabled 이면 Some. 활성화 시 ZMQ PUSH 와 **동시에**
     /// /dev/shm quote/trade 영역에도 기록한다. intra-host strategy 는 SHM 을 읽어
@@ -213,7 +213,7 @@ impl Worker {
     pub fn new(clock: Arc<dyn Clock>, push: PushSocket, topics: Arc<TopicCache>) -> Self {
         Self {
             clock,
-            push,
+            push: Mutex::new(push),
             topics,
             shm: None,
         }
@@ -228,7 +228,7 @@ impl Worker {
     ) -> Self {
         Self {
             clock,
-            push,
+            push: Mutex::new(push),
             topics,
             shm: Some(shm),
         }
@@ -318,8 +318,12 @@ impl Worker {
         //      볼 수 있다. SHM publish 실패는 metric 만 올리고 ZMQ 경로는 영향 없음.
         if let Some(shm) = self.shm.as_ref() {
             // ms → ns 변환. legacy wire 포맷의 stamp 는 모두 ms 단위.
-            let event_ns = stamps.exchange_server.wall_ms.saturating_mul(1_000_000);
-            let recv_ns = stamps.pushed.wall_ms.saturating_mul(1_000_000);
+            let event_ns = u64::try_from(stamps.exchange_server.wall_ms)
+                .unwrap_or(0)
+                .saturating_mul(1_000_000);
+            let recv_ns = u64::try_from(stamps.pushed.wall_ms)
+                .unwrap_or(0)
+                .saturating_mul(1_000_000);
             let pub_ns = recv_ns; // SHM publish 시각 ≈ pushed 시각. 재계산하지 않아 clock syscall 1 회 절약.
             match &event {
                 MarketEvent::BookTicker(bt) | MarketEvent::WebBookTicker(bt) => {
@@ -332,7 +336,19 @@ impl Worker {
         }
 
         // 5) non-blocking send.
-        match self.push.send_dontwait(&topic_bytes, &buf[..payload_len]) {
+        let send_outcome = match self.push.lock() {
+            Ok(push) => push.send_dontwait(&topic_bytes, &buf[..payload_len]),
+            Err(poisoned) => {
+                warn!(
+                    target: "publisher::worker",
+                    "push mutex poisoned — continuing with recovered socket"
+                );
+                poisoned
+                    .into_inner()
+                    .send_dontwait(&topic_bytes, &buf[..payload_len])
+            }
+        };
+        match send_outcome {
             SendOutcome::Sent => counter_inc(CounterKey::PipelineEvent),
             SendOutcome::WouldBlock => {
                 // counter 는 zmq wrapper 안에서 이미 bump.
@@ -795,7 +811,7 @@ impl PublisherHandle {
 /// - Aggregator task spawn
 /// - 각 ExchangeConfig 마다 Feed + Worker 구성
 /// - readiness probe 가 있다면 spawn
-/// 을 수행하고 `PublisherHandle` 을 돌려준다. Feed 실행 task 도 spawn 된 상태.
+///   을 수행하고 `PublisherHandle` 을 돌려준다. Feed 실행 task 도 spawn 된 상태.
 ///
 /// `readiness_port` 가 `Some` 이면 그 포트에 probe 를 띄우고, ready flag 는
 /// aggregator task 가 sock bind 를 마친 이후에 set 된다.
@@ -1205,6 +1221,18 @@ fn build_shm_publisher(cfg: &AppConfig) -> Result<Arc<crate::shm_pub::ShmPublish
     }
 }
 
+// `Aggregator` 의 async 함수가 `async_trait` 없이도 `Send + 'static` 이 되게 함:
+// tokio::spawn 에 넘기려면 run 전체가 Send 여야 한다. 현재 구현은 `PubSocket`,
+// `PullSocket`, `Vec<(Vec<u8>,Vec<u8>)>` 만 들고 있고 모두 Send 이므로 OK.
+//
+// `async_trait` 을 쓰지 않는 이유: trait object 뒤에 숨길 이유가 없고
+// 직접 호출하는 single-task 이기 때문.
+#[allow(dead_code)]
+const _: fn() = || {
+    fn a<T: Send + 'static>() {}
+    a::<Aggregator>();
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1212,7 +1240,8 @@ fn build_shm_publisher(cfg: &AppConfig) -> Result<Arc<crate::shm_pub::ShmPublish
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hft_testkit::samples;
+    use hft_config::ZmqConfig;
+    use hft_testkit::fixtures as samples;
     use hft_time::MockClock;
     use hft_types::{DataRole, ExchangeId, Price, Size};
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -1615,23 +1644,23 @@ mod tests {
         let push_ep = unique_inproc();
         let pub_ep = unique_inproc();
 
-        let mut app = AppConfig::default();
-        app.service_name = "publisher-test".into();
-        app.hot_workers = 2;
-        app.zmq.push_endpoint = push_ep;
-        app.zmq.pub_endpoint = pub_ep;
-        app.zmq.drain_batch_cap = 64;
-        // 실제 네트워크 WS 를 띄우지 않기 위해 fake endpoint. feed 는
-        // connect 실패를 반복하겠지만 cancel 로 종료 가능.
-        app.exchanges = vec![ExchangeConfig {
-            id: ExchangeId::Gate,
-            symbols: vec![Symbol::new("BTC_USDT")],
-            role: DataRole::Primary,
-            ws_url: Some("ws://127.0.0.1:1".into()),
-            reconnect_backoff_ms: 200,
-            ping_interval_s: 15,
-            ignore_symbols: Vec::new(),
-        }];
+        let app = AppConfig {
+            service_name: "publisher-test".into(),
+            hot_workers: 2,
+            zmq: default_zmq(&push_ep, &pub_ep),
+            // 실제 네트워크 WS 를 띄우지 않기 위해 fake endpoint. feed 는
+            // connect 실패를 반복하겠지만 cancel 로 종료 가능.
+            exchanges: vec![ExchangeConfig {
+                id: ExchangeId::Gate,
+                symbols: vec![Symbol::new("BTC_USDT")],
+                role: DataRole::Primary,
+                ws_url: Some("ws://127.0.0.1:1".into()),
+                reconnect_backoff_ms: 200,
+                ping_interval_s: 15,
+                ignore_symbols: Vec::new(),
+            }],
+            ..Default::default()
+        };
 
         let handle = start(Arc::new(app), None).await.unwrap();
         assert!(handle.ready.is_ready(), "handle must be ready right after bind");
@@ -1646,11 +1675,10 @@ mod tests {
         assert!(timed.is_ok(), "handle.join() did not complete within 5s");
     }
 
-    #[test]
-    fn worker_buf_size_covers_both_wire_types() {
+    const _: () = {
         assert!(WORKER_BUF_SIZE >= BOOK_TICKER_SIZE);
         assert!(WORKER_BUF_SIZE >= TRADE_SIZE);
-    }
+    };
 
     #[tokio::test]
     async fn worker_emit_closure_matches_arc() {
@@ -1865,19 +1893,6 @@ mod tests {
     }
 }
 
-// `Aggregator` 의 async 함수가 `async_trait` 없이도 `Send + 'static` 이 되게 함:
-// tokio::spawn 에 넘기려면 run 전체가 Send 여야 한다. 현재 구현은 `PubSocket`,
-// `PullSocket`, `Vec<(Vec<u8>,Vec<u8>)>` 만 들고 있고 모두 Send 이므로 OK.
-//
-// `async_trait` 을 쓰지 않는 이유: trait object 뒤에 숨길 이유가 없고
-// 직접 호출하는 single-task 이기 때문.
-#[allow(dead_code)]
-const _: fn() = || {
-    fn a<T: Send + 'static>() {}
-    a::<Aggregator>();
-};
-
 // NOTE: `async_trait` 은 Cargo.toml 에 올려져 있지만 이 파일에서는 직접 사용하지 않는다.
 // publisher 에 추가 trait 가 필요해질 때 use 로 가져오면 된다. (현재 unused 이지만
 // workspace 다른 crate 들이 쓰므로 dep 유지)
-

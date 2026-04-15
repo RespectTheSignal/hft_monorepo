@@ -230,7 +230,7 @@ impl ShmPublisher {
             symbol_idx: idx,
             price: tr.price.0 as i64,
             size: tr.size.0 as i64,
-            trade_id: tr.trade_id as i64,
+            trade_id: tr.trade_id,
             event_ns,
             recv_ns,
             pub_ns,
