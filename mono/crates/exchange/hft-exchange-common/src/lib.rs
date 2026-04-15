@@ -29,7 +29,6 @@
 #![forbid(unsafe_code)]
 
 use std::fmt;
-use std::sync::Arc;
 
 use dashmap::DashMap;
 use hft_time::{Clock, LatencyStamps, Stage};
@@ -446,6 +445,7 @@ pub fn stamps_with_ws(ws_received: hft_time::Stamp, server_time_ms: i64) -> Late
 mod tests {
     use super::*;
     use serde::Deserialize;
+    use std::sync::Arc;
 
     #[test]
     fn symbol_cache_interns_first_and_clones_rest() {
@@ -512,7 +512,7 @@ mod tests {
     }
 
     #[derive(Deserialize)]
-    struct TFO {
+    struct Tfo {
         #[serde(default, deserialize_with = "deserialize_f64_lenient_opt")]
         v: Option<f64>,
     }
@@ -535,13 +535,14 @@ mod tests {
 
     #[test]
     fn f64_lenient_opt_handles_null_and_missing() {
-        let a: TFO = serde_json::from_str(r#"{"v":null}"#).unwrap();
+        let a: Tfo = serde_json::from_str(r#"{"v":null}"#).unwrap();
         assert_eq!(a.v, None);
-        let b: TFO = serde_json::from_str(r#"{}"#).unwrap();
+        let b: Tfo = serde_json::from_str(r#"{}"#).unwrap();
         assert_eq!(b.v, None);
-        let c: TFO = serde_json::from_str(r#"{"v":"3.14"}"#).unwrap();
-        assert_eq!(c.v, Some(3.14));
-        let d: TFO = serde_json::from_str(r#"{"v":""}"#).unwrap();
+        let c: Tfo = serde_json::from_str(r#"{"v":"3.14"}"#).unwrap();
+        let expected = "3.14".parse::<f64>().unwrap();
+        assert_eq!(c.v, Some(expected));
+        let d: Tfo = serde_json::from_str(r#"{"v":""}"#).unwrap();
         assert_eq!(d.v, None);
     }
 
@@ -552,7 +553,7 @@ mod tests {
     }
 
     #[derive(Deserialize)]
-    struct TIO {
+    struct Tio {
         #[serde(default, deserialize_with = "deserialize_i64_lenient_opt")]
         v: Option<i64>,
     }
@@ -567,9 +568,9 @@ mod tests {
 
     #[test]
     fn i64_lenient_opt_null() {
-        let a: TIO = serde_json::from_str(r#"{"v":null}"#).unwrap();
+        let a: Tio = serde_json::from_str(r#"{"v":null}"#).unwrap();
         assert_eq!(a.v, None);
-        let b: TIO = serde_json::from_str(r#"{}"#).unwrap();
+        let b: Tio = serde_json::from_str(r#"{}"#).unwrap();
         assert_eq!(b.v, None);
     }
 
