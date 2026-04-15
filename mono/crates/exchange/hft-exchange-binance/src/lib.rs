@@ -21,7 +21,7 @@
 //! Binance aggTrade 의 `m` 필드는 **buyer-is-maker** 를 의미한다.
 //! - `m=true`  → 매수자 maker, 즉 aggressor 는 **seller** → [`Trade::size`] 는 **음수**.
 //! - `m=false` → 매수자 taker, aggressor 는 **buyer**     → [`Trade::size`] 는 **양수**.
-//! 이 규약은 legacy `binance_market_watcher_v3.py` 의 `qty*(-1 if m else +1)` 와 일치.
+//!   이 규약은 legacy `binance_market_watcher_v3.py` 의 `qty*(-1 if m else +1)` 와 일치.
 //!
 //! ## 성능 — Phase 2 refactor
 //!
@@ -785,7 +785,9 @@ mod tests {
         m
     }
 
-    fn capture_emitter() -> (Emitter, Arc<Mutex<Vec<(MarketEvent, hft_time::LatencyStamps)>>>) {
+    type CapturedEvents = Arc<Mutex<Vec<(MarketEvent, hft_time::LatencyStamps)>>>;
+
+    fn capture_emitter() -> (Emitter, CapturedEvents) {
         let buf: Arc<Mutex<Vec<_>>> = Arc::new(Mutex::new(Vec::new()));
         let b = buf.clone();
         let e: Emitter = Arc::new(move |ev, ls| {
@@ -812,9 +814,9 @@ mod tests {
         let (emit, buf) = capture_emitter();
 
         let text = direct_text();
-        let mut bytes = text.into_bytes();
+        let bytes = text.into_bytes();
         dispatch_primary_bytes(
-            &mut bytes,
+            &bytes,
             Stamp { wall_ms: 10, mono_ns: 20 },
             &raw_map,
             &cache,
@@ -848,9 +850,9 @@ mod tests {
         let (emit, buf) = capture_emitter();
 
         let text = combined_text();
-        let mut bytes = text.into_bytes();
+        let bytes = text.into_bytes();
         dispatch_primary_bytes(
-            &mut bytes,
+            &bytes,
             Stamp { wall_ms: 10, mono_ns: 20 },
             &raw_map,
             &cache,
@@ -875,10 +877,10 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let mut bytes = r#"{"s":"BTCUSDT","b":"1.0","B":"2","a":"3","A":"4","E":5,"T":6}"#
+        let bytes = r#"{"s":"BTCUSDT","b":"1.0","B":"2","a":"3","A":"4","E":5,"T":6}"#
             .as_bytes()
             .to_vec();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         assert_eq!(buf.lock().unwrap().len(), 1);
     }
@@ -890,11 +892,11 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, cnt) = count_emitter();
 
-        let mut bytes =
+        let bytes =
             r#"{"e":"depthUpdate","s":"BTCUSDT","b":[["1","1"]],"a":[["2","2"]]}"#
                 .as_bytes()
                 .to_vec();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         assert_eq!(cnt.load(Ordering::SeqCst), 0);
     }
@@ -906,11 +908,11 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let mut bytes =
+        let bytes =
             r#"{"e":"bookTicker","s":"BTCUSDT","b":40000.5,"B":12,"a":40001,"A":4.5,"E":1,"T":1}"#
                 .as_bytes()
                 .to_vec();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         assert_eq!(events.len(), 1);
@@ -921,17 +923,19 @@ mod tests {
         assert_eq!(bt.bid_size.0, 12.0);
     }
 
+    // Binance wire 필드명 E/T 를 테스트명에 보존한다.
+    #[allow(non_snake_case)]
     #[test]
     fn dispatch_falls_back_to_E_when_T_missing() {
         let cache = SymbolCache::new();
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let mut bytes =
+        let bytes =
             r#"{"e":"bookTicker","s":"BTCUSDT","b":"1","B":"2","a":"3","A":"4","E":999}"#
                 .as_bytes()
                 .to_vec();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         assert_eq!(events.len(), 1);
@@ -949,10 +953,10 @@ mod tests {
         let (emit, cnt) = count_emitter();
 
         // `b` 누락.
-        let mut bytes = r#"{"e":"bookTicker","s":"BTCUSDT","B":"1","a":"2","A":"3"}"#
+        let bytes = r#"{"e":"bookTicker","s":"BTCUSDT","B":"1","a":"2","A":"3"}"#
             .as_bytes()
             .to_vec();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         assert_eq!(cnt.load(Ordering::SeqCst), 0);
     }
@@ -963,8 +967,8 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, cnt) = count_emitter();
 
-        let mut bytes = b"not json at all".to_vec();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        let bytes = b"not json at all".to_vec();
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         assert_eq!(cnt.load(Ordering::SeqCst), 0);
     }
@@ -975,8 +979,8 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, cnt) = count_emitter();
 
-        let mut bytes = br#"{"result":null,"id":1}"#.to_vec();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        let bytes = br#"{"result":null,"id":1}"#.to_vec();
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         assert_eq!(cnt.load(Ordering::SeqCst), 0);
     }
@@ -989,8 +993,8 @@ mod tests {
         let (emit, buf) = capture_emitter();
 
         let text = direct_text();
-        let mut bytes = text.into_bytes();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        let bytes = text.into_bytes();
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         assert_eq!(events.len(), 1);
@@ -999,7 +1003,7 @@ mod tests {
         };
         assert_eq!(bt.symbol.as_str(), "BTC_USDT");
         // cache 에 BTC_USDT 가 intern 되었어야 함.
-        assert!(cache.len() >= 1);
+        assert!(!cache.is_empty());
     }
 
     // ─── symbol cache / intern ──────────────────────────────────────────────
@@ -1011,10 +1015,10 @@ mod tests {
         let (emit, buf) = capture_emitter();
 
         let t = direct_text();
-        let mut b1 = t.clone().into_bytes();
-        let mut b2 = t.into_bytes();
-        dispatch_primary_bytes(&mut b1, Stamp::default(), &raw_map, &cache, &emit);
-        dispatch_primary_bytes(&mut b2, Stamp::default(), &raw_map, &cache, &emit);
+        let b1 = t.clone().into_bytes();
+        let b2 = t.into_bytes();
+        dispatch_primary_bytes(&b1, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&b2, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         assert_eq!(events.len(), 2);
@@ -1055,8 +1059,8 @@ mod tests {
         let (emit, buf) = capture_emitter();
 
         let ws_recv = Stamp::now(&*clock);
-        let mut bytes = direct_text().into_bytes();
-        dispatch_primary_bytes(&mut bytes, ws_recv, &raw_map, &cache, &emit);
+        let bytes = direct_text().into_bytes();
+        dispatch_primary_bytes(&bytes, ws_recv, &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         let (_, ls) = &events[0];
@@ -1074,9 +1078,9 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let mut bytes = trade_direct_sell_text().into_bytes();
+        let bytes = trade_direct_sell_text().into_bytes();
         dispatch_primary_bytes(
-            &mut bytes,
+            &bytes,
             Stamp { wall_ms: 7, mono_ns: 11 },
             &raw_map,
             &cache,
@@ -1111,8 +1115,8 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let mut bytes = trade_direct_buy_text().into_bytes();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        let bytes = trade_direct_buy_text().into_bytes();
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         assert_eq!(events.len(), 1);
@@ -1129,8 +1133,8 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let mut bytes = trade_combined_text().into_bytes();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        let bytes = trade_combined_text().into_bytes();
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         assert_eq!(events.len(), 1);
@@ -1143,16 +1147,18 @@ mod tests {
         assert_eq!(t.trade_id, 101);
     }
 
+    // Binance wire 필드명 E/T 를 테스트명에 보존한다.
+    #[allow(non_snake_case)]
     #[test]
     fn dispatch_aggtrade_missing_T_falls_back_to_E() {
         let cache = SymbolCache::new();
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let mut bytes = r#"{"e":"aggTrade","E":888,"a":7,"s":"BTCUSDT","p":"1","q":"1","m":false}"#
+        let bytes = r#"{"e":"aggTrade","E":888,"a":7,"s":"BTCUSDT","p":"1","q":"1","m":false}"#
             .as_bytes()
             .to_vec();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         let MarketEvent::Trade(t) = &events[0].0 else {
@@ -1170,10 +1176,10 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let mut bytes = r#"{"e":"aggTrade","E":10,"a":1,"s":"BTCUSDT","p":"1","q":"5","T":10}"#
+        let bytes = r#"{"e":"aggTrade","E":10,"a":1,"s":"BTCUSDT","p":"1","q":"5","T":10}"#
             .as_bytes()
             .to_vec();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         let MarketEvent::Trade(t) = &events[0].0 else {
@@ -1189,11 +1195,11 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let mut bytes =
+        let bytes =
             r#"{"e":"aggTrade","E":10,"a":1,"s":"BTCUSDT","p":42,"q":0.5,"T":10,"m":true}"#
                 .as_bytes()
                 .to_vec();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         let MarketEvent::Trade(t) = &events[0].0 else {
@@ -1209,8 +1215,8 @@ mod tests {
         let raw_map: RawSymMap = HashMap::with_hasher(ahash::RandomState::new());
         let (emit, buf) = capture_emitter();
 
-        let mut bytes = trade_direct_buy_text().into_bytes();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        let bytes = trade_direct_buy_text().into_bytes();
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         assert_eq!(events.len(), 1);
@@ -1218,7 +1224,7 @@ mod tests {
             unreachable!()
         };
         assert_eq!(t.symbol.as_str(), "BTC_USDT");
-        assert!(cache.len() >= 1);
+        assert!(!cache.is_empty());
     }
 
     #[test]
@@ -1228,10 +1234,10 @@ mod tests {
         let (emit, cnt) = count_emitter();
 
         // `p` 누락.
-        let mut bytes = r#"{"e":"aggTrade","E":10,"a":1,"s":"BTCUSDT","q":"1","T":10,"m":true}"#
+        let bytes = r#"{"e":"aggTrade","E":10,"a":1,"s":"BTCUSDT","q":"1","T":10,"m":true}"#
             .as_bytes()
             .to_vec();
-        dispatch_primary_bytes(&mut bytes, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         assert_eq!(cnt.load(Ordering::SeqCst), 0);
     }
@@ -1257,14 +1263,14 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let mut b1 = direct_text().into_bytes();
-        let mut b2 = trade_direct_sell_text().into_bytes();
-        let mut b3 = combined_text().into_bytes();
-        let mut b4 = trade_combined_text().into_bytes();
-        dispatch_primary_bytes(&mut b1, Stamp::default(), &raw_map, &cache, &emit);
-        dispatch_primary_bytes(&mut b2, Stamp::default(), &raw_map, &cache, &emit);
-        dispatch_primary_bytes(&mut b3, Stamp::default(), &raw_map, &cache, &emit);
-        dispatch_primary_bytes(&mut b4, Stamp::default(), &raw_map, &cache, &emit);
+        let b1 = direct_text().into_bytes();
+        let b2 = trade_direct_sell_text().into_bytes();
+        let b3 = combined_text().into_bytes();
+        let b4 = trade_combined_text().into_bytes();
+        dispatch_primary_bytes(&b1, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&b2, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&b3, Stamp::default(), &raw_map, &cache, &emit);
+        dispatch_primary_bytes(&b4, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
         assert_eq!(events.len(), 4);

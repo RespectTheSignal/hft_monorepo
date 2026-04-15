@@ -241,6 +241,8 @@ struct BinancePlaceResp {
     #[serde(default)]
     #[serde(rename = "orderId")]
     order_id: Option<i64>,
+    // 응답 전문 보존용 필드다. 현재는 ack 조립에 직접 쓰지 않지만 추후 로그/디버깅에 필요하다.
+    #[allow(dead_code)]
     #[serde(default)]
     #[serde(rename = "clientOrderId")]
     client_order_id: Option<String>,
