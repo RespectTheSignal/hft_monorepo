@@ -249,6 +249,7 @@ struct BybitEnvelope {
 struct BybitResult {
     #[serde(rename = "orderId", default)]
     order_id: Option<String>,
+    #[allow(dead_code)]
     #[serde(rename = "orderLinkId", default)]
     order_link_id: Option<String>,
     #[serde(default)]

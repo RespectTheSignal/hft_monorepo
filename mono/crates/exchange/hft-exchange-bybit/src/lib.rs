@@ -789,7 +789,7 @@ fn trade_id_from_str(s: &str) -> i64 {
     const K0: u64 = 0xDEAD_BEEF_CAFE_BABE;
     const K1: u64 = 0x0123_4567_89AB_CDEF;
     const K2: u64 = 0xFEDC_BA98_7654_3210;
-    const K3: u64 = 0xBADF_00D_0C0F_FEE0;
+    const K3: u64 = 0x0BAD_F00D_0C0F_FEE0;
     let state = ahash::RandomState::with_seeds(K0, K1, K2, K3);
     let mut h = state.build_hasher();
     h.write(s.as_bytes());
@@ -1391,7 +1391,7 @@ mod tests {
         let clock: Arc<dyn Clock> = mock.clone();
         let f = BybitFeed::with_clock(BybitConfig::default(), clock.clone());
         // mock 이 injection 됐는지 stamp 로 검증.
-        let s = Stamp::now(&**f.clock());
+        let s = Stamp::now(f.clock().as_ref());
         assert_eq!(s.wall_ms, 42);
     }
 
@@ -1415,7 +1415,7 @@ mod tests {
             clock.clone(),
             shared.clone(),
         );
-        let s = Stamp::now(&**f.clock());
+        let s = Stamp::now(f.clock().as_ref());
         assert_eq!(s.wall_ms, 100);
         assert!(Arc::ptr_eq(f.symbol_cache(), &shared));
     }
@@ -1451,8 +1451,10 @@ mod tests {
 
     // ── publicTrade ────────────────────────────────────────────────────
 
-    fn emit_capture_all() -> (Emitter, Arc<Mutex<Vec<(MarketEvent, hft_time::LatencyStamps)>>>) {
-        let buf: Arc<Mutex<Vec<_>>> = Arc::new(Mutex::new(Vec::new()));
+    type CapturedEvents = Arc<Mutex<Vec<(MarketEvent, hft_time::LatencyStamps)>>>;
+
+    fn emit_capture_all() -> (Emitter, CapturedEvents) {
+        let buf: CapturedEvents = Arc::new(Mutex::new(Vec::new()));
         let b = buf.clone();
         let e: Emitter = Arc::new(move |ev, ls| {
             b.lock().unwrap().push((ev, ls));
@@ -1594,6 +1596,8 @@ mod tests {
     }
 
     #[test]
+    // Bybit wire 필드명 T 를 테스트명에 보존한다.
+    #[allow(non_snake_case)]
     fn dispatch_trade_falls_back_to_frame_ts_when_T_missing() {
         let bytes = r#"{"topic":"publicTrade.BTCUSDT","type":"snapshot","ts":1700000000999,"data":[{"s":"BTCUSDT","S":"Buy","v":"1","p":"1","i":"x"}]}"#.as_bytes().to_vec();
         let cache = Arc::new(SymbolCache::new());
