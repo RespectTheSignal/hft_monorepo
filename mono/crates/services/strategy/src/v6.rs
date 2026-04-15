@@ -227,10 +227,10 @@ impl V6Strategy {
         let symbol_ref = Symbol::new(symbol);
         let ctx = self.build_v6_ctx(&exposure, &symbol_ref, now_ms);
 
-        let ts = self.trade_settings();
+        let ts = self.trade_settings().clone();
         let dec = decide_order_v6(
             &sig,
-            ts,
+            &ts,
             &ctx,
             gate_bt.server_time_ms,
             cache.binance_bt.as_ref().map(|b| b.server_time_ms),
@@ -263,11 +263,11 @@ impl V6Strategy {
             bypass_safe_limit_close: false,
             bypass_max_position_size: false,
         };
-        let jitter = TimeRestrictionJitter::midpoint(ts);
+        let jitter = TimeRestrictionJitter::midpoint(&ts);
         let rc = handle_chance(
             self.oracle.as_ref(),
             &chance,
-            ts,
+            &ts,
             &self.risk,
             self.account_total_usdt,
             self.account_unrealized_pnl_usdt,
@@ -380,7 +380,6 @@ mod tests {
         AccountMembership, ContractMeta, PositionCache, PositionSnapshot, SymbolMetaCache,
         SymbolPosition,
     };
-    use ahash::AHashMap as AMap;
     use hft_types::{BookTicker, Price, Size};
 
     fn strat() -> V6Strategy {
@@ -438,13 +437,15 @@ mod tests {
     /// 실 oracle + runtime → close_stale 시 MarketClose.
     #[test]
     fn v6_close_stale_emits_market_close() {
-        let mut ts = TradeSettings::default();
-        ts.close_stale_minutes = 1;
-        ts.order_size = 10.0;
-        ts.max_position_size = 10_000.0;
-        ts.gate_last_book_ticker_latency_ms = 60 * 60 * 1000;
-        ts.binance_last_book_ticker_latency_ms = 60 * 60 * 1000;
-        ts.gate_last_webbook_ticker_latency_ms = 60 * 60 * 1000;
+        let ts = TradeSettings {
+            close_stale_minutes: 1,
+            order_size: 10.0,
+            max_position_size: 10_000.0,
+            gate_last_book_ticker_latency_ms: 60 * 60 * 1000,
+            binance_last_book_ticker_latency_ms: 60 * 60 * 1000,
+            gate_last_webbook_ticker_latency_ms: 60 * 60 * 1000,
+            ..Default::default()
+        };
         let cfg = Arc::new(StrategyConfig::new(
             "t".into(),
             vec!["BTC_USDT".into()],
@@ -463,7 +464,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let mut by_sym = AMap::new();
+        let mut by_sym = PositionSnapshot::default().by_symbol;
         by_sym.insert(
             Symbol::new("BTC_USDT"),
             SymbolPosition {

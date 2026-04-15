@@ -6,25 +6,25 @@
 //! `HFT_STRATEGY_VARIANT` 로 선택한다 (기본 `noop`).
 //!
 //! 1. `noop`  — 기존 idle-loop. subscriber 없이 빈 이벤트 채널만 붙여 프로세스
-//!              수명 관리/배포 스모크용. 실 주문 경로 없음.
-//! 2. `v6` / `v7` / `v8` — **풀 스택**.
-//!      (a) `hft_config::load_all()` → `AppConfig`
-//!      (b) `subscriber::start(cfg, Arc<InprocQueue>)` 로 SUB 소켓 구독 + 채널 세팅
-//!      (c) `hft_exchange_gate::GateAccountClient` + `AccountPoller` spawn — 계정 메타 /
-//!          포지션 / 잔고를 `SymbolMetaCache` · `PositionCache` · `BalanceSlot` 에 펌프
-//!      (d) `PositionOracleImpl::new(meta, positions, last_orders, membership)` 로 oracle 조립
-//!      (e) `V?Strategy::with_runtime(oracle, rate_tracker)` 로 러너 주입
-//!      (f) 주기 tokio task — `BalanceSlot` → `StrategyControl::SetAccountBalance`
-//!          를 `StrategyHandle::push_control` 로 내보내 `on_control` 경로로 반영
-//!      (g) rate decay task — 매 1s `OrderRateTracker::decay_before_now` 호출
+//!    수명 관리/배포 스모크용. 실 주문 경로 없음.
+//! 2. `v6` / `v7` / `v8` — **풀 스택**. 다음 순서로 구성된다.
+//!    `hft_config::load_all()` → `AppConfig`
+//!    `subscriber::start(cfg, Arc<InprocQueue>)` 로 SUB 소켓 구독 + 채널 세팅
+//!    `hft_exchange_gate::GateAccountClient` + `AccountPoller` spawn — 계정 메타 /
+//!    포지션 / 잔고를 `SymbolMetaCache` · `PositionCache` · `BalanceSlot` 에 펌프
+//!    `PositionOracleImpl::new(meta, positions, last_orders, membership)` 로 oracle 조립
+//!    `V?Strategy::with_runtime(oracle, rate_tracker)` 로 러너 주입
+//!    주기 tokio task — `BalanceSlot` → `StrategyControl::SetAccountBalance` 를
+//!    `StrategyHandle::push_control` 로 내보내 `on_control` 경로로 반영
+//!    rate decay task — 매 1s `OrderRateTracker::decay_before_now` 호출
 //!
 //! # 환경변수
 //! - `HFT_STRATEGY_VARIANT`       : `noop` | `v6` | `v7` | `v8` (default `noop`)
 //! - `HFT_STRATEGY_LOGIN_NAME`    : 전략 식별자 (= 계정 login_name). default `default`
 //! - `HFT_STRATEGY_SYMBOLS`       : 쉼표 구분 심볼 리스트. 비어있으면 AppConfig.exchanges
-//!                                  에서 `ExchangeId::Gate` primary 심볼을 그대로 사용.
+//!   에서 `ExchangeId::Gate` primary 심볼을 그대로 사용.
 //! - `GATE_API_KEY` / `GATE_API_SECRET` : Gate 계정 creds. 미설정이면 poller 비활성화
-//!                                       (전략은 여전히 돌지만 포지션/잔고는 0 유지).
+//!   (전략은 여전히 돌지만 포지션/잔고는 0 유지).
 //! - `HFT_STRATEGY_ACCOUNT_MODE` : `shared` | `isolated` — Phase 2 D 는 `shared` 만 사용.
 //! - `HFT_BALANCE_PUMP_MS`       : 잔고 pump 주기 ms (default 500).
 //! - `HFT_RATE_DECAY_MS`         : rate tracker decay 호출 주기 ms (default 1_000).
