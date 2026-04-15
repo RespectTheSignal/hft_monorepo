@@ -251,6 +251,7 @@ struct BitgetEnvelope {
 struct BitgetPlaceData {
     #[serde(rename = "orderId", default)]
     order_id: Option<String>,
+    #[allow(dead_code)]
     #[serde(rename = "clientOid", default)]
     client_oid: Option<String>,
     #[serde(default)]

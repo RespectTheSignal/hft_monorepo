@@ -71,7 +71,6 @@ use futures_util::{SinkExt, StreamExt};
 use serde::de::{Deserializer, SeqAccess, Visitor};
 use serde::Deserialize;
 use serde_json::value::RawValue;
-use std::hash::{BuildHasher, Hash, Hasher};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, error, info, trace, warn};
 use url::Url;
@@ -716,11 +715,9 @@ fn parse_or_hash_trade_id(s: &str) -> i64 {
     const K0: u64 = 0xDEAD_BEEF_CAFE_BABE;
     const K1: u64 = 0x0123_4567_89AB_CDEF;
     const K2: u64 = 0xFEDC_BA98_7654_3210;
-    const K3: u64 = 0xBADF_00D_0C0F_FEE0;
+    const K3: u64 = 0x0BAD_F00D_0C0F_FEE0;
     let state = ahash::RandomState::with_seeds(K0, K1, K2, K3);
-    let mut h = state.build_hasher();
-    s.hash(&mut h);
-    (h.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
+    (state.hash_one(s) & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -824,8 +821,10 @@ mod tests {
         m
     }
 
-    fn capture_emitter() -> (Emitter, Arc<Mutex<Vec<(MarketEvent, hft_time::LatencyStamps)>>>) {
-        let buf: Arc<Mutex<Vec<_>>> = Arc::new(Mutex::new(Vec::new()));
+    type CapturedEvents = Arc<Mutex<Vec<(MarketEvent, hft_time::LatencyStamps)>>>;
+
+    fn capture_emitter() -> (Emitter, CapturedEvents) {
+        let buf: CapturedEvents = Arc::new(Mutex::new(Vec::new()));
         let b = buf.clone();
         let e: Emitter = Arc::new(move |ev, ls| {
             b.lock().unwrap().push((ev, ls));
@@ -897,7 +896,7 @@ mod tests {
         };
         assert_eq!(bt.symbol.as_str(), "ETH_USDT");
         assert_eq!(bt.server_time_ms, 1_700_000_000_001);
-        assert!(cache.len() >= 1); // fallback intern 되었어야 함.
+        assert!(!cache.is_empty()); // fallback intern 되었어야 함.
     }
 
     #[test]
