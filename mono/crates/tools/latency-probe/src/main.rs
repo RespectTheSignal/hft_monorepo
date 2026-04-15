@@ -206,7 +206,7 @@ impl Histograms {
     ///
     /// 위반된 항목을 `Vec<Violation>` 으로 반환한다. 샘플 수가 `min_samples` 미만이면
     /// 해당 항목은 검사를 건너뛰고 warn 로그만 남긴다.
-    pub fn check_targets(&self, cli: &Cli) -> Vec<Violation> {
+    fn check_targets(&self, cli: &Cli) -> Vec<Violation> {
         let mut v = Vec::new();
         let min = cli.min_samples;
 
