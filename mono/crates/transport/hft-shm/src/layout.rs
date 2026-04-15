@@ -175,7 +175,7 @@ const _: () = assert!(std::mem::align_of::<TradeRingHeader>() == 64);
 /// Trade ring 한 프레임 (128B). `seq` 가 핫 atomic.
 #[repr(C, align(64))]
 pub struct TradeFrame {
-    /// writer 가 기록한 seq. 0 = unused.
+    /// writer 가 기록한 seq. 0 = unused, `u64::MAX` = writer in-progress sentinel.
     pub seq: AtomicU64,
     /// exchange id.
     pub exchange_id: u8,

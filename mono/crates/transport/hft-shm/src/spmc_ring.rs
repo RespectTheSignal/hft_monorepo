@@ -5,13 +5,16 @@
 //! **Writer (1명)**:
 //! ```text
 //!   let w = header.writer_seq.load(Relaxed);
+//!   let new_seq = w + 1;
 //!   let slot = frames[w & mask];
+//!   slot.seq.store(SEQ_IN_PROGRESS, SeqCst);  // overwrite 시작 marker
 //!   // 본문 쓰기
-//!   slot.seq.store(w + 1, Release);          // seq 에 "commit"
-//!   header.writer_seq.store(w + 1, Release); // 외부 상한 공개
+//!   slot.seq.store(new_seq, Release);         // seq 에 "commit"
+//!   header.writer_seq.store(new_seq, Release); // 외부 상한 공개
 //! ```
 //!
-//! `seq` 는 monotonic. `slot.seq == w + 1` 이면 "이 슬롯은 seq=w+1 의 프레임".
+//! `slot.seq == SEQ_IN_PROGRESS` 이면 writer 가 payload 를 덮어쓰는 중이다.
+//! `slot.seq == n` (1..=u64::MAX-1) 이면 "이 슬롯은 seq=n 의 프레임" 을 안정적으로 보유한다.
 //!
 //! **Reader (N명)**:
 //! ```text
@@ -20,17 +23,15 @@
 //!       if r == w { return None; }                // empty
 //!       let slot = frames[r & mask];
 //!       let s = slot.seq.load(Acquire);
-//!       if s == r + 1 {
-//!           // 아직 writer 가 r 에 쓰는 중.
-//!           spin();
-//!           continue;
-//!       }
-//!       if s < r + 1 { return None; }             // race: writer_seq 는 올라갔지만 slot 은 아직
-//!       // 본문 읽기
+//!       if s == SEQ_IN_PROGRESS { spin(); continue; } // writer 가 현재 이 slot overwrite 중
+//!       if s < r + 1 { spin_or_none(); continue; }    // 아직 target seq commit 전
+//!       if s > r + 1 { jump_to_retained_window(); return None; } // lap
+//!       // s == r + 1
+//!       let frame = read_frame_body(slot);
 //!       let s2 = slot.seq.load(Acquire);
-//!       if s2 != s { /* writer lapped 했다면 재시도 */ continue; }
+//!       if s2 != s { spin_or_drop(); continue; } // lap 또는 in-progress 재진입
 //!       r += 1;
-//!       return Some(frame_copy);
+//!       return Some(frame);
 //!   }
 //! ```
 //!
@@ -53,6 +54,12 @@ use crate::mmap::ShmRegion;
 
 /// 기본 reader spin 한도. 이 값을 초과해도 writer 가 commit 안 하면 None 반환.
 const READER_SPIN_LIMIT: u32 = 1024;
+
+/// `slot.seq` 값 중 "writer 가 payload 를 기록 중" 을 의미하는 sentinel.
+///
+/// monotonic seq 영역(1..=u64::MAX-1) 과 겹치지 않도록 `u64::MAX` 를 예약한다.
+/// `writer_seq` 는 실사용에서 이 값에 도달할 수 없다고 가정한다.
+pub(crate) const SEQ_IN_PROGRESS: u64 = u64::MAX;
 
 /// Writer (publisher aggregator) 단독 보유.
 pub struct TradeRingWriter {
@@ -136,23 +143,18 @@ impl TradeRingWriter {
         unsafe {
             let hdr = &*(self.region.as_ptr() as *const TradeRingHeader);
             let w = hdr.writer_seq.load(Ordering::Relaxed);
+            let new_seq = w + 1;
             let idx = w & self.capacity_mask;
             let slot = self.frame_mut_ptr(idx);
+            // overwrite 시작 marker. payload store 보다 먼저 관측되도록 SeqCst 로 고정한다.
+            (*slot).seq.store(SEQ_IN_PROGRESS, Ordering::SeqCst);
             // 본문 기록.
-            std::ptr::addr_of_mut!((*slot).exchange_id).write(frame.exchange_id);
-            std::ptr::addr_of_mut!((*slot).symbol_idx).write(frame.symbol_idx);
-            std::ptr::addr_of_mut!((*slot).price).write(frame.price);
-            std::ptr::addr_of_mut!((*slot).size).write(frame.size);
-            std::ptr::addr_of_mut!((*slot).trade_id).write(frame.trade_id);
-            std::ptr::addr_of_mut!((*slot).event_ns).write(frame.event_ns);
-            std::ptr::addr_of_mut!((*slot).recv_ns).write(frame.recv_ns);
-            std::ptr::addr_of_mut!((*slot).pub_ns).write(frame.pub_ns);
-            std::ptr::addr_of_mut!((*slot).flags).write(frame.flags);
+            write_frame_payload(slot, frame);
 
             // slot.seq 에 commit — reader 는 이를 Acquire load 로 관측.
-            (*slot).seq.store(w + 1, Ordering::Release);
+            (*slot).seq.store(new_seq, Ordering::Release);
             // writer_seq 를 한 칸 올림.
-            hdr.writer_seq.store(w + 1, Ordering::Release);
+            hdr.writer_seq.store(new_seq, Ordering::Release);
         }
     }
 
@@ -256,6 +258,14 @@ impl TradeRingReader {
             let mut spins: u32 = 0;
             loop {
                 let s1 = (*slot).seq.load(Ordering::Acquire);
+                if s1 == SEQ_IN_PROGRESS {
+                    if spins >= READER_SPIN_LIMIT {
+                        return None;
+                    }
+                    hint::spin_loop();
+                    spins += 1;
+                    continue;
+                }
                 if s1 < target_seq {
                     // writer 가 아직 이 슬롯을 이번 seq 로 commit 안 함.
                     if spins >= READER_SPIN_LIMIT {
@@ -320,6 +330,20 @@ impl TradeRingReader {
         let frames =
             unsafe { base.add(std::mem::size_of::<TradeRingHeader>()) } as *const TradeFrame;
         unsafe { frames.add(idx as usize) }
+    }
+}
+
+unsafe fn write_frame_payload(slot: *mut TradeFrame, frame: &TradeFrame) {
+    unsafe {
+        std::ptr::addr_of_mut!((*slot).exchange_id).write(frame.exchange_id);
+        std::ptr::addr_of_mut!((*slot).symbol_idx).write(frame.symbol_idx);
+        std::ptr::addr_of_mut!((*slot).price).write(frame.price);
+        std::ptr::addr_of_mut!((*slot).size).write(frame.size);
+        std::ptr::addr_of_mut!((*slot).trade_id).write(frame.trade_id);
+        std::ptr::addr_of_mut!((*slot).event_ns).write(frame.event_ns);
+        std::ptr::addr_of_mut!((*slot).recv_ns).write(frame.recv_ns);
+        std::ptr::addr_of_mut!((*slot).pub_ns).write(frame.pub_ns);
+        std::ptr::addr_of_mut!((*slot).flags).write(frame.flags);
     }
 }
 
@@ -420,6 +444,46 @@ mod tests {
         }
     }
 
+    fn run_concurrent_monotonic_once() -> u64 {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::thread;
+
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("t5");
+        let w = Arc::new(TradeRingWriter::create(&p, 1024).unwrap());
+        let mut r = TradeRingReader::open(&p).unwrap();
+        assert_eq!(r.cursor(), 0);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_w = stop.clone();
+        let w_c = w.clone();
+
+        let writer = thread::spawn(move || {
+            let mut i = 0i64;
+            while !stop_w.load(Ordering::Relaxed) && i < 50_000 {
+                w_c.publish(&frame(i));
+                i += 1;
+            }
+        });
+
+        let mut last_price: Option<i64> = None;
+        let mut seen = 0u64;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline && seen < 40_000 {
+            if let Some(f) = r.try_consume() {
+                if let Some(lp) = last_price {
+                    assert!(f.price > lp, "non-monotonic: {} <= {}", f.price, lp);
+                }
+                last_price = Some(f.price);
+                seen += 1;
+            }
+        }
+        stop.store(true, Ordering::Relaxed);
+        writer.join().unwrap();
+        assert!(seen > 1000, "expected many frames, got {}", seen);
+        seen
+    }
+
     #[test]
     fn writer_then_reader_delivers_in_order() {
         let dir = tempdir().unwrap();
@@ -480,41 +544,51 @@ mod tests {
 
     #[test]
     fn concurrent_writer_and_reader_see_monotonic_data() {
-        use std::sync::Arc;
-        use std::sync::atomic::AtomicBool;
-        use std::thread;
+        run_concurrent_monotonic_once();
+    }
 
+    #[test]
+    fn concurrent_reader_never_sees_future_payload_under_capacity_mask() {
         let dir = tempdir().unwrap();
-        let p = dir.path().join("t5");
-        let w = Arc::new(TradeRingWriter::create(&p, 1024).unwrap());
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_w = stop.clone();
-        let w_c = w.clone();
-
-        let writer = thread::spawn(move || {
-            let mut i = 0i64;
-            while !stop_w.load(Ordering::Relaxed) && i < 50_000 {
-                w_c.publish(&frame(i));
-                i += 1;
-            }
-        });
-
+        let p = dir.path().join("t7");
+        let w = TradeRingWriter::create(&p, 1024).unwrap();
         let mut r = TradeRingReader::open(&p).unwrap();
-        let mut last_price: Option<i64> = None;
-        let mut seen = 0u64;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while std::time::Instant::now() < deadline && seen < 40_000 {
-            if let Some(f) = r.try_consume() {
-                if let Some(lp) = last_price {
-                    assert!(f.price > lp, "non-monotonic: {} <= {}", f.price, lp);
-                }
-                last_price = Some(f.price);
-                seen += 1;
-            }
+        assert_eq!(r.cursor(), 0);
+
+        for i in 0..1024 {
+            w.publish(&frame(i));
         }
-        stop.store(true, Ordering::Relaxed);
-        writer.join().unwrap();
-        assert!(seen > 1000, "expected many frames, got {}", seen);
+
+        unsafe {
+            let hdr = &*(w.region.as_ptr() as *const TradeRingHeader);
+            assert_eq!(hdr.writer_seq.load(Ordering::Acquire), 1024);
+
+            let slot = w.frame_mut_ptr(0);
+            let future = frame(1024);
+            (*slot).seq.store(SEQ_IN_PROGRESS, Ordering::SeqCst);
+            write_frame_payload(slot, &future);
+
+            assert!(
+                r.try_consume().is_none(),
+                "reader must not accept future payload while overwrite is in progress"
+            );
+
+            (*slot).seq.store(1025, Ordering::Release);
+            hdr.writer_seq.store(1025, Ordering::Release);
+        }
+
+        assert!(
+            r.try_consume().is_none(),
+            "reader must jump/drop instead of accepting masked future payload"
+        );
+    }
+
+    #[test]
+    #[ignore = "로컬 stress 용. 100회 연속 monotonic 보장 확인"]
+    fn stress_monotonic_100_iterations() {
+        for _ in 0..100 {
+            run_concurrent_monotonic_once();
+        }
     }
 
     #[test]
