@@ -48,7 +48,7 @@ use hft_types::{DataRole, ExchangeId, Symbol};
 pub enum ConfigError {
     /// Figment composition 단계에서 발생한 에러 (TOML parse, env coerce 등).
     #[error("config load failed: {0}")]
-    Load(#[from] figment::Error),
+    Load(Box<figment::Error>),
 
     /// I/O 에러 (파일 접근 실패 등).
     #[error("config IO error: {0}")]
@@ -61,6 +61,12 @@ pub enum ConfigError {
 
 /// 결과 타입 별칭.
 pub type ConfigResult<T> = Result<T, ConfigError>;
+
+impl From<figment::Error> for ConfigError {
+    fn from(value: figment::Error) -> Self {
+        Self::Load(Box::new(value))
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AppConfig — 최상위 설정
