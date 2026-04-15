@@ -262,7 +262,7 @@ impl PushSocket {
 
     /// raw fd (tokio AsyncFd 어댑터 용).
     pub fn raw_fd(&self) -> ZmqResult<RawFdValue> {
-        Ok(RawFdValue(self.inner.get_fd()?))
+        Ok(RawFdValue(self.inner.get_fd()?.into()))
     }
 
     /// 소켓 `disconnect`. 보통 Drop 으로 충분하지만 explicit shutdown 용.
@@ -289,7 +289,7 @@ impl PubSocket {
 
     /// raw fd.
     pub fn raw_fd(&self) -> ZmqResult<RawFdValue> {
-        Ok(RawFdValue(self.inner.get_fd()?))
+        Ok(RawFdValue(self.inner.get_fd()?.into()))
     }
 }
 
@@ -378,7 +378,7 @@ impl PullSocket {
 
     /// raw fd.
     pub fn raw_fd(&self) -> ZmqResult<RawFdValue> {
-        Ok(RawFdValue(self.inner.get_fd()?))
+        Ok(RawFdValue(self.inner.get_fd()?.into()))
     }
 }
 
@@ -412,7 +412,7 @@ impl SubSocket {
 
     /// raw fd.
     pub fn raw_fd(&self) -> ZmqResult<RawFdValue> {
-        Ok(RawFdValue(self.inner.get_fd()?))
+        Ok(RawFdValue(self.inner.get_fd()?.into()))
     }
 }
 

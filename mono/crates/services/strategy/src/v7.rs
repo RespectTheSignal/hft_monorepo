@@ -194,10 +194,10 @@ impl V7Strategy {
         let extras = V7DecisionExtras {
             account_net_position_usdt: self.account_net_position_usdt,
         };
-        let ts = self.trade_settings();
+        let ts = self.trade_settings().clone();
         let dec = decide_order_v7(
             &sig,
-            ts,
+            &ts,
             &extras,
             now_ms,
             gate_bt.server_time_ms,
@@ -231,11 +231,11 @@ impl V7Strategy {
             bypass_safe_limit_close: false,
             bypass_max_position_size: false,
         };
-        let jitter = TimeRestrictionJitter::midpoint(ts);
+        let jitter = TimeRestrictionJitter::midpoint(&ts);
         let rc = handle_chance(
             self.oracle.as_ref(),
             &chance,
-            ts,
+            &ts,
             &self.risk,
             self.account_total_usdt,
             self.account_unrealized_pnl_usdt,

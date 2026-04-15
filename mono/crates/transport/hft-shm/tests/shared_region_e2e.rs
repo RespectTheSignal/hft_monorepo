@@ -201,8 +201,14 @@ fn layout_digest_mismatch_is_rejected() {
         n_max: 4, // DIFFERENT
         ..spec_a
     };
-    let err = SharedRegion::open_view(Backing::DevShm { path: p.clone() }, spec_b, Role::ReadOnly)
-        .expect_err("open_view should fail on digest mismatch");
+    let err = match SharedRegion::open_view(
+        Backing::DevShm { path: p.clone() },
+        spec_b,
+        Role::ReadOnly,
+    ) {
+        Ok(_) => panic!("open_view should fail on digest mismatch"),
+        Err(err) => err,
+    };
     let msg = format!("{err}");
     assert!(
         msg.to_ascii_lowercase().contains("layout") || msg.to_ascii_lowercase().contains("digest"),

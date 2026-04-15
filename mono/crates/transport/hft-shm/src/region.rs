@@ -141,6 +141,16 @@ impl Role {
     pub fn is_writer(&self) -> bool {
         matches!(self, Role::Publisher)
     }
+
+    /// 헤더에 남기는 진단용 역할 코드.
+    pub const fn header_code(self) -> u32 {
+        match self {
+            Role::Publisher => 1,
+            Role::OrderGateway => 2,
+            Role::Strategy { .. } => 3,
+            Role::ReadOnly => 4,
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -714,7 +724,7 @@ unsafe fn init_or_validate_header(
         let header = RegionHeader {
             magic: SHARED_REGION_MAGIC,
             version: SHM_VERSION,
-            writer_role: Role::Publisher as u32, // 최초 기록자는 언제나 publisher.
+            writer_role: Role::Publisher.header_code(), // 최초 기록자는 언제나 publisher.
             writer_pid: AtomicU32::new(std::process::id()),
             _pad_a: [0; 4],
             created_ns: crate::now_realtime_ns(),

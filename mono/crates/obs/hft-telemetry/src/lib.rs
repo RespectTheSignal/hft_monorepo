@@ -20,6 +20,7 @@
 use anyhow::{anyhow, Result};
 use hdrhistogram::Histogram;
 use hft_time::Stage;
+use opentelemetry::trace::TracerProvider as _;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -58,17 +59,18 @@ impl Default for TelemetryConfig {
 pub struct TelemetryHandle {
     #[allow(dead_code)]
     service_name: String,
-    /// OTLP 활성화 여부 — Drop 시 `global::shutdown_tracer_provider` 호출 필요 여부
-    /// 를 판정한다.
-    otlp_active: bool,
+    /// OTLP 활성화 시 생성한 provider. Drop 시 남은 span flush 를 위해 shutdown 한다.
+    otlp_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
 }
 
 impl Drop for TelemetryHandle {
     fn drop(&mut self) {
-        if self.otlp_active {
+        if let Some(provider) = &self.otlp_provider {
             // BatchSpanProcessor 가 backend 로 남은 span 을 flush 하도록 block.
-            // 이 호출은 tokio runtime 없이도 안전하다 (내부에서 dedicated thread 사용).
-            opentelemetry::global::shutdown_tracer_provider();
+            // provider 직접 shutdown 하여 global provider 교체 여부와 무관하게 flush 한다.
+            if let Err(err) = provider.shutdown() {
+                eprintln!("[hft-telemetry] tracer provider shutdown failed: {err}");
+            }
         }
     }
 }
@@ -95,12 +97,12 @@ pub fn init(cfg: &TelemetryConfig, service_name: &str) -> Result<TelemetryHandle
     let env_filter = tracing_subscriber::EnvFilter::try_from_env("HFT_LOG")
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(cfg.default_level.clone()));
 
-    // OTLP tracer 를 조건부로 생성. 성공 시 Some(Tracer), 실패/비활성 시 None.
+    // OTLP tracer/provider 를 조건부로 생성. 성공 시 Some, 실패/비활성 시 None.
     // `tracing_opentelemetry::layer().with_tracer(tracer)` 가 Layer<S> 를 구현하는
     // `OpenTelemetryLayer<S, Tracer>` 를 만들어주며, `S` 는 `.with()` 호출 시점에
     // 추론된다. `Option<L: Layer<S>> : Layer<S>` 이므로 `None` 은 no-op layer 로 동작.
-    let otlp_tracer = build_otlp_tracer(cfg.otlp_endpoint.as_deref(), service_name);
-    let otlp_active = otlp_tracer.is_some();
+    let otlp = build_otlp_tracer(cfg.otlp_endpoint.as_deref(), service_name);
+    let otlp_active = otlp.is_some();
 
     // 주의: Phase 1 은 blocking stdout. Phase 2 에서 tracing-appender::non_blocking 으로
     // 교체 고려. hot path 는 tracing::trace! 를 쓰지 않으므로 현재는 병목이 아니다.
@@ -109,7 +111,9 @@ pub fn init(cfg: &TelemetryConfig, service_name: &str) -> Result<TelemetryHandle
             .json()
             .with_target(true)
             .with_thread_ids(true);
-        let otel_layer = otlp_tracer.map(|t| tracing_opentelemetry::layer().with_tracer(t));
+        let otel_layer =
+            otlp.as_ref()
+                .map(|t| tracing_opentelemetry::layer().with_tracer(t.tracer.clone()));
         tracing_subscriber::registry()
             .with(env_filter)
             .with(fmt_layer)
@@ -119,7 +123,9 @@ pub fn init(cfg: &TelemetryConfig, service_name: &str) -> Result<TelemetryHandle
         let fmt_layer = tracing_subscriber::fmt::layer()
             .with_target(true)
             .with_thread_ids(true);
-        let otel_layer = otlp_tracer.map(|t| tracing_opentelemetry::layer().with_tracer(t));
+        let otel_layer =
+            otlp.as_ref()
+                .map(|t| tracing_opentelemetry::layer().with_tracer(t.tracer.clone()));
         tracing_subscriber::registry()
             .with(env_filter)
             .with(fmt_layer)
@@ -138,22 +144,25 @@ pub fn init(cfg: &TelemetryConfig, service_name: &str) -> Result<TelemetryHandle
 
     Ok(TelemetryHandle {
         service_name: service_name.to_owned(),
-        otlp_active,
+        otlp_provider: otlp.map(|t| t.provider),
     })
 }
 
-/// OTLP gRPC exporter + BatchSpanProcessor 를 띄우고 `Tracer` 반환.
+struct OtlpTracer {
+    provider: opentelemetry_sdk::trace::TracerProvider,
+    tracer: opentelemetry_sdk::trace::Tracer,
+}
+
+/// OTLP gRPC exporter + BatchSpanProcessor 를 띄우고 `TracerProvider + Tracer` 반환.
 ///
 /// - `endpoint` 가 `None` 또는 빈 문자열이면 `None` (비활성).
 /// - 내부적으로 `install_batch(runtime::Tokio)` 를 사용하므로 현재 thread 는
 ///   tokio runtime 위에 있어야 한다. 없으면 실패 → warn 후 `None`.
-/// - `opentelemetry_otlp::new_pipeline().install_batch(..)` 는 global tracer
-///   provider 에 BatchSpanProcessor 를 등록하는 side-effect 를 동반한다. 이 때문에
-///   `TelemetryHandle::Drop` 에서 `global::shutdown_tracer_provider()` 가 필요하다.
+/// - `TelemetryHandle::Drop` 에서 provider 를 직접 shutdown 하여 flush 를 보장한다.
 fn build_otlp_tracer(
     endpoint: Option<&str>,
     service_name: &str,
-) -> Option<opentelemetry_sdk::trace::Tracer> {
+) -> Option<OtlpTracer> {
     let ep = endpoint?.trim();
     if ep.is_empty() {
         return None;
@@ -179,7 +188,10 @@ fn build_otlp_tracer(
         .with_trace_config(trace_config)
         .install_batch(runtime::Tokio)
     {
-        Ok(provider) => Some(provider.tracer(service_name.to_owned())),
+        Ok(provider) => {
+            let tracer = provider.tracer(service_name.to_owned());
+            Some(OtlpTracer { provider, tracer })
+        }
         Err(e) => {
             // tracing 이 아직 init 안 됐을 수 있으므로 stderr 로 병행 출력.
             eprintln!(

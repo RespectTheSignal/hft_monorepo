@@ -227,7 +227,7 @@ impl Default for TradeFrame {
 // Order ring (SPSC)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Order ring 헤더 (128B). head/tail 는 서로 다른 cacheline 에 둔다.
+/// Order ring 헤더 (192B). metadata / head / tail 을 각각 다른 cacheline 에 둔다.
 #[repr(C, align(64))]
 pub struct OrderRingHeader {
     /// [`ORDER_MAGIC`].
@@ -254,8 +254,8 @@ pub struct OrderRingHeader {
     pub _pad_c: [u8; 56],
 }
 
-// 128B 가 아니라 256B 인 이유: head/tail 를 각각 별 cacheline 에.
-const _: () = assert!(std::mem::size_of::<OrderRingHeader>() == 256);
+// 64B metadata + 64B head lane + 64B tail lane.
+const _: () = assert!(std::mem::size_of::<OrderRingHeader>() == 192);
 const _: () = assert!(std::mem::align_of::<OrderRingHeader>() == 64);
 
 /// Order 종류.
