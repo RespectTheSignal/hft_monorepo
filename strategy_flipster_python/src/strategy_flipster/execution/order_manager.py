@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 import structlog
 
@@ -50,6 +50,7 @@ class OrderManager:
         self._dry_run_fee_bps: float = dry_run_fee_bps
         self._total_submitted: int = 0
         self._total_errors: int = 0
+        self._contract_specs: dict[str, dict[str, Decimal]] = {}
 
     @property
     def total_submitted(self) -> int:
@@ -65,7 +66,8 @@ class OrderManager:
             return self._simulate_fill(request)
 
         try:
-            response = await self._client.place_order(request)
+            normalized = await self._normalize_request(request)
+            response = await self._client.place_order(normalized)
             self._total_submitted += 1
             return response
         except AppException as e:
@@ -192,3 +194,69 @@ class OrderManager:
         except AppException as e:
             logger.error("cancel_all_failed", symbol=symbol, error=e.error.message)
             return 0
+
+    async def _normalize_request(self, request: OrderRequest) -> OrderRequest:
+        """거래소 contract 스펙에 맞게 price/qty를 정규화."""
+        if request.order_type.value != "LIMIT":
+            return request
+        if request.price is None or request.quantity is None:
+            return request
+
+        spec = await self._get_contract_spec(request.symbol)
+        tick_size = spec["tick_size"]
+        unit_qty = spec["unit_qty"]
+        min_notional = spec["min_notional"]
+
+        price = self._quantize_down(request.price, tick_size)
+        qty = self._quantize_down(request.quantity, unit_qty)
+        if price <= 0 or qty <= 0:
+            return request
+
+        while qty * price < min_notional:
+            qty = (qty + unit_qty).quantize(unit_qty)
+
+        if price == request.price and qty == request.quantity:
+            return request
+
+        logger.info(
+            "order_normalized",
+            symbol=request.symbol,
+            side=request.side.value,
+            orig_qty=str(request.quantity),
+            norm_qty=str(qty),
+            orig_price=str(request.price),
+            norm_price=str(price),
+            min_notional=str(min_notional),
+        )
+        return OrderRequest(
+            symbol=request.symbol,
+            side=request.side,
+            order_type=request.order_type,
+            quantity=qty,
+            amount=request.amount,
+            price=price,
+            reduce_only=request.reduce_only,
+            time_in_force=request.time_in_force,
+            max_slippage_price=request.max_slippage_price,
+        )
+
+    async def _get_contract_spec(self, symbol: str) -> dict[str, Decimal]:
+        cached = self._contract_specs.get(symbol)
+        if cached is not None:
+            return cached
+
+        raw = await self._client.get_contract_info(symbol)
+        spec = {
+            "tick_size": Decimal(str(raw.get("tickSize", "0.1"))),
+            "unit_qty": Decimal(str(raw.get("unitOrderQty", "0.001"))),
+            "min_notional": Decimal(str(raw.get("notionalMinOrderAmount", "0"))),
+        }
+        self._contract_specs[symbol] = spec
+        return spec
+
+    @staticmethod
+    def _quantize_down(value: Decimal, step: Decimal) -> Decimal:
+        if step <= 0:
+            return value
+        units = (value / step).to_integral_value(rounding=ROUND_DOWN)
+        return (units * step).quantize(step)

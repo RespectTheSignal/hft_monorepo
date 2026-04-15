@@ -276,11 +276,19 @@ class FlipsterExecutionClient:
     # ── 시장 (인증 필요) ──
 
     async def get_contract_info(self, symbol: str) -> dict:
-        """계약 스펙 (tickSize, unitOrderQty, notionalMinOrderAmount 등)"""
-        data = await self._request("GET", f"/api/v1/market/contract?symbol={symbol}")
+        """계약 스펙 (tickSize, unitOrderQty, notionalMinOrderAmount 등).
+
+        현재 Flipster endpoint가 query string 별로 동일한 cached 응답을 돌려주는
+        현상이 있어, symbol query 없이 단일 endpoint 호출로 통일한다.
+        """
+        data = await self._request("GET", "/api/v1/market/contract")
         if isinstance(data, list):
             if not data:
                 raise AppException(AppError(kind=ErrorKind.API, message=f"contract 응답 비어있음: {symbol}"))
+            symbol_upper = symbol.upper()
+            for item in data:
+                if str(item.get("symbol", "")).upper() == symbol_upper:
+                    return item
             return data[0]
         return data
 

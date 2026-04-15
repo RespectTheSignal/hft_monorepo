@@ -63,7 +63,8 @@ def quantize_down(value: Decimal, step: Decimal) -> Decimal:
     """value를 step 배수로 내림"""
     if step <= 0:
         return value
-    return (value / step).to_integral_value(rounding=ROUND_DOWN) * step
+    units = (value / step).to_integral_value(rounding=ROUND_DOWN)
+    return (units * step).quantize(step)
 
 
 def hr(title: str) -> None:
