@@ -595,7 +595,7 @@ mod tests {
         assert!(t.get(ExchangeId::Binance).is_none());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn router_forwards_ack_through_noop_executor() {
         let mut routing = RoutingTable::new();
         routing.insert(
@@ -625,7 +625,7 @@ mod tests {
         handle.join().await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn router_deduplicates_repeated_client_id() {
         let mut routing = RoutingTable::new();
         routing.insert(
@@ -673,7 +673,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn router_retries_then_gives_up() {
         use std::sync::atomic::AtomicU32;
         let calls = Arc::new(AtomicU32::new(0));
@@ -716,7 +716,7 @@ mod tests {
         handle.join().await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn router_skips_unknown_exchange() {
         let mut routing = RoutingTable::new();
         routing.insert(
@@ -737,7 +737,7 @@ mod tests {
         handle.join().await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn router_rejects_invalid_order() {
         let mut routing = RoutingTable::new();
         routing.insert(

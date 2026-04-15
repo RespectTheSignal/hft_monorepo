@@ -511,6 +511,15 @@ mod tests {
             taken_at_ms: 0,
         }));
         let last = Arc::new(hft_strategy_runtime::LastOrderStore::new());
+        last.record(
+            "BTC_USDT",
+            LastOrder {
+                level: OrderLevel::LimitOpen,
+                side: hft_strategy_core::decision::OrderSide::Buy,
+                price: 90.0,
+                timestamp_ms: 0,
+            },
+        );
         // 계정 심볼 허용.
         let membership = AccountMembership::fixed(["BTC_USDT"]);
         let oracle = Arc::new(PositionOracleImpl::new(meta, pos, last, membership));
@@ -537,14 +546,15 @@ mod tests {
         strat.update(&MarketEvent::WebBookTicker(BookTicker {
             exchange: ExchangeId::Gate,
             symbol: Symbol::new("BTC_USDT"),
-            bid_price: Price(99.0),  // gate_web_bid > gate_mid (100.5)? No, 99 < 100.5.
-            ask_price: Price(100.0), // gate_web_ask (100) < gate_mid (100.5) → buy signal triggered.
+            bid_price: Price(101.0), // gate_web_bid (101) > gate_mid (100.5) → sell signal.
+            ask_price: Price(102.0),
             bid_size: Size(1.0),
             ask_size: Size(1.0),
             event_time_ms: now_ms,
             server_time_ms: now_ms,
         }));
-        // close_stale 은 signal 없이도 작동 — 하지만 has_signal 체크 전에 short-circuit.
+        // close_stale 은 short-circuit 이지만, 서비스 층은 side 를 signal 에서 가져오므로
+        // long 포지션 청산 방향과 맞는 sell 시그널을 만들어 둔다.
         let ev = MarketEvent::BookTicker(BookTicker {
             exchange: ExchangeId::Gate,
             symbol: Symbol::new("BTC_USDT"),

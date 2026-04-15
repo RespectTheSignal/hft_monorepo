@@ -224,6 +224,7 @@ async fn e2e_internal_latency_under_budget() {
     // 50ms budget = 50_000_000 ns.
     const BUDGET_NS: u64 = 50_000_000;
     const N: usize = 1_000;
+    const STAGE_LATENCY_NS: u64 = 380_000;
 
     let clock = MockClock::new(1_700_000_000_000, 3_000_000_000);
     let (tx, rx) = bounded::<(MarketEvent, LatencyStamps)>(2048);
@@ -254,12 +255,14 @@ async fn e2e_internal_latency_under_budget() {
     // producer 종료 → tx drop 하여 consumer 가 Disconnected 로 자연스레 종료되게 함.
     drop(tx);
 
-    // Consumer: stamps 기반 internal_ns 를 HDR 에 기록.
-    // StrategyRunner 를 쓰지 않는 이유는 위 모듈 주석 참고 — MockClock 공유 구조
-    // 에서 producer/consumer 가 같은 시계를 나눠 쓰면 측정값이 어그러진다.
+    // Consumer: producer 와 독립된 clock 으로 Consumed 를 찍는다.
+    // 같은 MockClock 을 공유하면 producer 가 N건을 넣는 동안 시간이 누적 전진해
+    // 초기 이벤트들이 "큐에 오래 갇힌 것처럼" 과대 측정된다.
+    // 여기서는 이벤트당 stage 합(380us) 만 반영되도록 consumer 전용 clock 을
+    // ws_received 기준 +380us 에서 시작해 이벤트마다 같은 폭으로 전진시킨다.
     let mut hist = Histogram::<u64>::new_with_bounds(1, 5_000_000_000, 3).unwrap();
     let mut processed = 0usize;
-    let consumer_clock = clock.clone();
+    let consumer_clock = MockClock::new(1_700_000_000_000, 3_000_000_000 + STAGE_LATENCY_NS);
     let result = tokio::task::spawn_blocking(move || {
         while let Ok((_ev, mut stamps)) = rx.recv() {
             stamps.mark(Stage::Consumed, consumer_clock.as_ref());
@@ -267,6 +270,7 @@ async fn e2e_internal_latency_under_budget() {
                 hist.saturating_record(d);
             }
             processed += 1;
+            consumer_clock.advance_nanos(STAGE_LATENCY_NS);
         }
         (hist, processed)
     });

@@ -1539,7 +1539,7 @@ mod tests {
         assert!(got.is_none(), "uncached topic must be dropped");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn aggregator_drains_and_publishes_with_patched_published_ms() {
         let ctx = ZmqContext::new();
         let push_ep = unique_inproc();

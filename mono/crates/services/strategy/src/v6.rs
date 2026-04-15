@@ -479,6 +479,15 @@ mod tests {
             taken_at_ms: 0,
         }));
         let last = Arc::new(hft_strategy_runtime::LastOrderStore::new());
+        last.record(
+            "BTC_USDT",
+            LastOrder {
+                level: OrderLevel::LimitOpen,
+                side: hft_strategy_core::decision::OrderSide::Buy,
+                price: 90.0,
+                timestamp_ms: 0,
+            },
+        );
         let membership = AccountMembership::fixed(["BTC_USDT"]);
         let oracle = Arc::new(PositionOracleImpl::new(meta, pos, last, membership));
         let rate = Arc::new(OrderRateTracker::new());
@@ -500,12 +509,12 @@ mod tests {
             event_time_ms: now_ms,
             server_time_ms: now_ms,
         }));
-        // web book — fallback 분기 또는 v0 buy 시그널 트리거.
+        // web book — long 포지션을 닫을 수 있도록 sell 시그널을 만든다.
         strat.update(&MarketEvent::WebBookTicker(BookTicker {
             exchange: ExchangeId::Gate,
             symbol: Symbol::new("BTC_USDT"),
-            bid_price: Price(99.0),
-            ask_price: Price(100.0),
+            bid_price: Price(101.0),
+            ask_price: Price(102.0),
             bid_size: Size(1.0),
             ask_size: Size(1.0),
             event_time_ms: now_ms,
