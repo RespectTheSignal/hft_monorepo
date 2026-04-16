@@ -10,8 +10,8 @@ use hft_protocol::{
     WireLevel,
 };
 use hft_shm::{
-    Backing, LayoutSpec, OrderRingReader, OrderRingWriter, QuoteSlotWriter, Role, SharedRegion,
-    SubKind, SymbolTable, TradeRingWriter,
+    Backing, LayoutSpec, OrderRingReader, OrderRingWriter, PlaceAuxMeta, QuoteSlotWriter, Role,
+    SharedRegion, SubKind, SymbolTable, TradeRingWriter, PLACE_LEVEL_CLOSE, PLACE_LEVEL_OPEN,
 };
 use hft_strategy_shm::StrategyShmClient;
 use hft_telemetry::counters_snapshot;
@@ -370,8 +370,39 @@ fn shm_egress_smoke() {
     assert_eq!(got.ts_ns, req.origin_ts_ns);
     assert_eq!(got.price, 100);
     assert_eq!(got.size, 1);
+    let place_meta = PlaceAuxMeta::unpack(&got.aux);
+    assert_eq!(place_meta.wire_level_code(), PLACE_LEVEL_OPEN);
+    assert!(!place_meta.reduce_only());
+    assert_eq!(place_meta.text_tag_str(), "v8");
     let after = snapshot_map();
     assert_eq!(counter_delta(&before, &after, "shm_order_published"), 1);
+}
+
+#[test]
+fn shm_egress_preserves_close_reduce_only_meta() {
+    let _g = lock_test();
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("sr_reduce");
+    let spec = spec(8);
+    let sr_pub = boot_publisher(&path, spec);
+    let client = connect_strategy_client(&path, spec);
+    let egress = ShmOrderEgress::new(client);
+    let mut req = sample_req(ExchangeId::Gate);
+    req.reduce_only = true;
+    let mut meta = sample_meta();
+    meta.level = WireLevel::Close;
+    meta.strategy_tag = "v7";
+    meta.symbol_idx = None;
+
+    assert_eq!(egress.try_submit(&req, &meta).unwrap(), SubmitOutcome::Sent);
+
+    let sub = sr_pub.sub_region(SubKind::OrderRing { vm_id: 0 }).unwrap();
+    let mut reader = OrderRingReader::from_region(sub).unwrap();
+    let got = reader.try_consume().expect("one frame");
+    let place_meta = PlaceAuxMeta::unpack(&got.aux);
+    assert_eq!(place_meta.wire_level_code(), PLACE_LEVEL_CLOSE);
+    assert!(place_meta.reduce_only());
+    assert_eq!(place_meta.text_tag_str(), "v7");
 }
 
 #[test]
