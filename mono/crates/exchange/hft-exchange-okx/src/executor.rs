@@ -145,6 +145,7 @@ impl OkxExecutor {
         body.insert("ordType".into(), Self::ord_type_for(req).into());
         body.insert("sz".into(), format_num(req.qty).into());
         body.insert("clOrdId".into(), cl_ord_id.into());
+        body.insert("reduceOnly".into(), req.reduce_only.into());
 
         if matches!(req.order_type, OrderType::Limit) {
             let p = req.price.ok_or_else(|| {
@@ -453,6 +454,7 @@ mod tests {
         assert_eq!(v["sz"], "1");
         assert_eq!(v["px"], "60000");
         assert_eq!(v["clOrdId"], "cl01abc");
+        assert_eq!(v["reduceOnly"], false);
     }
 
     #[test]
@@ -475,6 +477,28 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["ordType"], "market");
         assert!(v.get("px").is_none());
+        assert_eq!(v["reduceOnly"], false);
+    }
+
+    #[test]
+    fn build_place_body_includes_reduce_only_when_true() {
+        let e = mk_exec();
+        let req = OrderRequest {
+            exchange: ExchangeId::Okx,
+            symbol: Symbol::new("BTC_USDT"),
+            side: OrderSide::Sell,
+            order_type: OrderType::Limit,
+            qty: 1.0,
+            price: Some(58_000.0),
+            reduce_only: true,
+            tif: TimeInForce::Ioc,
+            client_seq: 0,
+            origin_ts_ns: 0,
+            client_id: Arc::from("reduce-okx"),
+        };
+        let body = e.build_place_body(&req).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["reduceOnly"], true);
     }
 
     #[test]
