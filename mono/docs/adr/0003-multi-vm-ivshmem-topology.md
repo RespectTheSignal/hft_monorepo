@@ -30,6 +30,11 @@ VM 당 1개로 수평 확장. `/dev/shm` 은 VM 경계를 넘지 못하므로 Ph
 5. **wire 레이아웃은 v2 digest 로 잠금.** 변경은 전체 infra reboot 이벤트.
 6. ZMQ 경로는 유지하되 **fallback 전용**.
 
+보충 메모 (2026-04-17):
+- `OrderFrame` 자체 크기/필드는 유지하되, `aux[5]` 해석은 `kind`-dependent union 으로
+  확장됐다. `Place` 는 `PlaceAuxMeta(level, reduce_only, text_tag)` 를, `Cancel` 은
+  기존 `exchange_order_id` ASCII 를 유지한다.
+
 ## Alternatives considered
 
 - **vhost-vsock**: 5–15μs. 구현 단순하지만 HFT 지연 목표 미달.

@@ -127,7 +127,10 @@ OrderFrame (128B)
   size_raw: i64
   client_id: u64
   ts_ns: u64
-  aux_u64: [u64; 5]        # payload 여유 (cancel 시 exchange_order_id 등)
+  aux_u64: [u64; 5]        # kind-dependent union
+                           #   Place  -> level:u8, flags:u8(bit0=reduce_only),
+                           #             text_tag:[u8;32], pad:[u8;6]
+                           #   Cancel -> exchange_order_id ASCII (legacy 그대로)
   (총 128B)
 ```
 

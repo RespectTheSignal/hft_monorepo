@@ -22,7 +22,7 @@
 | **Phase 2 B** — `ExchangeExecutor` × 5 + REST/서명 infra | ✅ **완료** | `hft-exchange-rest` 중앙화 + Gate/Binance/Bybit/Bitget/OKX executor 각 place+cancel + RFC 4231 벡터 검증. order-gateway env-var wiring. |
 | **Phase 2 C** — SHM intra-host IPC (MdRing + OrderRing + SymbolTable) | ✅ **완료 (Rust 사이드)** | publisher SHM egress + order-gateway SHM ingress 양방향. `INFRA_REQUIREMENTS.md` + `MULTI_VM_TOPOLOGY.md` / ADR-0003 / `SHM_DESIGN.md`. Python ctypes reader/writer 는 pending. |
 | **Phase 2 D** — runtime feeders + main.rs variant dispatch + rate-decay 정책 | ✅ **완료** (이번 트랙) | Gate REST AccountPoller (SymbolMeta/Position provider), `OrderRateTracker::decay_before[_now]`, `StrategyControl` 채널 + V6/V7/V8 `on_control`, `services/strategy/main.rs` 전면 재작성. |
-| **Phase 2 E** — order egress (strategy → SHM 정상 / ZMQ fallback → order-gateway) | ✅ **완료 (request path)** | Step 1~5 완료: order wire, config, counter vocabulary, strategy drain, order-gateway SHM/ZMQ ingress fan-in + router counter split. result back-channel / naming cleanup / price regime 은 분리. |
+| **Phase 2 E** — order egress (strategy → SHM 정상 / ZMQ fallback → order-gateway) | ✅ **완료 (request path)** | Step 1~6 완료: order wire, config, counter vocabulary, strategy drain, order-gateway SHM/ZMQ ingress fan-in, SHM `aux` Place packing 으로 `reduce_only`/`text_tag` parity 확보. result back-channel / naming cleanup / price regime / executor reduce_only 반영은 분리. |
 | **Phase 2 F** — 실 toolchain 에서 `cargo check/test --workspace` 1회 통과 | ⏳ **다음** | 샌드박스 rustc 부재로 정적 검증만 수행. |
 | **Phase 3** — monitoring / analytics / ops 자동화 | ⏸ | §13 ~ §14. Docker infra 이관 + error manager + telegram bot. |
 | **Flipster / Python ops** | ⏸ | `feed/`, `strategy_flipster_python/` workspace exclude 유지. 대부분 Python 그대로 운영. |
@@ -39,7 +39,7 @@
 3. price regime + symbol-meta layer — `OrderFrame.price: i64` / Python `price_raw` / executor quantize 책임 정리.
 4. 통합 테스트 보강 — mock Gate REST + 실 `StrategyRunner` e2e (poll → BalanceSlot → on_control → orders).
 
-### Phase 2 E 세부 상태 (2026-04-16)
+### Phase 2 E 세부 상태 (2026-04-17)
 
 - [x] Step 1: `OrderRequestWire` / `OrderResultWire` 128B 레이아웃 + design invariance fixture
 - [x] Step 2: `OrderEgressConfig` (request egress only)
@@ -48,6 +48,8 @@
 - [x] Step 4b: `OrderEgress` trait + `PolicyOrderEgress` + SHM/ZMQ impl
 - [x] Step 4c: `services/strategy` drain 결선 (`OrderEgressMetaSeed`, `Strategy::tag`, `DrainEgress`, mode=shm|zmq)
 - [x] Step 5: `services/order-gateway` SHM/ZMQ decode fan-in + `OrderRequest` 정규화 + router counter split + `ZmqConfig.order_ingress_bind`
+- [x] Step 6: SHM `OrderFrame.aux` kind-dependent union (`PlaceAuxMeta`) 으로 `reduce_only` / `level` / `text_tag` 보존
+- [ ] Step 7: executor reduce_only 실사용 (Gate/Binance/Bybit/Bitget/OKX REST body 반영)
 - [ ] ADR-0004 draft: Order Result Return Path (TBD)
 - [ ] Heartbeat: Strategy ↔ Gateway liveness (TBD)
 - [ ] Naming cleanup: `shared_path` 드리프트 정렬 (TBD, 별도 PR)
@@ -57,6 +59,7 @@
 - [ ] `ZmqDropped` → `StrategyOrderChannelFull` rename (dashboard 호환 고려)
 - [ ] `Strategy::label()` vs `tag()` 역할 정리 (logging/display vs wire text_tag)
 - [ ] `order_egress.shm.ring_capacity` 와 shared-region layout spec 단일화 (현재는 mismatch guard만 존재)
+- [ ] ADR-0005: SHM/ZMQ wire format 단일화 (`slot.seq` 탈결합, cancel wire, PyO3 v2 API)
 
 ---
 
