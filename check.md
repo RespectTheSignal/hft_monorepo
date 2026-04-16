@@ -22,7 +22,7 @@
 | **Phase 2 B** — `ExchangeExecutor` × 5 + REST/서명 infra | ✅ **완료** | `hft-exchange-rest` 중앙화 + Gate/Binance/Bybit/Bitget/OKX executor 각 place+cancel + RFC 4231 벡터 검증. order-gateway env-var wiring. |
 | **Phase 2 C** — SHM intra-host IPC (MdRing + OrderRing + SymbolTable) | ✅ **완료 (Rust 사이드)** | publisher SHM egress + order-gateway SHM ingress 양방향. `INFRA_REQUIREMENTS.md` + `MULTI_VM_TOPOLOGY.md` / ADR-0003 / `SHM_DESIGN.md`. Python ctypes reader/writer 는 pending. |
 | **Phase 2 D** — runtime feeders + main.rs variant dispatch + rate-decay 정책 | ✅ **완료** (이번 트랙) | Gate REST AccountPoller (SymbolMeta/Position provider), `OrderRateTracker::decay_before[_now]`, `StrategyControl` 채널 + V6/V7/V8 `on_control`, `services/strategy/main.rs` 전면 재작성. |
-| **Phase 2 E** — order egress (strategy → SHM 정상 / ZMQ fallback → order-gateway) | ✅ **완료** | Step 1~7 완료: order wire, config, counter vocabulary, strategy drain, order-gateway SHM/ZMQ ingress fan-in, SHM `aux` Place packing, executor 5종 `reduce_only` 반영까지 연결. result back-channel / naming cleanup / price regime 은 분리. |
+| **Phase 2 E** — order egress (strategy → SHM 정상 / ZMQ fallback → order-gateway) | ✅ **완료** | Step 1~8 완료: order wire, config, counter vocabulary, strategy drain, order-gateway SHM/ZMQ ingress fan-in, SHM `aux` Place packing, executor 5종 `reduce_only`, ZMQ result back-channel 까지 연결. SHM result ring / naming cleanup / price regime 은 분리. |
 | **Phase 2 F** — 실 toolchain 에서 `cargo check/test --workspace` 1회 통과 | ⏳ **다음** | 샌드박스 rustc 부재로 정적 검증만 수행. |
 | **Phase 3** — monitoring / analytics / ops 자동화 | ⏸ | §13 ~ §14. Docker infra 이관 + error manager + telegram bot. |
 | **Flipster / Python ops** | ⏸ | `feed/`, `strategy_flipster_python/` workspace exclude 유지. 대부분 Python 그대로 운영. |
@@ -35,9 +35,9 @@
 
 **지금 즉시 해결이 필요한 항목 (order 순):**
 1. 실 rustc 환경에서 `cargo check --workspace --all-targets` — dep 그래프 / feature flag 회귀 확인. (블로커)
-2. ADR-0004 — order result back-channel / heartbeat 범위 확정.
+2. ADR-0004 — SHM result ring / heartbeat 범위 확정 (현재 ZMQ reverse path 는 구현 완료).
 3. price regime + symbol-meta layer — `OrderFrame.price: i64` / Python `price_raw` / executor quantize 책임 정리.
-4. 통합 테스트 보강 — mock Gate REST + 실 `StrategyRunner` e2e (poll → BalanceSlot → on_control → orders).
+4. 통합 테스트 보강 — mock Gate REST + 실 `StrategyRunner` e2e (poll → BalanceSlot → on_control → orders/results).
 
 ### Phase 2 E 세부 상태 (2026-04-17)
 
@@ -50,7 +50,8 @@
 - [x] Step 5: `services/order-gateway` SHM/ZMQ decode fan-in + `OrderRequest` 정규화 + router counter split + `ZmqConfig.order_ingress_bind`
 - [x] Step 6: SHM `OrderFrame.aux` kind-dependent union (`PlaceAuxMeta`) 으로 `reduce_only` / `level` / `text_tag` 보존
 - [x] Step 7: executor reduce_only 실사용 (Gate/Binance/Bybit/Bitget/OKX REST body 반영)
-- [ ] ADR-0004 draft: Order Result Return Path (TBD)
+- [x] Step 8: order result back-channel (gateway ZMQ PUSH → strategy ZMQ PULL → `StrategyControl::OrderResult`)
+- [ ] ADR-0004 draft: SHM result ring / heartbeat / fill-stream 확장 범위 (현재 ZMQ reverse path 만 완료)
 - [ ] Heartbeat: Strategy ↔ Gateway liveness (TBD)
 - [ ] Naming cleanup: `shared_path` 드리프트 정렬 (TBD, 별도 PR)
 - [ ] `ShmOrderInvalid` → `OrderGatewayInvalidTotal` rename + `OrderGatewayInvalidWire` subset 분리 (별도 PR, dashboard rename 주의)
@@ -615,7 +616,7 @@ Phase 1 완료 조건. **모두 통과 (2026-04-15 시점)**.
 | ✅ **P2 B** | 완료 | Exchange executor × 5 (Gate/Binance/Bybit/Bitget/OKX) + hft-exchange-rest 서명 | §3.10 (executor), §11.5 |
 | ✅ **P2 C** | 완료 | SHM intra-host IPC (MdRing seqlock + OrderRing SPSC + SymbolTable ahash) | §0, §2 subscriber, §10.5 |
 | ✅ **P2 D** | 완료 | Account REST poller + OrderRateTracker::decay + StrategyControl + main.rs 배선 | §10.6 (strategy_manager, partial account_manager) |
-| ✅ **P2 E** | 완료 (request path) | `OrderRequestWire` + `OrderEgressConfig` + strategy drain + order-gateway SHM/ZMQ ingress/routing + request-path tests 완료. result back-channel / heartbeat / price regime 은 별도 | §11.2, §11.4 |
+| ✅ **P2 E** | 완료 | `OrderRequestWire` + `OrderEgressConfig` + strategy drain + order-gateway SHM/ZMQ ingress/routing + SHM `PlaceAuxMeta` + executor `reduce_only` + ZMQ result back-channel 완료. SHM result ring / heartbeat / price regime 은 별도 | §11.2, §11.4 |
 | ⏳ **P2 F** | 진행 예정 | Deploy/Runtime 하드닝 (systemd, log rotation, healthcheck) | §11.2, §11.4, §13 부분 |
 | 🔷 **P3** | 미착수 | monitoring 스택 / analytics / ops 자동화 / multi-subaccount | §10.6 (error_manager 등), §13, §14, §16 정리 |
 | ⏸ **Deferred** | 유지/드랍 | Python 운영 스크립트 / RL / flatbuffer / 레거시 버전 | §9.4, §11.1, §11.7, §15 |

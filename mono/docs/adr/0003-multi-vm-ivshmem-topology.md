@@ -34,6 +34,9 @@ VM 당 1개로 수평 확장. `/dev/shm` 은 VM 경계를 넘지 못하므로 Ph
 - `OrderFrame` 자체 크기/필드는 유지하되, `aux[5]` 해석은 `kind`-dependent union 으로
   확장됐다. `Place` 는 `PlaceAuxMeta(level, reduce_only, text_tag)` 를, `Cancel` 은
   기존 `exchange_order_id` ASCII 를 유지한다.
+- order result return path 는 현재 `gateway ZMQ PUSH → strategy ZMQ PULL` 이다.
+  SHM result ring 은 현 SPSC commit marker 가 payload layout 에 결합돼 있어
+  별도 ADR(ADR-0005/0004 후속) 로 미뤄진다.
 
 ## Alternatives considered
 
