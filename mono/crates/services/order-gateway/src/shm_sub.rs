@@ -39,7 +39,8 @@ use crossbeam_channel::{Sender, TrySendError};
 use hft_exchange_api::{CancellationToken, OrderRequest, OrderSide, OrderType, TimeInForce};
 use hft_shm::{
     exchange_from_u8, Backing, LayoutSpec, MultiOrderRingReader, OrderFrame, OrderKind,
-    OrderRingReader, Role, SharedRegion, SubKind, SymbolTable,
+    OrderRingReader, PlaceAuxMeta, Role, SharedRegion, SubKind, SymbolTable,
+    PLACE_LEVEL_OPEN,
 };
 use hft_telemetry::{counter_add, counter_inc, CounterKey};
 use hft_types::Symbol;
@@ -462,6 +463,23 @@ impl Worker {
         exchange: hft_types::ExchangeId,
         symbol: Symbol,
     ) -> Result<(), HandleFrameError> {
+        let place_meta = PlaceAuxMeta::unpack(&frame.aux);
+        let strategy_tag = place_meta.text_tag_str();
+        if place_meta.wire_level_code() != PLACE_LEVEL_OPEN
+            || place_meta.reduce_only()
+            || !strategy_tag.is_empty()
+        {
+            debug!(
+                target: "order_gateway::shm_sub",
+                vm_id,
+                client_seq = frame.client_id,
+                level = place_meta.wire_level_code(),
+                reduce_only = place_meta.reduce_only(),
+                strategy_tag = strategy_tag,
+                "decoded SHM place aux meta"
+            );
+        }
+
         let side = match frame.side {
             0 => OrderSide::Buy,
             1 => OrderSide::Sell,
@@ -519,8 +537,7 @@ impl Worker {
             order_type,
             qty,
             price,
-            // TODO(Step5-debt): OrderFrame 에 reduce_only 부재. SHM path 는 현재 false 고정.
-            reduce_only: false,
+            reduce_only: place_meta.reduce_only(),
             tif,
             client_seq: frame.client_id,
             origin_ts_ns: frame.ts_ns,
@@ -751,6 +768,18 @@ mod tests {
         }
     }
 
+    fn sample_place_frame_with_meta(
+        symbol_idx: u32,
+        client_id: u64,
+        level: u8,
+        reduce_only: bool,
+        tag: &str,
+    ) -> OrderFrame {
+        let mut frame = sample_place_frame(symbol_idx, client_id);
+        frame.aux = PlaceAuxMeta::from_parts(level, reduce_only, tag).pack();
+        frame
+    }
+
     fn sample_cancel_frame(symbol_idx: u32, order_id: &str) -> OrderFrame {
         OrderFrame {
             seq: 0,
@@ -854,6 +883,97 @@ mod tests {
         assert!((req.qty - 1.0).abs() < 1e-9);
         assert_eq!(req.price, Some(50_000.0));
         assert!(req.client_id.starts_with("py-gate-"));
+
+        handle.join();
+    }
+
+    #[tokio::test]
+    async fn place_frame_place_aux_restores_reduce_only() {
+        let dir = tempdir().unwrap();
+        let (writer, _sym, sym_idx) = setup_shm(dir.path());
+
+        let mut routing = RoutingTable::new();
+        routing.insert(
+            ExchangeId::Gate,
+            Route::Rust(Arc::new(crate::NoopExecutor::new(ExchangeId::Gate))),
+        );
+        let routing = Arc::new(routing);
+
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(16);
+        let cancel = CancellationToken::new();
+        let cfg = ShmSubscriberConfig::legacy(
+            dir.path().join("orders"),
+            dir.path().join("symtab"),
+        );
+        let handle = start_shm_order_subscriber(
+            &cfg,
+            routing.clone(),
+            req_tx,
+            TokioHandle::current(),
+            cancel.clone(),
+        )
+        .unwrap();
+
+        assert!(writer.publish(&sample_place_frame_with_meta(
+            sym_idx,
+            4242,
+            hft_shm::PLACE_LEVEL_CLOSE,
+            true,
+            "v6",
+        )));
+
+        let req = tokio::task::spawn_blocking(move || {
+            req_rx.recv_timeout(Duration::from_millis(500))
+        })
+        .await
+        .unwrap()
+        .expect("router should receive OrderRequest");
+
+        assert!(req.reduce_only);
+        assert_eq!(req.client_seq, 4242);
+        assert_eq!(req.origin_ts_ns, 12345);
+
+        handle.join();
+    }
+
+    #[tokio::test]
+    async fn place_frame_legacy_zero_aux_falls_back_to_reduce_only_false() {
+        let dir = tempdir().unwrap();
+        let (writer, _sym, sym_idx) = setup_shm(dir.path());
+
+        let mut routing = RoutingTable::new();
+        routing.insert(
+            ExchangeId::Gate,
+            Route::Rust(Arc::new(crate::NoopExecutor::new(ExchangeId::Gate))),
+        );
+        let routing = Arc::new(routing);
+
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(16);
+        let cancel = CancellationToken::new();
+        let cfg = ShmSubscriberConfig::legacy(
+            dir.path().join("orders"),
+            dir.path().join("symtab"),
+        );
+        let handle = start_shm_order_subscriber(
+            &cfg,
+            routing.clone(),
+            req_tx,
+            TokioHandle::current(),
+            cancel.clone(),
+        )
+        .unwrap();
+
+        assert!(writer.publish(&sample_place_frame(sym_idx, 7)));
+
+        let req = tokio::task::spawn_blocking(move || {
+            req_rx.recv_timeout(Duration::from_millis(500))
+        })
+        .await
+        .unwrap()
+        .expect("router should receive OrderRequest");
+
+        assert!(!req.reduce_only);
+        assert_eq!(req.client_seq, 7);
 
         handle.join();
     }
