@@ -362,6 +362,25 @@ fn recv_timeout_inner(
     }
 }
 
+/// 공통 raw single-frame recv 로직.
+fn recv_bytes_timeout_inner(
+    sock: &mut zmq::Socket,
+    timeout_ms: i32,
+) -> ZmqResult<Option<Vec<u8>>> {
+    sock.set_rcvtimeo(timeout_ms)?;
+    match sock.recv_multipart(0) {
+        Ok(parts) => {
+            if parts.len() != 1 {
+                return Err(ZmqWrapError::BadFrameCount(parts.len()));
+            }
+            Ok(parts.into_iter().next())
+        }
+        Err(zmq::Error::EAGAIN) => Ok(None),
+        Err(zmq::Error::ETERM) => Err(ZmqWrapError::ContextTerminated),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// 배치 drain: `DONTWAIT` 으로 cap 개까지 recv.
 ///
 /// 반환: 실제로 꺼낸 개수. WouldBlock 에 도달하면 조기 종료.
@@ -407,6 +426,11 @@ impl PullSocket {
     /// ms 단위 timeout 으로 한 건 수신. `None` = timeout.
     pub fn recv_timeout(&mut self, timeout_ms: i32) -> ZmqResult<Option<TopicPayload>> {
         recv_timeout_inner(&mut self.inner, timeout_ms)
+    }
+
+    /// raw single-frame payload 를 timeout 기반으로 1건 수신한다.
+    pub fn recv_bytes_timeout(&mut self, timeout_ms: i32) -> ZmqResult<Option<Vec<u8>>> {
+        recv_bytes_timeout_inner(&mut self.inner, timeout_ms)
     }
 
     /// 배치 drain. 반환은 **이번 호출에서 밀어 넣은 건수**.
@@ -501,6 +525,7 @@ mod tests {
             push_endpoint: String::new(),
             pub_endpoint: String::new(),
             sub_endpoint: String::new(),
+            order_ingress_bind: None,
         }
     }
 
@@ -569,6 +594,24 @@ mod tests {
         // PUSH 가 연결되지 않음 → recv_timeout(50) 은 None.
         let got = pull.recv_timeout(50).unwrap();
         assert!(got.is_none());
+    }
+
+    #[test]
+    fn push_pull_raw_single_frame_roundtrip() {
+        let ctx = Context::new();
+        let ep = unique_inproc();
+        let cfg = cfg();
+        let mut pull = ctx.pull(&ep, &cfg).unwrap();
+        let push = ctx.push(&ep, &cfg).unwrap();
+
+        let out = push.send_bytes_dontwait(b"raw-128b");
+        assert!(out.is_sent(), "send_bytes_dontwait: {:?}", out);
+
+        let got = pull
+            .recv_bytes_timeout(500)
+            .expect("recv_bytes_timeout err")
+            .expect("timeout");
+        assert_eq!(got, b"raw-128b");
     }
 
     #[test]

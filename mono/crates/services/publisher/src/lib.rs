@@ -1398,6 +1398,7 @@ mod tests {
             push_endpoint: push.into(),
             pub_endpoint: pub_.into(),
             sub_endpoint: pub_.into(),
+            order_ingress_bind: None,
         }
     }
 

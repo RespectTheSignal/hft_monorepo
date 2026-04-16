@@ -727,6 +727,7 @@ mod tests {
                 pub_endpoint: "inproc://subtest-pub".into(),
                 sub_endpoint: "inproc://subtest-pub".into(),
                 linger_ms: 0,
+                order_ingress_bind: None,
             },
             ..AppConfig::default()
         });

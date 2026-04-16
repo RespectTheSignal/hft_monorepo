@@ -300,6 +300,7 @@ mod tests {
             push_endpoint: String::new(),
             pub_endpoint: String::new(),
             sub_endpoint: String::new(),
+            order_ingress_bind: None,
         }
     }
 

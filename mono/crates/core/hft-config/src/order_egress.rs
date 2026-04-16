@@ -11,7 +11,7 @@ use crate::{ConfigError, ConfigResult};
 ///
 /// `ShmConfig` 가 shared region 경로/role/vm_id 를 담당하고, 이 구조체는
 /// "어느 경로를 쓸지" 와 "주문 경로 자체의 튜닝" 만 담당한다.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct OrderEgressConfig {
     /// 정상 경로(SHM) 또는 fallback(ZMQ) 선택.
@@ -22,17 +22,6 @@ pub struct OrderEgressConfig {
     pub zmq: Option<ZmqOrderEgressConfig>,
     /// 링 full / downstream 정체 시 처리 정책.
     pub backpressure: BackpressurePolicy,
-}
-
-impl Default for OrderEgressConfig {
-    fn default() -> Self {
-        Self {
-            mode: OrderEgressMode::default(),
-            shm: ShmOrderEgressConfig::default(),
-            zmq: None,
-            backpressure: BackpressurePolicy::default(),
-        }
-    }
 }
 
 impl OrderEgressConfig {

@@ -158,6 +158,9 @@ pub struct ZmqConfig {
     pub pub_endpoint: String,
     /// SUB (subscriber → aggregator) endpoint.
     pub sub_endpoint: String,
+    /// order-gateway ZMQ ingress bind endpoint. `None` 이면 SHM-only.
+    #[serde(default)]
+    pub order_ingress_bind: Option<String>,
 }
 
 impl Default for ZmqConfig {
@@ -169,6 +172,7 @@ impl Default for ZmqConfig {
             push_endpoint: "inproc://hft-push".into(),
             pub_endpoint: "tcp://0.0.0.0:5555".into(),
             sub_endpoint: "tcp://127.0.0.1:5555".into(),
+            order_ingress_bind: None,
         }
     }
 }
@@ -666,6 +670,17 @@ pub fn validate(cfg: &AppConfig) -> ConfigResult<()> {
         !cfg.zmq.push_endpoint.is_empty(),
         "zmq.push_endpoint must not be empty"
     );
+    if let Some(bind) = cfg.zmq.order_ingress_bind.as_ref() {
+        ensure!(
+            !bind.trim().is_empty(),
+            "zmq.order_ingress_bind must not be empty when set"
+        );
+        let ok_prefix = bind.starts_with("tcp://") || bind.starts_with("inproc://");
+        ensure!(
+            ok_prefix,
+            "zmq.order_ingress_bind must start with tcp:// or inproc://"
+        );
+    }
 
     ensure!(!cfg.exchanges.is_empty(), "exchanges must not be empty");
     for (i, ex) in cfg.exchanges.iter().enumerate() {
@@ -893,6 +908,17 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_bad_order_ingress_bind_uri() {
+        let mut cfg = minimal_valid_cfg();
+        cfg.zmq.order_ingress_bind = Some("".into());
+        assert!(validate(&cfg).is_err());
+        cfg.zmq.order_ingress_bind = Some("ipc://bad".into());
+        assert!(validate(&cfg).is_err());
+        cfg.zmq.order_ingress_bind = Some("tcp://127.0.0.1:7010".into());
+        validate(&cfg).unwrap();
+    }
+
+    #[test]
     fn validate_rejects_empty_symbol_list() {
         let mut cfg = minimal_valid_cfg();
         cfg.exchanges[0].symbols.clear();
@@ -928,6 +954,7 @@ mod tests {
             push_endpoint = "inproc://push"
             pub_endpoint = "tcp://0.0.0.0:5555"
             sub_endpoint = "tcp://127.0.0.1:5555"
+            order_ingress_bind = "tcp://127.0.0.1:7010"
 
             [[exchanges]]
             id = "gate"
@@ -939,6 +966,10 @@ mod tests {
         assert_eq!(cfg.hot_workers, 4);
         assert_eq!(cfg.zmq.hwm, 200_000);
         assert_eq!(cfg.zmq.drain_batch_cap, 1024);
+        assert_eq!(
+            cfg.zmq.order_ingress_bind.as_deref(),
+            Some("tcp://127.0.0.1:7010")
+        );
         assert_eq!(cfg.exchanges.len(), 1);
         assert_eq!(cfg.exchanges[0].id, ExchangeId::Gate);
         assert_eq!(cfg.exchanges[0].symbols.len(), 2);
@@ -966,6 +997,7 @@ mod tests {
             push_endpoint = "inproc://push"
             pub_endpoint = "tcp://0.0.0.0:5555"
             sub_endpoint = "tcp://127.0.0.1:5555"
+            order_ingress_bind = "inproc://order-ingress"
 
             [[exchanges]]
             id = "gate"
