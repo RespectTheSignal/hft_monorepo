@@ -24,7 +24,10 @@ pub mod wire;
 // ── 자주 쓰는 심볼 top-level re-export ────────────────────────────────────────
 
 pub use frame::{create_message, parse_frame, write_frame_into, FrameError, FrameView};
-pub use order_adapter::{OrderAdaptError, OrderEgressMeta, WireLevel};
+pub use order_adapter::{
+    order_request_to_order_frame, order_request_to_order_request_wire, OrderAdaptError,
+    OrderEgressMeta, WireLevel,
+};
 pub use topics::{
     parse_topic, ParsedTopic, TopicBuilder, MSG_BOOKTICKER, MSG_TRADE, MSG_WEBBOOKTICKER,
     TOPIC_SEP,
