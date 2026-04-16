@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -76,6 +77,43 @@ impl FlipsterClient {
             jar,
             cf_bm: Arc::new(RwLock::new(config.cf_bm)),
             dry_run: config.dry_run,
+        }
+    }
+
+    /// Create a client from a HashMap of cookies (e.g. from CDP extraction).
+    pub fn from_cookies(cookies: &HashMap<String, String>) -> Self {
+        let config = FlipsterConfig {
+            session_id_bolts: cookies.get("session_id_bolts").cloned().unwrap_or_default(),
+            session_id_nuts: cookies.get("session_id_nuts").cloned().unwrap_or_default(),
+            ajs_user_id: cookies.get("ajs_user_id").cloned().unwrap_or_default(),
+            cf_bm: cookies.get("__cf_bm").cloned().unwrap_or_default(),
+            ga: cookies.get("_ga").cloned().unwrap_or_default(),
+            ga_rh8fm2jkcm: cookies.get("_ga_RH8FM2JKCM").cloned().unwrap_or_default(),
+            ajs_anonymous_id: cookies.get("ajs_anonymous_id").cloned().unwrap_or_default(),
+            analytics_session_id: cookies.get("analytics_session_id").cloned().unwrap_or_default(),
+            internal: cookies.get("internal").cloned().unwrap_or("false".into()),
+            referral_path: cookies.get("referral_path").cloned().unwrap_or_default(),
+            referrer_symbol: cookies.get("referrer_symbol").cloned().unwrap_or_default(),
+            dry_run: false,
+            proxy: None,
+        };
+        Self::new(config)
+    }
+
+    /// Reload all cookies from a HashMap (e.g. after refresh_cookies).
+    pub fn reload_cookies(&self, cookies: &HashMap<String, String>) {
+        let api_url: Url = API_BASE.parse().unwrap();
+        for (name, value) in cookies {
+            let cookie_name = match name.as_str() {
+                "cf_bm" => "__cf_bm",
+                "ga" => "_ga",
+                "ga_rh8fm2jkcm" => "_ga_RH8FM2JKCM",
+                other => other,
+            };
+            self.jar.add_cookie_str(
+                &format!("{cookie_name}={value}; Domain=api.flipster.io; Path=/"),
+                &api_url,
+            );
         }
     }
 
