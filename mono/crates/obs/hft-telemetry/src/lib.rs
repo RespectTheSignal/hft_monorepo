@@ -353,6 +353,15 @@ struct Counters {
     shm_publisher_stale: AtomicU64,
     shm_order_batch: AtomicU64,
     shm_backoff_park: AtomicU64,
+    // strategy order egress vocabulary (Phase 2 E / Step 3).
+    order_egress_zmq_ok: AtomicU64,
+    order_egress_backpressure_dropped: AtomicU64,
+    order_egress_backpressure_retried: AtomicU64,
+    order_egress_backpressure_retry_exhausted: AtomicU64,
+    order_egress_backpressure_blocked: AtomicU64,
+    order_egress_backpressure_block_timeout: AtomicU64,
+    order_egress_zmq_fallback_activated: AtomicU64,
+    order_egress_serialize_error: AtomicU64,
     // 기타 ad-hoc 용 — rare.
     extras: Mutex<ahash::AHashMap<&'static str, Arc<AtomicU64>>>,
 }
@@ -379,6 +388,14 @@ fn counters() -> &'static Counters {
         shm_publisher_stale: AtomicU64::new(0),
         shm_order_batch: AtomicU64::new(0),
         shm_backoff_park: AtomicU64::new(0),
+        order_egress_zmq_ok: AtomicU64::new(0),
+        order_egress_backpressure_dropped: AtomicU64::new(0),
+        order_egress_backpressure_retried: AtomicU64::new(0),
+        order_egress_backpressure_retry_exhausted: AtomicU64::new(0),
+        order_egress_backpressure_blocked: AtomicU64::new(0),
+        order_egress_backpressure_block_timeout: AtomicU64::new(0),
+        order_egress_zmq_fallback_activated: AtomicU64::new(0),
+        order_egress_serialize_error: AtomicU64::new(0),
         extras: Mutex::new(ahash::AHashMap::default()),
     })
 }
@@ -422,6 +439,26 @@ pub enum CounterKey {
     ShmOrderBatch,
     /// v2 multi-VM: spin budget 소진 → park_timeout 진입 횟수.
     ShmBackoffPark,
+    /// Strategy egress 에서 ZMQ fallback 경로로 publish 성공.
+    /// NOTE: `ShmOrderPublished` 는 SHM 정상 경로. 둘이 함께 total egress 를 이룬다.
+    OrderEgressZmqOk,
+    /// Strategy egress 정책(`BackpressurePolicy::Drop`) 에 따른 즉시 drop.
+    /// NOTE: `ShmOrderFullDrop` 은 ring full mechanical condition (정책 무관).
+    ///       두 counter 는 서로 다른 축의 분석용이며 overlap 가능.
+    OrderEgressBackpressureDropped,
+    /// Strategy egress 정책(`BackpressurePolicy::RetryWithTimeout`) 내 1회 retry.
+    OrderEgressBackpressureRetried,
+    /// Retry 한도 초과로 최종 drop. `Retried` 카운트의 terminal tail.
+    OrderEgressBackpressureRetryExhausted,
+    /// Block 정책 timeout 내 성공. `ShmBackoffPark` (gateway idle park) 와 다름.
+    OrderEgressBackpressureBlocked,
+    /// Block 정책 timeout 초과 drop.
+    OrderEgressBackpressureBlockTimeout,
+    /// mode=Shm 운용 중 Zmq 로 fallback 전환된 signal.
+    /// 정상상태에서는 발화 빈도가 매우 낮아야 함 (alert 트리거 후보).
+    OrderEgressZmqFallbackActivated,
+    /// Wire encode 실패. 이론상 발생 불가, defensive.
+    OrderEgressSerializeError,
 }
 
 /// 알려진 counter 를 1 증가. hot path — atomic fetch_add 만.
@@ -453,6 +490,18 @@ pub fn counter_add(k: CounterKey, n: u64) {
         CounterKey::ShmPublisherStale => &c.shm_publisher_stale,
         CounterKey::ShmOrderBatch => &c.shm_order_batch,
         CounterKey::ShmBackoffPark => &c.shm_backoff_park,
+        CounterKey::OrderEgressZmqOk => &c.order_egress_zmq_ok,
+        CounterKey::OrderEgressBackpressureDropped => &c.order_egress_backpressure_dropped,
+        CounterKey::OrderEgressBackpressureRetried => &c.order_egress_backpressure_retried,
+        CounterKey::OrderEgressBackpressureRetryExhausted => {
+            &c.order_egress_backpressure_retry_exhausted
+        }
+        CounterKey::OrderEgressBackpressureBlocked => &c.order_egress_backpressure_blocked,
+        CounterKey::OrderEgressBackpressureBlockTimeout => {
+            &c.order_egress_backpressure_block_timeout
+        }
+        CounterKey::OrderEgressZmqFallbackActivated => &c.order_egress_zmq_fallback_activated,
+        CounterKey::OrderEgressSerializeError => &c.order_egress_serialize_error,
     };
     target.fetch_add(n, Ordering::Relaxed);
 }
@@ -532,6 +581,44 @@ pub fn counters_snapshot() -> Vec<(String, u64)> {
         (
             "shm_backoff_park".into(),
             c.shm_backoff_park.load(Ordering::Relaxed),
+        ),
+        (
+            "order_egress_zmq_ok".into(),
+            c.order_egress_zmq_ok.load(Ordering::Relaxed),
+        ),
+        (
+            "order_egress_backpressure_dropped".into(),
+            c.order_egress_backpressure_dropped
+                .load(Ordering::Relaxed),
+        ),
+        (
+            "order_egress_backpressure_retried".into(),
+            c.order_egress_backpressure_retried
+                .load(Ordering::Relaxed),
+        ),
+        (
+            "order_egress_backpressure_retry_exhausted".into(),
+            c.order_egress_backpressure_retry_exhausted
+                .load(Ordering::Relaxed),
+        ),
+        (
+            "order_egress_backpressure_blocked".into(),
+            c.order_egress_backpressure_blocked
+                .load(Ordering::Relaxed),
+        ),
+        (
+            "order_egress_backpressure_block_timeout".into(),
+            c.order_egress_backpressure_block_timeout
+                .load(Ordering::Relaxed),
+        ),
+        (
+            "order_egress_zmq_fallback_activated".into(),
+            c.order_egress_zmq_fallback_activated
+                .load(Ordering::Relaxed),
+        ),
+        (
+            "order_egress_serialize_error".into(),
+            c.order_egress_serialize_error.load(Ordering::Relaxed),
         ),
     ];
     for (k, v) in c.extras.lock().iter() {
