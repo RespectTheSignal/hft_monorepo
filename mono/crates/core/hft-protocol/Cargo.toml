@@ -8,6 +8,8 @@ rust-version.workspace = true
 
 [dependencies]
 hft-types = { workspace = true }
+hft-exchange-api = { workspace = true }
+hft-shm = { workspace = true }
 bytes = { workspace = true }
 byteorder = { workspace = true }
 serde = { workspace = true }

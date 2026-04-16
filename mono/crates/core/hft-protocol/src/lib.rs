@@ -16,6 +16,7 @@
 #![deny(rust_2018_idioms)]
 
 pub mod frame;
+pub mod order_adapter;
 pub mod order_wire;
 pub mod topics;
 pub mod wire;
@@ -23,6 +24,7 @@ pub mod wire;
 // ── 자주 쓰는 심볼 top-level re-export ────────────────────────────────────────
 
 pub use frame::{create_message, parse_frame, write_frame_into, FrameError, FrameView};
+pub use order_adapter::{OrderAdaptError, OrderEgressMeta, WireLevel};
 pub use topics::{
     parse_topic, ParsedTopic, TopicBuilder, MSG_BOOKTICKER, MSG_TRADE, MSG_WEBBOOKTICKER,
     TOPIC_SEP,

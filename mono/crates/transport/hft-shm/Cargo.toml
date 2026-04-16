@@ -13,7 +13,6 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 parking_lot = { workspace = true }
 hft-types = { workspace = true }
-hft-protocol = { workspace = true }
 hft-time = { workspace = true }
 hft-telemetry = { workspace = true }
 
