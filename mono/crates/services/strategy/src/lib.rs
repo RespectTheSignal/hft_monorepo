@@ -331,8 +331,7 @@ impl<S: Strategy> StrategyRunner<S> {
             match self.orders.try_send(order) {
                 Ok(()) => {}
                 Err(OrderSendError::Full) => {
-                    // TODO(4c-followup): rename to StrategyOrderChannelFull; see CounterKey vocabulary cleanup.
-                    counter_inc(CounterKey::ZmqDropped);
+                    counter_inc(CounterKey::StrategyOrderChannelFull);
                     warn!(
                         target: "strategy::runner",
                         "order channel full — dropping order"
@@ -390,7 +389,21 @@ impl StrategyHandle {
     /// 제어 메시지 발신 편의. channel full 이면 drop + warn 처리 (뷰어는 Relaxed).
     pub fn push_control(&self, ctrl: StrategyControl) {
         if let Err(e) = self.control_tx.try_send(ctrl) {
-            warn!(target: "strategy::handle", error = ?e, "control channel send failed");
+            match e {
+                TrySendError::Full(_) => {
+                    counter_inc(CounterKey::StrategyControlDropped);
+                    warn!(
+                        target: "strategy::handle",
+                        "control channel full — dropping control message"
+                    );
+                }
+                TrySendError::Disconnected(_) => {
+                    warn!(
+                        target: "strategy::handle",
+                        "control channel disconnected — control message dropped"
+                    );
+                }
+            }
         }
     }
 }

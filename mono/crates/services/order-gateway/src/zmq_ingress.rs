@@ -264,7 +264,7 @@ fn start_zmq_order_ingress_with_context(
                         }
                     },
                     Err(IngressDecodeError::Invalid(err)) => {
-                        counter_inc(CounterKey::ShmOrderInvalid);
+                        counter_inc(CounterKey::OrderGatewayInvalidWire);
                         debug!(
                             target: "order_gateway::zmq_ingress",
                             error = %err,
@@ -282,7 +282,7 @@ fn start_zmq_order_ingress_with_context(
                 },
                 Ok(None) => continue,
                 Err(e) => {
-                    counter_inc(CounterKey::ShmOrderInvalid);
+                    counter_inc(CounterKey::OrderGatewayInvalidWire);
                     warn!(
                         target: "order_gateway::zmq_ingress",
                         endpoint = %endpoint,

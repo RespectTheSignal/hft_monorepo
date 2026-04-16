@@ -16,6 +16,7 @@ hft-exchange-rest = { workspace = true }
 hft-strategy-runtime = { workspace = true }
 hft-types = { workspace = true }
 hft-time = { workspace = true }
+hft-telemetry = { workspace = true }
 # BalanceSlot = `ArcSwap<AccountBalance>` — 전략이 lock-free 로 최신 잔고를 읽는다.
 arc-swap = { workspace = true }
 # PositionSnapshot 내부 맵 구현 (strategy runtime 과 해시 전략 일치 유지).

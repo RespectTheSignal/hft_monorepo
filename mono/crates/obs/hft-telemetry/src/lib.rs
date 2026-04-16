@@ -370,6 +370,11 @@ struct Counters {
     // strategy result back-channel vocabulary (Phase 2 E / Step 8).
     order_result_received: AtomicU64,
     order_result_rejected: AtomicU64,
+    // cleanup batch vocabulary.
+    strategy_account_poll_err: AtomicU64,
+    strategy_control_dropped: AtomicU64,
+    strategy_order_channel_full: AtomicU64,
+    order_gateway_invalid_wire: AtomicU64,
     // 기타 ad-hoc 용 — rare.
     extras: Mutex<ahash::AHashMap<&'static str, Arc<AtomicU64>>>,
 }
@@ -410,6 +415,10 @@ fn counters() -> &'static Counters {
         order_gateway_unknown_symbol: AtomicU64::new(0),
         order_result_received: AtomicU64::new(0),
         order_result_rejected: AtomicU64::new(0),
+        strategy_account_poll_err: AtomicU64::new(0),
+        strategy_control_dropped: AtomicU64::new(0),
+        strategy_order_channel_full: AtomicU64::new(0),
+        order_gateway_invalid_wire: AtomicU64::new(0),
         extras: Mutex::new(ahash::AHashMap::default()),
     })
 }
@@ -491,6 +500,14 @@ pub enum CounterKey {
     OrderResultReceived,
     /// strategy 가 거절(REJECTED) 결과를 수신한 횟수.
     OrderResultRejected,
+    /// Gate REST account 폴러 에러 (접속/파싱/타임아웃).
+    StrategyAccountPollErr,
+    /// StrategyControl 채널 포화로 제어 메시지 유실.
+    StrategyControlDropped,
+    /// strategy hot path 의 주문 채널 포화.
+    StrategyOrderChannelFull,
+    /// gateway wire decode/recv 실패 (transport 종류와 무관한 총합).
+    OrderGatewayInvalidWire,
 }
 
 /// 알려진 counter 를 1 증가. hot path — atomic fetch_add 만.
@@ -540,6 +557,10 @@ pub fn counter_add(k: CounterKey, n: u64) {
         CounterKey::OrderGatewayUnknownSymbol => &c.order_gateway_unknown_symbol,
         CounterKey::OrderResultReceived => &c.order_result_received,
         CounterKey::OrderResultRejected => &c.order_result_rejected,
+        CounterKey::StrategyAccountPollErr => &c.strategy_account_poll_err,
+        CounterKey::StrategyControlDropped => &c.strategy_control_dropped,
+        CounterKey::StrategyOrderChannelFull => &c.strategy_order_channel_full,
+        CounterKey::OrderGatewayInvalidWire => &c.order_gateway_invalid_wire,
     };
     target.fetch_add(n, Ordering::Relaxed);
 }
@@ -682,6 +703,22 @@ pub fn counters_snapshot() -> Vec<(String, u64)> {
             "order_result_rejected".into(),
             c.order_result_rejected.load(Ordering::Relaxed),
         ),
+        (
+            "strategy_account_poll_err".into(),
+            c.strategy_account_poll_err.load(Ordering::Relaxed),
+        ),
+        (
+            "strategy_control_dropped".into(),
+            c.strategy_control_dropped.load(Ordering::Relaxed),
+        ),
+        (
+            "strategy_order_channel_full".into(),
+            c.strategy_order_channel_full.load(Ordering::Relaxed),
+        ),
+        (
+            "order_gateway_invalid_wire".into(),
+            c.order_gateway_invalid_wire.load(Ordering::Relaxed),
+        ),
     ];
     for (k, v) in c.extras.lock().iter() {
         out.push(((*k).to_string(), v.load(Ordering::Relaxed)));
@@ -780,7 +817,7 @@ mod tests {
     // cargo test 는 기본 병렬 → `--test-threads=1` 권장하지만, 여기서는 sub-lock.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
-    fn new_variants() -> [(CounterKey, &'static str, &'static str); 14] {
+    fn new_variants() -> [(CounterKey, &'static str, &'static str); 18] {
         [
             (
                 CounterKey::OrderEgressZmqOk,
@@ -851,6 +888,26 @@ mod tests {
                 CounterKey::OrderResultRejected,
                 "OrderResultRejected",
                 "order_result_rejected",
+            ),
+            (
+                CounterKey::StrategyAccountPollErr,
+                "StrategyAccountPollErr",
+                "strategy_account_poll_err",
+            ),
+            (
+                CounterKey::StrategyControlDropped,
+                "StrategyControlDropped",
+                "strategy_control_dropped",
+            ),
+            (
+                CounterKey::StrategyOrderChannelFull,
+                "StrategyOrderChannelFull",
+                "strategy_order_channel_full",
+            ),
+            (
+                CounterKey::OrderGatewayInvalidWire,
+                "OrderGatewayInvalidWire",
+                "order_gateway_invalid_wire",
             ),
         ]
     }

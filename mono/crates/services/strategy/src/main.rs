@@ -66,6 +66,7 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
 use hft_config::{order_egress::OrderEgressMode, AppConfig, ExchangeConfig, ShmBackendKind};
+use hft_telemetry::{counter_inc, CounterKey};
 use strategy::{
     start, v6::V6Strategy, v7::V7Strategy, v8::V8Strategy, NoopStrategy, OrderEgressMetaSeed,
     OrderEnvelope, OrderResultInfo, OrderSender, ResultStatus, StrategyControl, StrategyHandle,
@@ -278,11 +279,21 @@ fn spawn_balance_pump(
                     };
                     // try_send — full 이면 다음 tick 에 재시도 (수렴).
                     if let Err(e) = handle_ctrl.try_send(ctrl) {
-                        warn!(
-                            target: "strategy::main",
-                            error = ?e,
-                            "balance pump: control channel full/closed"
-                        );
+                        match e {
+                            crossbeam_channel::TrySendError::Full(_) => {
+                                counter_inc(CounterKey::StrategyControlDropped);
+                                warn!(
+                                    target: "strategy::main",
+                                    "balance pump: control channel full — dropping control message"
+                                );
+                            }
+                            crossbeam_channel::TrySendError::Disconnected(_) => {
+                                warn!(
+                                    target: "strategy::main",
+                                    "balance pump: control channel disconnected"
+                                );
+                            }
+                        }
                         continue;
                     }
                     last_sent = Some(cur);
@@ -559,11 +570,21 @@ fn spawn_result_listener_with_context(
                 Ok(Some(buf)) => match decode_order_result_info(&buf) {
                     Ok(info) => {
                         if let Err(e) = control_tx.try_send(StrategyControl::OrderResult(info)) {
-                            warn!(
-                                target: "strategy::result_listener",
-                                error = ?e,
-                                "result control channel full/closed"
-                            );
+                            match e {
+                                crossbeam_channel::TrySendError::Full(_) => {
+                                    counter_inc(CounterKey::StrategyControlDropped);
+                                    warn!(
+                                        target: "strategy::result_listener",
+                                        "result control channel full — dropping order result"
+                                    );
+                                }
+                                crossbeam_channel::TrySendError::Disconnected(_) => {
+                                    warn!(
+                                        target: "strategy::result_listener",
+                                        "result control channel disconnected"
+                                    );
+                                }
+                            }
                         }
                     }
                     Err(e) => warn!(

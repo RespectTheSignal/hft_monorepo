@@ -69,6 +69,7 @@ use hft_exchange_rest::{
     headers_from_pairs, hmac_sha512_hex, now_epoch_ms, now_epoch_s, sha512_hex, Credentials,
     RestClient,
 };
+use hft_telemetry::{counter_inc, CounterKey};
 use hft_strategy_runtime::{
     ContractMeta, PositionCache, PositionProvider, PositionSnapshot, SymbolMetaCache,
     SymbolMetaProvider, SymbolPosition,
@@ -537,6 +538,7 @@ impl PollerRunner {
                 self.stats
                     .meta_refreshes_err
                     .fetch_add(1, Ordering::Relaxed);
+                counter_inc(CounterKey::StrategyAccountPollErr);
                 warn!(target: "gate::account::poller", error = %e, "contracts refresh failed");
             }
         }
@@ -556,6 +558,7 @@ impl PollerRunner {
                 self.stats
                     .position_refreshes_err
                     .fetch_add(1, Ordering::Relaxed);
+                counter_inc(CounterKey::StrategyAccountPollErr);
                 warn!(target: "gate::account::poller", error = %e, "positions refresh failed");
             }
         }
@@ -576,6 +579,7 @@ impl PollerRunner {
                 self.stats
                     .account_refreshes_err
                     .fetch_add(1, Ordering::Relaxed);
+                counter_inc(CounterKey::StrategyAccountPollErr);
                 warn!(target: "gate::account::poller", error = %e, "accounts refresh failed");
             }
         }
