@@ -755,10 +755,84 @@ macro_rules! trace_verbose {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::{HashMap, HashSet};
 
     // 테스트 간 global state 공유 → serial 실행 보장 위해 mutex.
     // cargo test 는 기본 병렬 → `--test-threads=1` 권장하지만, 여기서는 sub-lock.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn new_variants() -> [(CounterKey, &'static str, &'static str); 12] {
+        [
+            (
+                CounterKey::OrderEgressZmqOk,
+                "OrderEgressZmqOk",
+                "order_egress_zmq_ok",
+            ),
+            (
+                CounterKey::OrderEgressBackpressureDropped,
+                "OrderEgressBackpressureDropped",
+                "order_egress_backpressure_dropped",
+            ),
+            (
+                CounterKey::OrderEgressBackpressureRetried,
+                "OrderEgressBackpressureRetried",
+                "order_egress_backpressure_retried",
+            ),
+            (
+                CounterKey::OrderEgressBackpressureRetryExhausted,
+                "OrderEgressBackpressureRetryExhausted",
+                "order_egress_backpressure_retry_exhausted",
+            ),
+            (
+                CounterKey::OrderEgressBackpressureBlocked,
+                "OrderEgressBackpressureBlocked",
+                "order_egress_backpressure_blocked",
+            ),
+            (
+                CounterKey::OrderEgressBackpressureBlockTimeout,
+                "OrderEgressBackpressureBlockTimeout",
+                "order_egress_backpressure_block_timeout",
+            ),
+            (
+                CounterKey::OrderEgressZmqFallbackActivated,
+                "OrderEgressZmqFallbackActivated",
+                "order_egress_zmq_fallback_activated",
+            ),
+            (
+                CounterKey::OrderEgressSerializeError,
+                "OrderEgressSerializeError",
+                "order_egress_serialize_error",
+            ),
+            (
+                CounterKey::OrderGatewayRoutedOk,
+                "OrderGatewayRoutedOk",
+                "order_gateway_routed_ok",
+            ),
+            (
+                CounterKey::OrderGatewayRouterQueueFull,
+                "OrderGatewayRouterQueueFull",
+                "order_gateway_router_queue_full",
+            ),
+            (
+                CounterKey::OrderGatewayExchangeNotFound,
+                "OrderGatewayExchangeNotFound",
+                "order_gateway_exchange_not_found",
+            ),
+            (
+                CounterKey::OrderGatewayUnknownSymbol,
+                "OrderGatewayUnknownSymbol",
+                "order_gateway_unknown_symbol",
+            ),
+        ]
+    }
+
+    fn snapshot_map() -> HashMap<String, u64> {
+        counters_snapshot().into_iter().collect()
+    }
+
+    fn snapshot_value(map: &HashMap<String, u64>, key: &str) -> u64 {
+        map.get(key).copied().unwrap_or(0)
+    }
 
     #[test]
     fn hdr_record_and_dump() {
@@ -849,6 +923,7 @@ mod tests {
 
     #[test]
     fn init_twice_fails() {
+        let _g = TEST_LOCK.lock();
         // init 은 실제 subscriber 등록 → 한 번 성공하면 글로벌 상태가 바뀜.
         // 이 테스트가 동작하려면 직전에 init 이 호출되지 않았어야 함.
         // 단독 실행 시 성공, 다른 테스트와 함께 돌리면 `already initialized` 도 OK.
@@ -864,5 +939,92 @@ mod tests {
         // cleanup: 성공한 handle 은 즉시 drop.
         drop(first);
         drop(second);
+    }
+
+    #[test]
+    fn new_variants_appear_in_snapshot() {
+        let _g = TEST_LOCK.lock();
+
+        for (key, _, snake) in new_variants() {
+            let before = snapshot_map();
+            counter_inc(key);
+            let after = snapshot_map();
+            assert!(
+                after.contains_key(snake),
+                "snapshot missing key {snake} for variant {:?}",
+                key
+            );
+            assert_eq!(
+                snapshot_value(&after, snake) - snapshot_value(&before, snake),
+                1,
+                "variant {:?} should increase {snake} by 1",
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn counter_add_propagates_for_new_variants() {
+        let _g = TEST_LOCK.lock();
+
+        for (key, _, snake) in new_variants() {
+            let before = snapshot_map();
+            counter_add(key, 42);
+            let after = snapshot_map();
+            assert_eq!(
+                snapshot_value(&after, snake) - snapshot_value(&before, snake),
+                42,
+                "variant {:?} should increase {snake} by 42",
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn no_snapshot_key_collision_after_extension() {
+        let _g = TEST_LOCK.lock();
+
+        let snap = counters_snapshot();
+        let keys: HashSet<_> = snap.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(
+            keys.len(),
+            snap.len(),
+            "snapshot keys must remain unique after CounterKey extension"
+        );
+    }
+
+    #[test]
+    fn variant_debug_to_snake_case_mapping() {
+        let _g = TEST_LOCK.lock();
+
+        for (key, debug_name, snake) in new_variants() {
+            assert_eq!(format!("{key:?}"), debug_name);
+
+            let before = snapshot_map();
+            counter_inc(key);
+            let after = snapshot_map();
+            assert_eq!(
+                snapshot_value(&after, snake) - snapshot_value(&before, snake),
+                1,
+                "variant {debug_name} should map to snapshot key {snake}"
+            );
+        }
+    }
+
+    #[test]
+    fn four_point_sync_for_new_variants() {
+        let _g = TEST_LOCK.lock();
+
+        for (key, _, snake) in new_variants() {
+            let before = snapshot_map();
+            counter_add(key, 7);
+            let after = snapshot_map();
+            assert_eq!(
+                snapshot_value(&after, snake) - snapshot_value(&before, snake),
+                7,
+                "variant {:?} must be wired through field/init/match/snapshot as {snake}",
+                key
+            );
+        }
     }
 }
