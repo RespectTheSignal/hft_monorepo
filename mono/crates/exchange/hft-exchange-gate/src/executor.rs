@@ -206,6 +206,7 @@ impl GateExecutor {
             "contract": req.symbol.as_str(),
             "size": size,
             "price": price_str,
+            "reduce_only": req.reduce_only,
             "tif": tif_str,
             "text": text,
         });
@@ -512,6 +513,28 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["price"], "0");
         assert_eq!(v["tif"], "ioc");
+        assert_eq!(v["reduce_only"], false);
+    }
+
+    #[test]
+    fn prepare_body_includes_reduce_only_when_true() {
+        let exec = mk_exec();
+        let req = OrderRequest {
+            exchange: ExchangeId::Gate,
+            symbol: Symbol::new("BTC_USDT"),
+            side: OrderSide::Sell,
+            order_type: OrderType::Limit,
+            qty: 2.0,
+            price: Some(42_000.0),
+            reduce_only: true,
+            tif: TimeInForce::Ioc,
+            client_seq: 0,
+            origin_ts_ns: 0,
+            client_id: Arc::from("reduce-gate"),
+        };
+        let (body, _) = exec.prepare_body(&req).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["reduce_only"], true);
     }
 
     #[test]
