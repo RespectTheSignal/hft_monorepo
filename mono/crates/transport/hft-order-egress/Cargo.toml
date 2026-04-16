@@ -1,0 +1,18 @@
+[package]
+name = "hft-order-egress"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+description = "Transport-agnostic order egress trait and policy wrapper for SHM/ZMQ."
+
+[lib]
+name = "hft_order_egress"
+path = "src/lib.rs"
+
+[dependencies]
+hft-exchange-api.workspace = true
+hft-protocol.workspace = true
+thiserror.workspace = true

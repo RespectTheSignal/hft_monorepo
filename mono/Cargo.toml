@@ -14,6 +14,7 @@ members = [
     "crates/transport/hft-zmq",
     "crates/transport/hft-shm",
     "crates/transport/hft-ipc",
+    "crates/transport/hft-order-egress",
     "crates/transport/hft-strategy-shm",
     "crates/transport/hft-strategy-shm-py",
 
@@ -155,6 +156,7 @@ hft-telemetry = { path = "crates/obs/hft-telemetry" }
 hft-zmq = { path = "crates/transport/hft-zmq" }
 hft-shm = { path = "crates/transport/hft-shm" }
 hft-ipc = { path = "crates/transport/hft-ipc" }
+hft-order-egress = { path = "crates/transport/hft-order-egress" }
 hft-strategy-shm = { path = "crates/transport/hft-strategy-shm" }
 hft-strategy-shm-py = { path = "crates/transport/hft-strategy-shm-py" }
 hft-strategy-config = { path = "crates/strategy/hft-strategy-config" }
