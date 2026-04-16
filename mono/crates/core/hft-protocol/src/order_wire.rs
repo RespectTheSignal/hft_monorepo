@@ -5,6 +5,7 @@
 //! - SHM order frame 과는 별개 포맷이며, ZMQ/TCP egress 용으로 설계한다.
 //! - padding / reserved 영역은 항상 0 으로 유지해 layout drift 를 빠르게 잡는다.
 
+use byteorder::{ByteOrder, LittleEndian};
 use thiserror::Error;
 
 /// OrderRequestWire 고정 크기.
@@ -216,6 +217,104 @@ impl OrderRequestWire {
     pub fn set_reduce_only(&mut self, enabled: bool) {
         self.flags = if enabled { FLAG_REDUCE_ONLY } else { 0 };
     }
+
+    /// wire buffer 에 little-endian 으로 인코드한다.
+    pub fn encode(&self, buf: &mut [u8; ORDER_REQUEST_WIRE_SIZE]) {
+        buf.fill(0);
+
+        LittleEndian::write_u16(&mut buf[OFFSET_EXCHANGE..OFFSET_SIDE], self.exchange);
+        buf[OFFSET_SIDE] = self.side;
+        buf[OFFSET_ORDER_TYPE] = self.order_type;
+        LittleEndian::write_u32(&mut buf[OFFSET_SYMBOL_ID..OFFSET_TIF], self.symbol_id);
+        buf[OFFSET_TIF] = self.tif;
+        buf[OFFSET_LEVEL] = self.level;
+        // reserved bit 는 항상 0 으로 정규화한다.
+        buf[OFFSET_FLAGS] = self.flags & FLAG_REDUCE_ONLY;
+        LittleEndian::write_f64(&mut buf[OFFSET_PRICE..OFFSET_SIZE], self.price);
+        LittleEndian::write_i64(&mut buf[OFFSET_SIZE..OFFSET_CLIENT_SEQ], self.size);
+        LittleEndian::write_u64(
+            &mut buf[OFFSET_CLIENT_SEQ..OFFSET_ORIGIN_TS_NS],
+            self.client_seq,
+        );
+        LittleEndian::write_u64(
+            &mut buf[OFFSET_ORIGIN_TS_NS..OFFSET_TEXT_TAG],
+            self.origin_ts_ns,
+        );
+        write_zero_padded_field(
+            &mut buf[OFFSET_TEXT_TAG..OFFSET_RESERVED],
+            &self.text_tag,
+        );
+    }
+
+    /// 128B wire buffer 를 decode 한다.
+    pub fn decode(buf: &[u8; ORDER_REQUEST_WIRE_SIZE]) -> Result<Self, WireError> {
+        let exchange = LittleEndian::read_u16(&buf[OFFSET_EXCHANGE..OFFSET_SIDE]);
+        if !is_valid_exchange_id(exchange) {
+            return Err(WireError::InvalidExchangeId(exchange));
+        }
+
+        let side = buf[OFFSET_SIDE];
+        if !is_valid_side(side) {
+            return Err(WireError::InvalidSide(side));
+        }
+
+        let order_type = buf[OFFSET_ORDER_TYPE];
+        if !is_valid_order_type(order_type) {
+            return Err(WireError::InvalidOrderType(order_type));
+        }
+
+        let tif = buf[OFFSET_TIF];
+        if !is_valid_tif(tif) {
+            return Err(WireError::InvalidTif(tif));
+        }
+
+        let level = buf[OFFSET_LEVEL];
+        if !is_valid_level(level) {
+            return Err(WireError::InvalidLevel(level));
+        }
+
+        let flags = buf[OFFSET_FLAGS];
+        if flags & !FLAG_REDUCE_ONLY != 0 {
+            return Err(WireError::NonZeroPadding {
+                field: "flags",
+                offset: OFFSET_FLAGS,
+            });
+        }
+
+        ensure_zero(
+            &buf[OFFSET_PAD0..OFFSET_PAD0 + 1],
+            "_pad0",
+            OFFSET_PAD0,
+        )?;
+        ensure_zero(&buf[OFFSET_PAD1..OFFSET_PRICE], "_pad1", OFFSET_PAD1)?;
+        ensure_zero(
+            &buf[OFFSET_RESERVED..ORDER_REQUEST_WIRE_SIZE],
+            "_reserved",
+            OFFSET_RESERVED,
+        )?;
+
+        Ok(Self {
+            exchange,
+            side,
+            order_type,
+            symbol_id: LittleEndian::read_u32(&buf[OFFSET_SYMBOL_ID..OFFSET_TIF]),
+            tif,
+            level,
+            flags,
+            _pad0: 0,
+            _pad1: 0,
+            price: LittleEndian::read_f64(&buf[OFFSET_PRICE..OFFSET_SIZE]),
+            size: LittleEndian::read_i64(&buf[OFFSET_SIZE..OFFSET_CLIENT_SEQ]),
+            client_seq: LittleEndian::read_u64(
+                &buf[OFFSET_CLIENT_SEQ..OFFSET_ORIGIN_TS_NS],
+            ),
+            origin_ts_ns: LittleEndian::read_u64(
+                &buf[OFFSET_ORIGIN_TS_NS..OFFSET_TEXT_TAG],
+            ),
+            text_tag: read_fixed(&buf[OFFSET_TEXT_TAG..OFFSET_RESERVED]),
+            _reserved: [0; 48],
+        })
+    }
 }
 
 /// gateway → strategy 결과 wire.
@@ -261,7 +360,150 @@ impl Default for OrderResultWire {
     }
 }
 
+impl OrderResultWire {
+    /// wire buffer 에 little-endian 으로 인코드한다.
+    pub fn encode(&self, buf: &mut [u8; ORDER_RESULT_WIRE_SIZE]) {
+        buf.fill(0);
+
+        LittleEndian::write_u64(
+            &mut buf[RESULT_OFFSET_CLIENT_SEQ..RESULT_OFFSET_GATEWAY_TS_NS],
+            self.client_seq,
+        );
+        LittleEndian::write_u64(
+            &mut buf[RESULT_OFFSET_GATEWAY_TS_NS..RESULT_OFFSET_FILLED_SIZE],
+            self.gateway_ts_ns,
+        );
+        LittleEndian::write_i64(
+            &mut buf[RESULT_OFFSET_FILLED_SIZE..RESULT_OFFSET_REJECT_CODE],
+            self.filled_size,
+        );
+        LittleEndian::write_u32(
+            &mut buf[RESULT_OFFSET_REJECT_CODE..RESULT_OFFSET_STATUS],
+            self.reject_code,
+        );
+        buf[RESULT_OFFSET_STATUS] = self.status;
+        write_zero_padded_field(
+            &mut buf[RESULT_OFFSET_EXCHANGE_ORDER_ID..RESULT_OFFSET_TEXT_TAG],
+            &self.exchange_order_id,
+        );
+        write_zero_padded_field(
+            &mut buf[RESULT_OFFSET_TEXT_TAG..RESULT_OFFSET_RESERVED],
+            &self.text_tag,
+        );
+    }
+
+    /// 128B wire buffer 를 decode 한다.
+    pub fn decode(buf: &[u8; ORDER_RESULT_WIRE_SIZE]) -> Result<Self, WireError> {
+        let status = buf[RESULT_OFFSET_STATUS];
+        if !is_valid_status(status) {
+            return Err(WireError::InvalidStatus(status));
+        }
+
+        ensure_zero(
+            &buf[RESULT_OFFSET_PAD0..RESULT_OFFSET_EXCHANGE_ORDER_ID],
+            "_pad0",
+            RESULT_OFFSET_PAD0,
+        )?;
+        ensure_zero(
+            &buf[RESULT_OFFSET_RESERVED..ORDER_RESULT_WIRE_SIZE],
+            "_reserved",
+            RESULT_OFFSET_RESERVED,
+        )?;
+
+        Ok(Self {
+            client_seq: LittleEndian::read_u64(
+                &buf[RESULT_OFFSET_CLIENT_SEQ..RESULT_OFFSET_GATEWAY_TS_NS],
+            ),
+            gateway_ts_ns: LittleEndian::read_u64(
+                &buf[RESULT_OFFSET_GATEWAY_TS_NS..RESULT_OFFSET_FILLED_SIZE],
+            ),
+            filled_size: LittleEndian::read_i64(
+                &buf[RESULT_OFFSET_FILLED_SIZE..RESULT_OFFSET_REJECT_CODE],
+            ),
+            reject_code: LittleEndian::read_u32(
+                &buf[RESULT_OFFSET_REJECT_CODE..RESULT_OFFSET_STATUS],
+            ),
+            status,
+            _pad0: [0; 3],
+            exchange_order_id: read_fixed(
+                &buf[RESULT_OFFSET_EXCHANGE_ORDER_ID..RESULT_OFFSET_TEXT_TAG],
+            ),
+            text_tag: read_fixed(&buf[RESULT_OFFSET_TEXT_TAG..RESULT_OFFSET_RESERVED]),
+            _reserved: [0; 16],
+        })
+    }
+}
+
 const _: () = assert!(std::mem::size_of::<OrderRequestWire>() == ORDER_REQUEST_WIRE_SIZE);
 const _: () = assert!(std::mem::align_of::<OrderRequestWire>() == 64);
 const _: () = assert!(std::mem::size_of::<OrderResultWire>() == ORDER_RESULT_WIRE_SIZE);
 const _: () = assert!(std::mem::align_of::<OrderResultWire>() == 64);
+
+#[inline]
+fn is_valid_exchange_id(v: u16) -> bool {
+    (1..=EXCHANGE_ID_MAX).contains(&v)
+}
+
+#[inline]
+fn is_valid_side(v: u8) -> bool {
+    matches!(v, SIDE_BUY | SIDE_SELL)
+}
+
+#[inline]
+fn is_valid_order_type(v: u8) -> bool {
+    matches!(
+        v,
+        ORDER_TYPE_LIMIT
+            | ORDER_TYPE_MARKET
+            | ORDER_TYPE_POST_ONLY
+            | ORDER_TYPE_FOK
+            | ORDER_TYPE_IOC
+            | ORDER_TYPE_STOP_LIMIT
+            | ORDER_TYPE_STOP_MARKET
+    )
+}
+
+#[inline]
+fn is_valid_tif(v: u8) -> bool {
+    matches!(v, TIF_GTC | TIF_IOC | TIF_FOK | TIF_GTX)
+}
+
+#[inline]
+fn is_valid_level(v: u8) -> bool {
+    matches!(v, LEVEL_OPEN | LEVEL_CLOSE)
+}
+
+#[inline]
+fn is_valid_status(v: u8) -> bool {
+    matches!(
+        v,
+        STATUS_SUBMITTED
+            | STATUS_ACCEPTED
+            | STATUS_PARTIALLY_FILLED
+            | STATUS_FILLED
+            | STATUS_CANCELLED
+            | STATUS_REJECTED
+            | STATUS_EXPIRED
+    )
+}
+
+fn ensure_zero(bytes: &[u8], field: &'static str, offset: usize) -> Result<(), WireError> {
+    if bytes.iter().any(|byte| *byte != 0) {
+        return Err(WireError::NonZeroPadding { field, offset });
+    }
+    Ok(())
+}
+
+fn write_zero_padded_field(dst: &mut [u8], src: &[u8]) {
+    dst.fill(0);
+    let used = src.iter().position(|byte| *byte == 0).unwrap_or(src.len());
+    let len = used.min(dst.len());
+    dst[..len].copy_from_slice(&src[..len]);
+}
+
+fn read_fixed<const N: usize>(src: &[u8]) -> [u8; N] {
+    debug_assert_eq!(src.len(), N, "fixed-size field length mismatch");
+    let mut out = [0u8; N];
+    out.copy_from_slice(src);
+    out
+}
