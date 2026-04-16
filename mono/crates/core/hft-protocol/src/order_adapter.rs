@@ -237,3 +237,251 @@ pub fn order_request_to_order_request_wire(
     }
     Ok(wire)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hft_types::{ExchangeId, Symbol};
+    use std::sync::Arc;
+
+    fn sample_req(exchange: ExchangeId) -> OrderRequest {
+        OrderRequest {
+            exchange,
+            symbol: Symbol::new("BTC_USDT"),
+            side: OrderSide::Buy,
+            order_type: OrderType::Limit,
+            qty: 1.0,
+            price: Some(100.0),
+            tif: TimeInForce::Gtc,
+            client_id: Arc::from("v8-1"),
+        }
+    }
+
+    fn sample_meta() -> OrderEgressMeta<'static> {
+        OrderEgressMeta {
+            client_seq: 42,
+            strategy_tag: "v8",
+            level: WireLevel::Open,
+            reduce_only: false,
+            origin_ts_ns: 1_765_432_100_000_000_000,
+            symbol_id: Some(77),
+            symbol_idx: Some(88),
+        }
+    }
+
+    #[test]
+    fn shm_adapter_happy_path() {
+        let req = sample_req(ExchangeId::Gate);
+        let meta = sample_meta();
+        let frame = order_request_to_order_frame(&req, &meta).expect("frame");
+
+        assert_eq!(frame.seq, 0);
+        assert_eq!(frame.kind, OrderKind::Place as u8);
+        assert_eq!(frame.exchange_id, exchange_to_u8(ExchangeId::Gate));
+        assert_eq!(frame.symbol_idx, 88);
+        assert_eq!(frame.side, SIDE_BUY);
+        assert_eq!(frame.tif, TIF_GTC);
+        assert_eq!(frame.ord_type, 0);
+        assert_eq!(frame.price, 100);
+        assert_eq!(frame.size, 1);
+        assert_eq!(frame.client_id, 42);
+        assert_eq!(frame.ts_ns, meta.origin_ts_ns);
+        assert_eq!(frame.aux, [0; 5]);
+    }
+
+    #[test]
+    fn shm_adapter_market_order() {
+        let mut req = sample_req(ExchangeId::Gate);
+        req.order_type = OrderType::Market;
+        req.price = None;
+        req.tif = TimeInForce::Ioc;
+
+        let frame = order_request_to_order_frame(&req, &sample_meta()).expect("frame");
+        assert_eq!(frame.ord_type, 1);
+        assert_eq!(frame.price, 0);
+        assert_eq!(frame.tif, TIF_IOC);
+    }
+
+    #[test]
+    fn shm_adapter_rejects_non_integer_qty() {
+        let mut req = sample_req(ExchangeId::Gate);
+        req.qty = 1.5;
+
+        assert!(matches!(
+            order_request_to_order_frame(&req, &sample_meta()),
+            Err(OrderAdaptError::NonIntegerQty { qty }) if qty == 1.5
+        ));
+    }
+
+    #[test]
+    fn shm_adapter_rejects_non_integer_limit_price() {
+        let mut req = sample_req(ExchangeId::Gate);
+        req.price = Some(100.5);
+
+        assert!(matches!(
+            order_request_to_order_frame(&req, &sample_meta()),
+            Err(OrderAdaptError::NonIntegerPrice { price }) if price == 100.5
+        ));
+    }
+
+    #[test]
+    fn shm_adapter_rejects_missing_symbol_idx() {
+        let mut meta = sample_meta();
+        meta.symbol_idx = None;
+
+        assert!(matches!(
+            order_request_to_order_frame(&sample_req(ExchangeId::Gate), &meta),
+            Err(OrderAdaptError::SymbolIdxMissing)
+        ));
+    }
+
+    #[test]
+    fn shm_adapter_rejects_limit_without_price() {
+        let mut req = sample_req(ExchangeId::Gate);
+        req.price = None;
+
+        assert!(matches!(
+            order_request_to_order_frame(&req, &sample_meta()),
+            Err(OrderAdaptError::LimitPriceMissing)
+        ));
+    }
+
+    #[test]
+    fn zmq_adapter_happy_path() {
+        let req = sample_req(ExchangeId::Gate);
+        let meta = sample_meta();
+        let wire = order_request_to_order_request_wire(&req, &meta).expect("wire");
+
+        assert_eq!(wire.exchange, u16::from(exchange_to_u8(ExchangeId::Gate)));
+        assert_eq!(wire.symbol_id, 77);
+        assert_eq!(wire.side, SIDE_BUY);
+        assert_eq!(wire.order_type, ORDER_TYPE_LIMIT);
+        assert_eq!(wire.tif, TIF_GTC);
+        assert_eq!(wire.level, LEVEL_OPEN);
+        assert_eq!(wire.flags, 0);
+        assert_eq!(wire.price, 100.0);
+        assert_eq!(wire.size, 1);
+        assert_eq!(wire.client_seq, 42);
+        assert_eq!(wire.origin_ts_ns, meta.origin_ts_ns);
+        assert_eq!(&wire.text_tag[..2], b"v8");
+
+        let mut buf = [0u8; crate::order_wire::ORDER_REQUEST_WIRE_SIZE];
+        wire.encode(&mut buf);
+        let decoded = OrderRequestWire::decode(&buf).expect("decode");
+        assert_eq!(decoded, wire);
+    }
+
+    #[test]
+    fn zmq_adapter_market_no_price_check() {
+        let mut req = sample_req(ExchangeId::Gate);
+        req.order_type = OrderType::Market;
+        req.price = None;
+
+        let wire = order_request_to_order_request_wire(&req, &sample_meta()).expect("wire");
+        assert_eq!(wire.order_type, ORDER_TYPE_MARKET);
+        assert_eq!(wire.price, 0.0);
+    }
+
+    #[test]
+    fn zmq_adapter_fractional_price_ok() {
+        let mut req = sample_req(ExchangeId::Gate);
+        req.price = Some(100.5);
+
+        let wire = order_request_to_order_request_wire(&req, &sample_meta()).expect("wire");
+        assert_eq!(wire.price, 100.5);
+    }
+
+    #[test]
+    fn zmq_adapter_rejects_missing_symbol_id() {
+        let mut meta = sample_meta();
+        meta.symbol_id = None;
+
+        assert!(matches!(
+            order_request_to_order_request_wire(&sample_req(ExchangeId::Gate), &meta),
+            Err(OrderAdaptError::SymbolIdMissing)
+        ));
+    }
+
+    #[test]
+    fn zmq_adapter_rejects_non_ascii_tag() {
+        let mut meta = sample_meta();
+        meta.strategy_tag = "v7_한글";
+
+        assert!(matches!(
+            order_request_to_order_request_wire(&sample_req(ExchangeId::Gate), &meta),
+            Err(OrderAdaptError::TextTagNonAscii)
+        ));
+    }
+
+    #[test]
+    fn zmq_adapter_rejects_too_long_tag() {
+        let mut meta = sample_meta();
+        meta.strategy_tag = "abcdefghijklmnopqrstuvwxyzABCDEFG";
+
+        assert!(matches!(
+            order_request_to_order_request_wire(&sample_req(ExchangeId::Gate), &meta),
+            Err(OrderAdaptError::TextTagTooLong { len: 33 })
+        ));
+    }
+
+    #[test]
+    fn zmq_adapter_reduce_only_flag() {
+        let mut meta = sample_meta();
+        meta.reduce_only = true;
+
+        let wire = order_request_to_order_request_wire(&sample_req(ExchangeId::Gate), &meta)
+            .expect("wire");
+        assert_eq!(wire.flags, FLAG_REDUCE_ONLY);
+    }
+
+    #[test]
+    fn zmq_adapter_level_close() {
+        let mut meta = sample_meta();
+        meta.level = WireLevel::Close;
+
+        let wire = order_request_to_order_request_wire(&sample_req(ExchangeId::Gate), &meta)
+            .expect("wire");
+        assert_eq!(wire.level, LEVEL_CLOSE);
+    }
+
+    #[test]
+    fn current_domain_enum_subset_maps_without_error() {
+        let order_types = [OrderType::Limit, OrderType::Market];
+        let tifs = [TimeInForce::Gtc, TimeInForce::Ioc, TimeInForce::Fok];
+
+        for order_type in order_types {
+            for tif in tifs {
+                let mut req = sample_req(ExchangeId::Gate);
+                req.order_type = order_type;
+                req.tif = tif;
+                req.price = if matches!(order_type, OrderType::Limit) {
+                    Some(100.0)
+                } else {
+                    None
+                };
+
+                assert!(order_request_to_order_frame(&req, &sample_meta()).is_ok());
+                assert!(order_request_to_order_request_wire(&req, &sample_meta()).is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn both_adapters_exchange_id_consistency() {
+        let exchanges = [
+            ExchangeId::Binance,
+            ExchangeId::Gate,
+            ExchangeId::Bybit,
+            ExchangeId::Bitget,
+            ExchangeId::Okx,
+        ];
+
+        for exchange in exchanges {
+            let req = sample_req(exchange);
+            let frame = order_request_to_order_frame(&req, &sample_meta()).expect("frame");
+            let wire = order_request_to_order_request_wire(&req, &sample_meta()).expect("wire");
+
+            assert_eq!(u16::from(frame.exchange_id), wire.exchange);
+        }
+    }
+}
