@@ -22,6 +22,8 @@ use hft_zmq::Context as ZmqContext;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
+use crate::{IngressEnvelope, IngressMeta};
+
 #[derive(Debug)]
 enum IngressDecodeError {
     Invalid(anyhow::Error),
@@ -132,7 +134,7 @@ fn decode_side(code: u8) -> Result<OrderSide, IngressDecodeError> {
 fn normalize_wire_request(
     buf: &[u8],
     symtab: &SymbolTable,
-) -> Result<OrderRequest, IngressDecodeError> {
+) -> Result<IngressEnvelope, IngressDecodeError> {
     if buf.len() != ORDER_REQUEST_WIRE_SIZE {
         return Err(IngressDecodeError::Invalid(anyhow!(
             "unexpected order wire size: {}",
@@ -170,26 +172,32 @@ fn normalize_wire_request(
         OrderType::Market => None,
     };
 
-    Ok(OrderRequest {
-        exchange,
-        symbol: Symbol::new(&symbol_name),
-        side: decode_side(wire.side)?,
-        order_type,
-        qty: wire.size as f64,
-        price,
-        reduce_only: wire.reduce_only(),
-        tif: decode_tif(wire.tif)?,
-        client_seq: wire.client_seq,
-        origin_ts_ns: wire.origin_ts_ns,
-        client_id,
-    })
+    Ok((
+        OrderRequest {
+            exchange,
+            symbol: Symbol::new(&symbol_name),
+            side: decode_side(wire.side)?,
+            order_type,
+            qty: wire.size as f64,
+            price,
+            reduce_only: wire.reduce_only(),
+            tif: decode_tif(wire.tif)?,
+            client_seq: wire.client_seq,
+            origin_ts_ns: wire.origin_ts_ns,
+            client_id,
+        },
+        IngressMeta {
+            origin_vm_id: None,
+            text_tag: wire.text_tag,
+        },
+    ))
 }
 
 pub fn start_zmq_order_ingress(
     endpoint: &str,
     zmq_cfg: &ZmqConfig,
     symtab: Arc<SymbolTable>,
-    req_tx: Sender<OrderRequest>,
+    req_tx: Sender<IngressEnvelope>,
     cancel: CancellationToken,
 ) -> Result<JoinHandle<()>> {
     start_zmq_order_ingress_with_context(
@@ -207,7 +215,7 @@ fn start_zmq_order_ingress_with_context(
     endpoint: &str,
     zmq_cfg: ZmqConfig,
     symtab: Arc<SymbolTable>,
-    req_tx: Sender<OrderRequest>,
+    req_tx: Sender<IngressEnvelope>,
     cancel: CancellationToken,
 ) -> Result<JoinHandle<()>> {
     let endpoint = endpoint.to_string();
@@ -237,9 +245,9 @@ fn start_zmq_order_ingress_with_context(
 
             match pull.recv_bytes_timeout(50) {
                 Ok(Some(payload)) => match normalize_wire_request(&payload, &symtab) {
-                    Ok(req) => match req_tx.try_send(req) {
+                    Ok((req, meta)) => match req_tx.try_send((req, meta)) {
                         Ok(()) => {}
-                        Err(TrySendError::Full(req)) => {
+                        Err(TrySendError::Full((req, _meta))) => {
                             counter_inc(CounterKey::OrderGatewayRouterQueueFull);
                             warn!(
                                 target: "order_gateway::zmq_ingress",
@@ -347,13 +355,15 @@ mod tests {
         let mut buf = [0u8; ORDER_REQUEST_WIRE_SIZE];
         wire.encode(&mut buf);
 
-        let normalized = normalize_wire_request(&buf, &symtab).unwrap();
+        let (normalized, meta) = normalize_wire_request(&buf, &symtab).unwrap();
         assert_eq!(normalized.exchange, ExchangeId::Gate);
         assert_eq!(normalized.symbol.as_str(), "BTC_USDT");
         assert!(normalized.reduce_only);
         assert_eq!(normalized.client_seq, 7);
         assert_eq!(normalized.origin_ts_ns, 123);
         assert_eq!(normalized.client_id.as_ref(), "v8-7");
+        assert_eq!(meta.origin_vm_id, None);
+        assert_eq!(&meta.text_tag[..2], b"v8");
     }
 
     #[test]
@@ -399,6 +409,7 @@ mod tests {
                 pub_endpoint: String::new(),
                 sub_endpoint: String::new(),
                 order_ingress_bind: Some(endpoint.into()),
+                result_egress_bind: None,
             },
             symtab.clone(),
             tx,
@@ -422,11 +433,13 @@ mod tests {
         meta.symbol_id = Some(symbol_id);
         assert_eq!(sender.try_submit(&sample_req(), &meta).unwrap(), SubmitOutcome::Sent);
 
-        let got = rx.recv_timeout(std::time::Duration::from_millis(500)).unwrap();
+        let (got, meta) = rx.recv_timeout(std::time::Duration::from_millis(500)).unwrap();
         assert_eq!(got.client_id.as_ref(), "v8-7");
         assert!(got.reduce_only);
         assert_eq!(got.client_seq, 7);
         assert_eq!(got.origin_ts_ns, 123);
+        assert_eq!(meta.origin_vm_id, None);
+        assert_eq!(&meta.text_tag[..2], b"v8");
 
         cancel.cancel();
         let _ = handle.await;
@@ -443,7 +456,7 @@ mod tests {
             .get_or_intern(ExchangeId::Gate, "BTC_USDT")
             .unwrap();
 
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(8);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(8);
         let (ack_tx, ack_rx) = crossbeam_channel::bounded::<hft_exchange_api::OrderAck>(8);
 
         let mut routing = RoutingTable::new();
@@ -455,6 +468,7 @@ mod tests {
             Arc::new(routing),
             req_rx,
             Some(ack_tx),
+            None,
             DEDUP_CACHE_CAP_DEFAULT,
             RetryPolicy::default(),
         )
@@ -472,6 +486,7 @@ mod tests {
                 pub_endpoint: String::new(),
                 sub_endpoint: String::new(),
                 order_ingress_bind: Some(endpoint.into()),
+                result_egress_bind: None,
             },
             symtab.clone(),
             req_tx,

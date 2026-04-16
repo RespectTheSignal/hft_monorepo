@@ -102,6 +102,10 @@ pub trait Strategy: Send + 'static {
     /// (주문 eval) 에서 `&mut self` 잠금 충돌을 피하기 위한 설계.
     #[inline]
     fn on_control(&mut self, _ctrl: &StrategyControl) {}
+
+    /// gateway 로부터 온 즉시 order result (accept/reject). 기본 no-op.
+    #[inline]
+    fn on_order_result(&mut self, _info: &OrderResultInfo) {}
 }
 
 /// 러너로 주입되는 제어 메시지. 전략 외부 (REST account poller 등) 에서
@@ -123,6 +127,25 @@ pub enum StrategyControl {
         /// 전 심볼 notional 합계 (long +, short -).
         net_usdt: f64,
     },
+    /// gateway ACK/REJECT 즉시 피드백.
+    OrderResult(OrderResultInfo),
+}
+
+/// gateway → strategy 결과 상태.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResultStatus {
+    Accepted,
+    Rejected,
+}
+
+/// strategy 가 즉시 소비하는 주문 결과 payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderResultInfo {
+    pub client_seq: u64,
+    pub status: ResultStatus,
+    pub exchange_order_id: String,
+    pub gateway_ts_ns: u64,
+    pub text_tag: String,
 }
 
 /// Phase 1 의 기본 strategy — 주문 0건.
@@ -248,16 +271,18 @@ impl<S: Strategy> StrategyRunner<S> {
 
             // control drain (hot path 비경유). try_recv 는 crossbeam 빈 채널에서 ~3ns.
             // 버스트 방지를 위해 한 iter 당 최대 16 건.
-            if let Some(crx) = self.control_rx.as_ref() {
-                for _ in 0..16 {
-                    match crx.try_recv() {
-                        Ok(ctrl) => self.strategy.on_control(&ctrl),
-                        Err(crossbeam_channel::TryRecvError::Empty) => break,
-                        Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                            // control sender 가 drop 됐다고 러너를 죽이지는 않는다.
-                            self.control_rx = None;
-                            break;
-                        }
+            for _ in 0..16 {
+                let recv = match self.control_rx.as_ref() {
+                    Some(crx) => crx.try_recv(),
+                    None => break,
+                };
+                match recv {
+                    Ok(ctrl) => self.handle_control(ctrl),
+                    Err(crossbeam_channel::TryRecvError::Empty) => break,
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                        // control sender 가 drop 됐다고 러너를 죽이지는 않는다.
+                        self.control_rx = None;
+                        break;
                     }
                 }
             }
@@ -320,6 +345,14 @@ impl<S: Strategy> StrategyRunner<S> {
                     );
                 }
             }
+        }
+    }
+
+    #[inline]
+    fn handle_control(&mut self, ctrl: StrategyControl) {
+        match ctrl {
+            StrategyControl::OrderResult(info) => self.strategy.on_order_result(&info),
+            other => self.strategy.on_control(&other),
         }
     }
 }
@@ -412,6 +445,7 @@ pub async fn wire_and_run<S: Strategy>(
 mod tests {
     use super::*;
     use hft_exchange_api::{OrderRequest, OrderSide, OrderType, TimeInForce};
+    use hft_telemetry::counters_snapshot;
     use hft_time::MockClock;
     use hft_types::{BookTicker, ExchangeId, Price, Size, Symbol};
 
@@ -593,5 +627,50 @@ mod tests {
 
         handle.shutdown();
         handle.join().await;
+    }
+
+    #[test]
+    fn v8_order_result_increments_result_counters() {
+        use crate::v8::V8Strategy;
+        use hft_strategy_config::{StrategyConfig, TradeSettings};
+
+        let before_received = counters_snapshot()
+            .into_iter()
+            .find(|(k, _)| k == "order_result_received")
+            .map(|(_, v)| v)
+            .unwrap_or(0);
+        let before_rejected = counters_snapshot()
+            .into_iter()
+            .find(|(k, _)| k == "order_result_rejected")
+            .map(|(_, v)| v)
+            .unwrap_or(0);
+
+        let cfg = Arc::new(StrategyConfig::new(
+            "test".into(),
+            vec!["BTC_USDT".into()],
+            TradeSettings::default(),
+        ));
+        let mut strat = V8Strategy::new(cfg, hft_strategy_core::risk::RiskConfig::default());
+        strat.on_order_result(&OrderResultInfo {
+            client_seq: 77,
+            status: ResultStatus::Rejected,
+            exchange_order_id: "ord-77".into(),
+            gateway_ts_ns: 123,
+            text_tag: "v8".into(),
+        });
+
+        let after_received = counters_snapshot()
+            .into_iter()
+            .find(|(k, _)| k == "order_result_received")
+            .map(|(_, v)| v)
+            .unwrap_or(0);
+        let after_rejected = counters_snapshot()
+            .into_iter()
+            .find(|(k, _)| k == "order_result_rejected")
+            .map(|(_, v)| v)
+            .unwrap_or(0);
+
+        assert_eq!(after_received, before_received + 1);
+        assert_eq!(after_rejected, before_rejected + 1);
     }
 }

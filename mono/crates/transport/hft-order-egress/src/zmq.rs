@@ -35,6 +35,7 @@ impl ZmqOrderEgress {
             pub_endpoint: String::new(),
             sub_endpoint: String::new(),
             order_ingress_bind: None,
+            result_egress_bind: None,
         };
         let socket = ctx.push_with_reconnect(
             &cfg.endpoint,

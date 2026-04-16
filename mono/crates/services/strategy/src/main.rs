@@ -42,11 +42,14 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{Receiver, Sender};
 use hft_exchange_api::{CancellationToken, OrderRequest};
 use hft_exchange_gate::{AccountPoller, BalanceSlot, GateAccountClient, PollerHandle};
 use hft_order_egress::{
     PolicyOrderEgress, ShmOrderEgress, SubmitError, SubmitOutcome, ZmqOrderEgress,
+};
+use hft_protocol::order_wire::{
+    OrderResultWire, WireError, ORDER_RESULT_WIRE_SIZE, STATUS_ACCEPTED, STATUS_REJECTED,
 };
 use hft_exchange_rest::{Credentials, RestClient};
 use hft_shm::{Backing, LayoutSpec, Role, SharedRegion, SubKind, SymbolTable};
@@ -57,6 +60,7 @@ use hft_strategy_runtime::{
     SymbolMetaCache,
 };
 use hft_types::ExchangeId;
+use hft_zmq::Context as ZmqContext;
 use subscriber::InprocQueue;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
@@ -64,7 +68,7 @@ use tracing::{error, info, warn};
 use hft_config::{order_egress::OrderEgressMode, AppConfig, ExchangeConfig, ShmBackendKind};
 use strategy::{
     start, v6::V6Strategy, v7::V7Strategy, v8::V8Strategy, NoopStrategy, OrderEgressMetaSeed,
-    OrderEnvelope, OrderSender, StrategyControl, StrategyHandle,
+    OrderEnvelope, OrderResultInfo, OrderSender, ResultStatus, StrategyControl, StrategyHandle,
 };
 
 #[global_allocator]
@@ -476,6 +480,113 @@ fn wall_clock_epoch_ns() -> u64 {
         .unwrap_or(0)
 }
 
+fn decode_zero_padded_string(bytes: &[u8]) -> String {
+    let len = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[..len]).into_owned()
+}
+
+fn decode_order_result_info(buf: &[u8]) -> Result<OrderResultInfo> {
+    if buf.len() != ORDER_RESULT_WIRE_SIZE {
+        anyhow::bail!("unexpected order result wire size: {}", buf.len());
+    }
+
+    let mut raw = [0u8; ORDER_RESULT_WIRE_SIZE];
+    raw.copy_from_slice(buf);
+    let wire = OrderResultWire::decode(&raw).map_err(|e: WireError| anyhow!(e))?;
+    let status = match wire.status {
+        STATUS_ACCEPTED => ResultStatus::Accepted,
+        STATUS_REJECTED => ResultStatus::Rejected,
+        other => anyhow::bail!("unsupported result status={other} for strategy listener"),
+    };
+
+    Ok(OrderResultInfo {
+        client_seq: wire.client_seq,
+        status,
+        exchange_order_id: decode_zero_padded_string(&wire.exchange_order_id),
+        gateway_ts_ns: wire.gateway_ts_ns,
+        text_tag: decode_zero_padded_string(&wire.text_tag),
+    })
+}
+
+fn spawn_result_listener(
+    endpoint: &str,
+    zmq_cfg: &hft_config::ZmqConfig,
+    control_tx: Sender<StrategyControl>,
+    cancel: CancellationToken,
+) -> Result<JoinHandle<()>> {
+    spawn_result_listener_with_context(
+        ZmqContext::new(),
+        endpoint,
+        zmq_cfg.clone(),
+        control_tx,
+        cancel,
+    )
+}
+
+fn spawn_result_listener_with_context(
+    ctx: ZmqContext,
+    endpoint: &str,
+    zmq_cfg: hft_config::ZmqConfig,
+    control_tx: Sender<StrategyControl>,
+    cancel: CancellationToken,
+) -> Result<JoinHandle<()>> {
+    let endpoint = endpoint.to_string();
+    Ok(tokio::task::spawn_blocking(move || {
+        let mut pull = match ctx.pull_connect(&endpoint, &zmq_cfg) {
+            Ok(sock) => sock,
+            Err(e) => {
+                error!(
+                    target: "strategy::result_listener",
+                    endpoint = %endpoint,
+                    error = %e,
+                    "failed to connect result PULL socket"
+                );
+                return;
+            }
+        };
+        info!(
+            target: "strategy::result_listener",
+            endpoint = %endpoint,
+            "strategy result listener started"
+        );
+
+        loop {
+            if cancel.is_cancelled() {
+                break;
+            }
+
+            match pull.recv_bytes_timeout(50) {
+                Ok(Some(buf)) => match decode_order_result_info(&buf) {
+                    Ok(info) => {
+                        if let Err(e) = control_tx.try_send(StrategyControl::OrderResult(info)) {
+                            warn!(
+                                target: "strategy::result_listener",
+                                error = ?e,
+                                "result control channel full/closed"
+                            );
+                        }
+                    }
+                    Err(e) => warn!(
+                        target: "strategy::result_listener",
+                        endpoint = %endpoint,
+                        error = %format!("{e:#}"),
+                        "failed to decode order result wire"
+                    ),
+                },
+                Ok(None) => continue,
+                Err(e) => warn!(
+                    target: "strategy::result_listener",
+                    endpoint = %endpoint,
+                    error = %e,
+                    "result listener recv failed"
+                ),
+            }
+        }
+
+        info!(target: "strategy::result_listener", "strategy result listener stopped");
+    }))
+}
+
 fn spawn_order_drain(rx: Receiver<OrderEnvelope>, egress: DrainEgress, cancel: CancellationToken) -> JoinHandle<()> {
     spawn_order_drain_with_now(rx, egress, cancel, wall_clock_epoch_ns)
 }
@@ -539,6 +650,7 @@ struct StackedHandles {
     balance_pump: JoinHandle<()>,
     rate_decay: JoinHandle<()>,
     order_drain: JoinHandle<()>,
+    result_listener: Option<JoinHandle<()>>,
     /// sub-task 들의 shutdown token — 주 cancel 과 분리.
     aux_cancel: CancellationToken,
 }
@@ -557,6 +669,9 @@ impl StackedHandles {
         let _ = self.balance_pump.await;
         let _ = self.rate_decay.await;
         let _ = self.order_drain.await;
+        if let Some(h) = self.result_listener {
+            let _ = h.await;
+        }
         self.subscriber.join().await;
         self.strategy.join().await;
     }
@@ -642,6 +757,18 @@ async fn bring_up_full(
     let rate_decay = spawn_rate_decay(rate, aux_cancel.clone(), decay_period, rate_window_ms);
 
     let order_drain = spawn_order_drain(orders_rx, drain_egress, aux_cancel.clone());
+    let result_listener = match cfg.order_egress.result_zmq_connect.as_deref() {
+        Some(endpoint) => Some(
+            spawn_result_listener(
+                endpoint,
+                &cfg.zmq,
+                strategy_handle.control_tx.clone(),
+                aux_cancel.clone(),
+            )
+            .context("spawn result listener")?,
+        ),
+        None => None,
+    };
 
     Ok(StackedHandles {
         strategy: strategy_handle,
@@ -650,6 +777,7 @@ async fn bring_up_full(
         balance_pump,
         rate_decay,
         order_drain,
+        result_listener,
         aux_cancel,
     })
 }
@@ -732,11 +860,15 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    use hft_config::order_egress::{BackpressurePolicy, ZmqOrderEgressConfig};
+    use hft_config::{order_egress::{BackpressurePolicy, ZmqOrderEgressConfig}, ZmqConfig};
     use hft_exchange_api::{OrderSide, OrderType, TimeInForce};
-    use hft_protocol::{order_wire::{OrderRequestWire, ORDER_REQUEST_WIRE_SIZE}, WireLevel};
+    use hft_protocol::{order_wire::{OrderRequestWire, OrderResultWire, ORDER_REQUEST_WIRE_SIZE, STATUS_ACCEPTED, STATUS_REJECTED}, WireLevel};
     use hft_shm::{OrderKind, OrderRingReader, OrderRingWriter, QuoteSlotWriter, TradeRingWriter};
     use hft_types::Symbol;
+    use order_gateway::{
+        start_with_arc, zmq_ingress::start_zmq_order_ingress, IngressEnvelope, NoopExecutor,
+        Route, RoutingTable, DEDUP_CACHE_CAP_DEFAULT, RetryPolicy,
+    };
     use tempfile::tempdir;
     use zmq::Socket;
 
@@ -809,6 +941,13 @@ mod tests {
         pull.set_rcvtimeo(1_000).expect("set rcvtimeo");
         pull.bind(endpoint).expect("bind pull");
         pull
+    }
+
+    fn bind_push(ctx: &hft_zmq::Context, endpoint: &str) -> Socket {
+        let push = ctx.raw().socket(zmq::PUSH).expect("push socket");
+        push.set_sndtimeo(1_000).expect("set sndtimeo");
+        push.bind(endpoint).expect("bind push");
+        push
     }
 
     fn free_tcp_endpoint() -> String {
@@ -948,5 +1087,324 @@ mod tests {
             .await
             .expect("drain exit timeout")
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn result_listener_decodes_wire_into_strategy_control() {
+        let ctx = hft_zmq::Context::new();
+        let endpoint = free_tcp_endpoint();
+        let push = bind_push(&ctx, &endpoint);
+        let (control_tx, control_rx) = crossbeam_channel::bounded(8);
+        let cancel = CancellationToken::new();
+        let handle = spawn_result_listener_with_context(
+            ctx.clone(),
+            &endpoint,
+            ZmqConfig::default(),
+            control_tx,
+            cancel.clone(),
+        )
+        .expect("spawn result listener");
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut wire = OrderResultWire {
+            client_seq: 77,
+            gateway_ts_ns: 123456,
+            filled_size: 0,
+            reject_code: 0,
+            status: STATUS_ACCEPTED,
+            _pad0: [0; 3],
+            exchange_order_id: [0; 48],
+            text_tag: [0; 32],
+            _reserved: [0; 16],
+        };
+        wire.exchange_order_id[..6].copy_from_slice(b"ord-77");
+        wire.text_tag[..2].copy_from_slice(b"v8");
+        let mut buf = [0u8; hft_protocol::order_wire::ORDER_RESULT_WIRE_SIZE];
+        wire.encode(&mut buf);
+        push.send(&buf[..], 0).expect("push result wire");
+
+        let ctrl = control_rx
+            .recv_timeout(Duration::from_millis(500))
+            .expect("result control");
+        match ctrl {
+            StrategyControl::OrderResult(info) => {
+                assert_eq!(info.client_seq, 77);
+                assert_eq!(info.status, ResultStatus::Accepted);
+                assert_eq!(info.exchange_order_id, "ord-77");
+                assert_eq!(info.gateway_ts_ns, 123456);
+                assert_eq!(info.text_tag, "v8");
+            }
+            other => panic!("unexpected control: {other:?}"),
+        }
+
+        cancel.cancel();
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn result_listener_rejected_wire_maps_to_rejected_status() {
+        let ctx = hft_zmq::Context::new();
+        let endpoint = free_tcp_endpoint();
+        let push = bind_push(&ctx, &endpoint);
+        let (control_tx, control_rx) = crossbeam_channel::bounded(8);
+        let cancel = CancellationToken::new();
+        let handle = spawn_result_listener_with_context(
+            ctx.clone(),
+            &endpoint,
+            ZmqConfig::default(),
+            control_tx,
+            cancel.clone(),
+        )
+        .expect("spawn result listener");
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let wire = OrderResultWire {
+            client_seq: 88,
+            gateway_ts_ns: 999,
+            filled_size: 0,
+            reject_code: 0,
+            status: STATUS_REJECTED,
+            _pad0: [0; 3],
+            exchange_order_id: [0; 48],
+            text_tag: [0; 32],
+            _reserved: [0; 16],
+        };
+        let mut buf = [0u8; hft_protocol::order_wire::ORDER_RESULT_WIRE_SIZE];
+        wire.encode(&mut buf);
+        push.send(&buf[..], 0).expect("push rejected result");
+
+        let ctrl = control_rx
+            .recv_timeout(Duration::from_millis(500))
+            .expect("rejected result control");
+        match ctrl {
+            StrategyControl::OrderResult(info) => {
+                assert_eq!(info.client_seq, 88);
+                assert_eq!(info.status, ResultStatus::Rejected);
+            }
+            other => panic!("unexpected control: {other:?}"),
+        }
+
+        cancel.cancel();
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn end_to_end_zmq_request_and_result_roundtrip_accepted() {
+        let dir = tempdir().unwrap();
+        let symtab_path = dir.path().join("symtab-result-ok.bin");
+        let order_endpoint = free_tcp_endpoint();
+        let result_endpoint = free_tcp_endpoint();
+
+        let symtab = Arc::new(SymbolTable::open_or_create(&symtab_path, 32).unwrap());
+        let result_ctx = hft_zmq::Context::new();
+        let result_push = bind_push(&result_ctx, &result_endpoint);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(8);
+        let (result_tx, result_rx) = crossbeam_channel::bounded::<OrderResultWire>(8);
+
+        let mut routing = RoutingTable::new();
+        routing.insert(
+            ExchangeId::Gate,
+            Route::Rust(Arc::new(NoopExecutor::new(ExchangeId::Gate))),
+        );
+        let gateway = start_with_arc(
+            Arc::new(routing),
+            req_rx,
+            None,
+            Some(result_tx),
+            DEDUP_CACHE_CAP_DEFAULT,
+            RetryPolicy::default(),
+        )
+        .unwrap();
+
+        let ingress = start_zmq_order_ingress(
+            &order_endpoint,
+            &ZmqConfig {
+                order_ingress_bind: Some(order_endpoint.clone()),
+                ..ZmqConfig::default()
+            },
+            symtab.clone(),
+            req_tx,
+            gateway.cancel.clone(),
+        )
+        .unwrap();
+
+        let (control_tx, control_rx) = crossbeam_channel::bounded(8);
+        let listener = spawn_result_listener(
+            &result_endpoint,
+            &ZmqConfig::default(),
+            control_tx,
+            gateway.cancel.clone(),
+        )
+        .unwrap();
+
+        let mut cfg = base_cfg();
+        cfg.shm.backend = ShmBackendKind::LegacyMultiFile;
+        cfg.shm.symtab_path = symtab_path;
+        cfg.shm.symbol_table_capacity = 32;
+        cfg.order_egress.mode = OrderEgressMode::Zmq;
+        cfg.order_egress.backpressure = BackpressurePolicy::RetryWithTimeout {
+            max_retries: 64,
+            backoff_ns: 1_000_000,
+            total_timeout_ns: 500_000_000,
+        };
+        cfg.order_egress.result_zmq_connect = Some(result_endpoint);
+        cfg.order_egress.zmq = Some(ZmqOrderEgressConfig {
+            endpoint: order_endpoint,
+            send_hwm: 8,
+            linger_ms: 0,
+            reconnect_interval_ms: 10,
+            reconnect_interval_max_ms: 10,
+        });
+
+        let egress = build_drain_egress(&cfg).expect("build zmq drain egress");
+        let (tx, rx) = crossbeam_channel::bounded(4);
+        let drain = spawn_order_drain_with_now(rx, egress, gateway.cancel.clone(), || 456);
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tx.send((sample_req(), sample_seed())).unwrap();
+        drop(tx);
+
+        let wire = tokio::task::spawn_blocking(move || {
+            result_rx.recv_timeout(Duration::from_millis(1500))
+        })
+        .await
+        .unwrap()
+        .expect("accepted result wire");
+        assert_eq!(wire.client_seq, 7);
+        assert_eq!(wire.status, STATUS_ACCEPTED);
+        assert_eq!(&wire.text_tag[..2], b"v8");
+        let mut buf = [0u8; hft_protocol::order_wire::ORDER_RESULT_WIRE_SIZE];
+        wire.encode(&mut buf);
+        result_push.send(&buf[..], 0).expect("send accepted result");
+
+        let ctrl = control_rx
+            .recv_timeout(Duration::from_millis(1500))
+            .expect("accepted order result");
+        match ctrl {
+            StrategyControl::OrderResult(info) => {
+                assert_eq!(info.client_seq, 7);
+                assert_eq!(info.status, ResultStatus::Accepted);
+                assert_eq!(info.text_tag, "v8");
+                assert!(info.exchange_order_id.starts_with("noop-"));
+            }
+            other => panic!("unexpected control: {other:?}"),
+        }
+
+        gateway.shutdown();
+        let _ = drain.await;
+        let _ = ingress.await;
+        let _ = listener.await;
+        gateway.join().await;
+    }
+
+    #[tokio::test]
+    async fn end_to_end_zmq_request_and_result_roundtrip_rejected() {
+        let dir = tempdir().unwrap();
+        let symtab_path = dir.path().join("symtab-result-reject.bin");
+        let order_endpoint = free_tcp_endpoint();
+        let result_endpoint = free_tcp_endpoint();
+
+        let symtab = Arc::new(SymbolTable::open_or_create(&symtab_path, 32).unwrap());
+        let result_ctx = hft_zmq::Context::new();
+        let result_push = bind_push(&result_ctx, &result_endpoint);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(8);
+        let (result_tx, result_rx) = crossbeam_channel::bounded::<OrderResultWire>(8);
+
+        let mut routing = RoutingTable::new();
+        routing.insert(
+            ExchangeId::Gate,
+            Route::Rust(Arc::new(NoopExecutor::new(ExchangeId::Gate))),
+        );
+        let gateway = start_with_arc(
+            Arc::new(routing),
+            req_rx,
+            None,
+            Some(result_tx),
+            DEDUP_CACHE_CAP_DEFAULT,
+            RetryPolicy::default(),
+        )
+        .unwrap();
+
+        let ingress = start_zmq_order_ingress(
+            &order_endpoint,
+            &ZmqConfig {
+                order_ingress_bind: Some(order_endpoint.clone()),
+                ..ZmqConfig::default()
+            },
+            symtab.clone(),
+            req_tx,
+            gateway.cancel.clone(),
+        )
+        .unwrap();
+
+        let (control_tx, control_rx) = crossbeam_channel::bounded(8);
+        let listener = spawn_result_listener(
+            &result_endpoint,
+            &ZmqConfig::default(),
+            control_tx,
+            gateway.cancel.clone(),
+        )
+        .unwrap();
+
+        let mut cfg = base_cfg();
+        cfg.shm.backend = ShmBackendKind::LegacyMultiFile;
+        cfg.shm.symtab_path = symtab_path;
+        cfg.shm.symbol_table_capacity = 32;
+        cfg.order_egress.mode = OrderEgressMode::Zmq;
+        cfg.order_egress.backpressure = BackpressurePolicy::RetryWithTimeout {
+            max_retries: 64,
+            backoff_ns: 1_000_000,
+            total_timeout_ns: 500_000_000,
+        };
+        cfg.order_egress.result_zmq_connect = Some(result_endpoint);
+        cfg.order_egress.zmq = Some(ZmqOrderEgressConfig {
+            endpoint: order_endpoint,
+            send_hwm: 8,
+            linger_ms: 0,
+            reconnect_interval_ms: 10,
+            reconnect_interval_max_ms: 10,
+        });
+
+        let egress = build_drain_egress(&cfg).expect("build zmq drain egress");
+        let (tx, rx) = crossbeam_channel::bounded(4);
+        let drain = spawn_order_drain_with_now(rx, egress, gateway.cancel.clone(), || 789);
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut req = sample_req();
+        req.exchange = ExchangeId::Binance;
+        tx.send((req, sample_seed())).unwrap();
+        drop(tx);
+
+        let wire = tokio::task::spawn_blocking(move || {
+            result_rx.recv_timeout(Duration::from_millis(1500))
+        })
+        .await
+        .unwrap()
+        .expect("rejected result wire");
+        assert_eq!(wire.client_seq, 7);
+        assert_eq!(wire.status, STATUS_REJECTED);
+        assert_eq!(&wire.text_tag[..2], b"v8");
+        let mut buf = [0u8; hft_protocol::order_wire::ORDER_RESULT_WIRE_SIZE];
+        wire.encode(&mut buf);
+        result_push.send(&buf[..], 0).expect("send rejected result");
+
+        let ctrl = control_rx
+            .recv_timeout(Duration::from_millis(1500))
+            .expect("rejected order result");
+        match ctrl {
+            StrategyControl::OrderResult(info) => {
+                assert_eq!(info.client_seq, 7);
+                assert_eq!(info.status, ResultStatus::Rejected);
+                assert_eq!(info.text_tag, "v8");
+                assert!(info.exchange_order_id.is_empty());
+            }
+            other => panic!("unexpected control: {other:?}"),
+        }
+
+        gateway.shutdown();
+        let _ = drain.await;
+        let _ = ingress.await;
+        let _ = listener.await;
+        gateway.join().await;
     }
 }

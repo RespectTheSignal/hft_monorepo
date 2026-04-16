@@ -47,3 +47,4 @@ ctrlc = { workspace = true }
 tempfile = "3"
 hft-zmq = { workspace = true }
 zmq = { workspace = true }
+order-gateway = { workspace = true }

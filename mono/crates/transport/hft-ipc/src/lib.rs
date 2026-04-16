@@ -301,6 +301,7 @@ mod tests {
             pub_endpoint: String::new(),
             sub_endpoint: String::new(),
             order_ingress_bind: None,
+            result_egress_bind: None,
         }
     }
 

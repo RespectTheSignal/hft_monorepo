@@ -1399,6 +1399,7 @@ mod tests {
             pub_endpoint: pub_.into(),
             sub_endpoint: pub_.into(),
             order_ingress_bind: None,
+            result_egress_bind: None,
         }
     }
 

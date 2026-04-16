@@ -30,6 +30,7 @@ use hft_strategy_core::risk::{
 use hft_strategy_core::signal::{calculate_signal, BookTickerSnap, GateContract, TradeSnap};
 use hft_strategy_core::OrderLevel;
 use hft_strategy_runtime::{OrderRateTracker, PositionOracleImpl};
+use hft_telemetry::{counter_inc, CounterKey};
 use hft_types::{ExchangeId, MarketEvent, Symbol};
 use parking_lot::RwLock;
 use tracing::{debug, trace};
@@ -350,7 +351,24 @@ impl Strategy for V7Strategy {
                 unrealized_pnl_usdt,
             } => self.set_account_balance(total_usdt, unrealized_pnl_usdt),
             SetAccountNetPosition { net_usdt } => self.set_account_net_position(net_usdt),
+            OrderResult(_) => {}
         }
+    }
+
+    fn on_order_result(&mut self, info: &crate::OrderResultInfo) {
+        counter_inc(CounterKey::OrderResultReceived);
+        if matches!(info.status, crate::ResultStatus::Rejected) {
+            counter_inc(CounterKey::OrderResultRejected);
+        }
+        tracing::info!(
+            target: "strategy::v7",
+            client_seq = info.client_seq,
+            status = ?info.status,
+            exchange_order_id = %info.exchange_order_id,
+            text_tag = %info.text_tag,
+            gateway_ts_ns = info.gateway_ts_ns,
+            "v7 received order result"
+        );
     }
 }
 

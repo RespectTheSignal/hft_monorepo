@@ -161,6 +161,9 @@ pub struct ZmqConfig {
     /// order-gateway ZMQ ingress bind endpoint. `None` 이면 SHM-only.
     #[serde(default)]
     pub order_ingress_bind: Option<String>,
+    /// gateway → strategy order result reverse path bind endpoint. `None` 이면 비활성.
+    #[serde(default)]
+    pub result_egress_bind: Option<String>,
 }
 
 impl Default for ZmqConfig {
@@ -173,6 +176,7 @@ impl Default for ZmqConfig {
             pub_endpoint: "tcp://0.0.0.0:5555".into(),
             sub_endpoint: "tcp://127.0.0.1:5555".into(),
             order_ingress_bind: None,
+            result_egress_bind: None,
         }
     }
 }
@@ -681,6 +685,16 @@ pub fn validate(cfg: &AppConfig) -> ConfigResult<()> {
             "zmq.order_ingress_bind must start with tcp:// or inproc://"
         );
     }
+    if let Some(bind) = cfg.zmq.result_egress_bind.as_ref() {
+        ensure!(
+            !bind.trim().is_empty(),
+            "zmq.result_egress_bind must not be empty when set"
+        );
+        ensure!(
+            bind.starts_with("tcp://") || bind.starts_with("inproc://"),
+            "zmq.result_egress_bind must start with tcp:// or inproc://"
+        );
+    }
 
     ensure!(!cfg.exchanges.is_empty(), "exchanges must not be empty");
     for (i, ex) in cfg.exchanges.iter().enumerate() {
@@ -919,6 +933,17 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_bad_result_egress_bind_uri() {
+        let mut cfg = minimal_valid_cfg();
+        cfg.zmq.result_egress_bind = Some("".into());
+        assert!(validate(&cfg).is_err());
+        cfg.zmq.result_egress_bind = Some("ipc://bad".into());
+        assert!(validate(&cfg).is_err());
+        cfg.zmq.result_egress_bind = Some("inproc://order-result".into());
+        validate(&cfg).unwrap();
+    }
+
+    #[test]
     fn validate_rejects_empty_symbol_list() {
         let mut cfg = minimal_valid_cfg();
         cfg.exchanges[0].symbols.clear();
@@ -955,6 +980,7 @@ mod tests {
             pub_endpoint = "tcp://0.0.0.0:5555"
             sub_endpoint = "tcp://127.0.0.1:5555"
             order_ingress_bind = "tcp://127.0.0.1:7010"
+            result_egress_bind = "tcp://127.0.0.1:7060"
 
             [[exchanges]]
             id = "gate"
@@ -969,6 +995,10 @@ mod tests {
         assert_eq!(
             cfg.zmq.order_ingress_bind.as_deref(),
             Some("tcp://127.0.0.1:7010")
+        );
+        assert_eq!(
+            cfg.zmq.result_egress_bind.as_deref(),
+            Some("tcp://127.0.0.1:7060")
         );
         assert_eq!(cfg.exchanges.len(), 1);
         assert_eq!(cfg.exchanges[0].id, ExchangeId::Gate);
@@ -998,6 +1028,7 @@ mod tests {
             pub_endpoint = "tcp://0.0.0.0:5555"
             sub_endpoint = "tcp://127.0.0.1:5555"
             order_ingress_bind = "inproc://order-ingress"
+            result_egress_bind = "inproc://order-result"
 
             [[exchanges]]
             id = "gate"

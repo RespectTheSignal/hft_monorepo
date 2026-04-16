@@ -2841,6 +2841,7 @@ dependencies = [
  "hft-types",
  "hft-zmq",
  "mimalloc",
+ "order-gateway",
  "parking_lot",
  "subscriber",
  "tempfile",

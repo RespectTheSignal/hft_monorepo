@@ -1,7 +1,7 @@
 //! Order egress 설정.
 //!
-//! request egress 만 다루며, 결과/ack 역방향 경로는 포함하지 않는다.
-//! 정상 경로는 SHM, ZMQ 는 fallback 용으로만 사용한다.
+//! request egress 와 선택적 result ZMQ ingress(connect) 를 다룬다.
+//! 정상 request 경로는 SHM, ZMQ 는 fallback 또는 역방향 결과 수신용으로만 사용한다.
 
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +20,9 @@ pub struct OrderEgressConfig {
     pub shm: ShmOrderEgressConfig,
     /// ZMQ fallback 설정. `mode=Zmq` 일 때만 필수.
     pub zmq: Option<ZmqOrderEgressConfig>,
+    /// gateway PUSH bind 에 strategy 가 PULL connect 할 result endpoint.
+    #[serde(default)]
+    pub result_zmq_connect: Option<String>,
     /// 링 full / downstream 정체 시 처리 정책.
     pub backpressure: BackpressurePolicy,
 }
@@ -75,6 +78,17 @@ impl OrderEgressConfig {
             ensure!(
                 zmq.reconnect_interval_max_ms >= zmq.reconnect_interval_ms,
                 "order_egress.zmq.reconnect_interval_max_ms must be >= reconnect_interval_ms"
+            );
+        }
+
+        if let Some(endpoint) = self.result_zmq_connect.as_deref() {
+            ensure!(
+                !endpoint.trim().is_empty(),
+                "order_egress.result_zmq_connect must not be empty when set"
+            );
+            ensure!(
+                endpoint.starts_with("tcp://") || endpoint.starts_with("inproc://"),
+                "order_egress.result_zmq_connect must start with tcp:// or inproc://"
             );
         }
 
@@ -215,6 +229,7 @@ mod tests {
         assert_eq!(cfg.shm.strategy_ring_id, 0);
         assert_eq!(cfg.shm.ring_capacity, 1024);
         assert!(cfg.zmq.is_none());
+        assert!(cfg.result_zmq_connect.is_none());
         assert_eq!(cfg.backpressure, BackpressurePolicy::Drop);
     }
 
@@ -241,6 +256,7 @@ mod tests {
                 reconnect_interval_ms: 50,
                 reconnect_interval_max_ms: 500,
             }),
+            result_zmq_connect: Some("tcp://127.0.0.1:7060".into()),
             backpressure: BackpressurePolicy::RetryWithTimeout {
                 max_retries: 4,
                 backoff_ns: 1_000,
@@ -278,6 +294,19 @@ mod tests {
 
         cfg.shm.ring_capacity = 1 << 10;
         cfg.validate().expect("power-of-two capacity");
+    }
+
+    #[test]
+    fn order_egress_result_zmq_connect_validate() {
+        let mut cfg = OrderEgressConfig::default();
+        cfg.result_zmq_connect = Some("".into());
+        assert!(cfg.validate().is_err());
+
+        cfg.result_zmq_connect = Some("ipc://bad".into());
+        assert!(cfg.validate().is_err());
+
+        cfg.result_zmq_connect = Some("inproc://strategy-result".into());
+        cfg.validate().expect("valid result connect endpoint");
     }
 
     #[test]

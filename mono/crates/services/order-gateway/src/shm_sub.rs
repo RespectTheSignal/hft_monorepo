@@ -47,7 +47,7 @@ use hft_types::Symbol;
 use tokio::runtime::Handle as TokioHandle;
 use tracing::{debug, error, info, warn};
 
-use crate::{Route, RoutingTable};
+use crate::{IngressEnvelope, IngressMeta, Route, RoutingTable};
 
 /// 빈 ring 에서 CPU 양보 전 spin 시도 횟수. L2 레이턴시 ~10-30ns × 4096 ≈ 100μs.
 const SPIN_LIMIT: u32 = 4096;
@@ -251,7 +251,7 @@ struct Worker {
     reader: ReaderImpl,
     symtab: SymbolTable,
     routing: Arc<RoutingTable>,
-    req_tx: Sender<OrderRequest>,
+    req_tx: Sender<IngressEnvelope>,
     rt: TokioHandle,
     stop: Arc<AtomicBool>,
     cancel: CancellationToken,
@@ -543,11 +543,17 @@ impl Worker {
             origin_ts_ns: frame.ts_ns,
             client_id,
         };
+        let mut text_tag = [0u8; 32];
+        text_tag.copy_from_slice(&place_meta.text_tag);
+        let meta = IngressMeta {
+            origin_vm_id: Some(vm_id),
+            text_tag,
+        };
 
         // Router 로 전달 (핫패스 아님: crossbeam try_send).
-        match self.req_tx.try_send(req) {
+        match self.req_tx.try_send((req, meta)) {
             Ok(()) => Ok(()),
-            Err(TrySendError::Full(req)) => {
+            Err(TrySendError::Full((req, _meta))) => {
                 counter_inc(CounterKey::OrderGatewayRouterQueueFull);
                 warn!(
                     target: "order_gateway::shm_sub",
@@ -633,7 +639,7 @@ impl Worker {
 pub fn start_shm_order_subscriber(
     cfg: &ShmSubscriberConfig,
     routing: Arc<RoutingTable>,
-    req_tx: Sender<OrderRequest>,
+    req_tx: Sender<IngressEnvelope>,
     rt: TokioHandle,
     cancel: CancellationToken,
 ) -> Result<ShmOrderSubscriberHandle> {
@@ -850,7 +856,7 @@ mod tests {
         );
         let routing = Arc::new(routing);
 
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(16);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(16);
 
         let cancel = CancellationToken::new();
         let cfg = ShmSubscriberConfig::legacy(
@@ -869,7 +875,7 @@ mod tests {
         // Python-producer 역할.
         assert!(writer.publish(&sample_place_frame(sym_idx, 42)));
 
-        let req = tokio::task::spawn_blocking(move || {
+        let (req, meta) = tokio::task::spawn_blocking(move || {
             req_rx.recv_timeout(Duration::from_millis(500))
         })
         .await
@@ -883,6 +889,7 @@ mod tests {
         assert!((req.qty - 1.0).abs() < 1e-9);
         assert_eq!(req.price, Some(50_000.0));
         assert!(req.client_id.starts_with("py-gate-"));
+        assert_eq!(meta.origin_vm_id, Some(0));
 
         handle.join();
     }
@@ -899,7 +906,7 @@ mod tests {
         );
         let routing = Arc::new(routing);
 
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(16);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(16);
         let cancel = CancellationToken::new();
         let cfg = ShmSubscriberConfig::legacy(
             dir.path().join("orders"),
@@ -922,7 +929,7 @@ mod tests {
             "v6",
         )));
 
-        let req = tokio::task::spawn_blocking(move || {
+        let (req, meta) = tokio::task::spawn_blocking(move || {
             req_rx.recv_timeout(Duration::from_millis(500))
         })
         .await
@@ -932,6 +939,7 @@ mod tests {
         assert!(req.reduce_only);
         assert_eq!(req.client_seq, 4242);
         assert_eq!(req.origin_ts_ns, 12345);
+        assert_eq!(&meta.text_tag[..2], b"v6");
 
         handle.join();
     }
@@ -948,7 +956,7 @@ mod tests {
         );
         let routing = Arc::new(routing);
 
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(16);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(16);
         let cancel = CancellationToken::new();
         let cfg = ShmSubscriberConfig::legacy(
             dir.path().join("orders"),
@@ -965,7 +973,7 @@ mod tests {
 
         assert!(writer.publish(&sample_place_frame(sym_idx, 7)));
 
-        let req = tokio::task::spawn_blocking(move || {
+        let (req, _meta) = tokio::task::spawn_blocking(move || {
             req_rx.recv_timeout(Duration::from_millis(500))
         })
         .await
@@ -994,7 +1002,7 @@ mod tests {
         routing.insert(ExchangeId::Gate, Route::Rust(exec));
         let routing = Arc::new(routing);
 
-        let (req_tx, _req_rx) = crossbeam_channel::bounded::<OrderRequest>(16);
+        let (req_tx, _req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(16);
         let cancel = CancellationToken::new();
         let cfg = ShmSubscriberConfig::legacy(
             dir.path().join("orders"),
@@ -1035,7 +1043,7 @@ mod tests {
         );
         let routing = Arc::new(routing);
 
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(16);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(16);
         let cancel = CancellationToken::new();
         let cfg = ShmSubscriberConfig::legacy(
             dir.path().join("orders"),
@@ -1119,7 +1127,7 @@ mod tests {
         );
         let routing = Arc::new(routing);
 
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(32);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(32);
         let cancel = CancellationToken::new();
 
         let cfg = ShmSubscriberConfig::shared_region(
@@ -1144,7 +1152,7 @@ mod tests {
         let mut collected: Vec<OrderRequest> = Vec::new();
         let deadline = std::time::Instant::now() + Duration::from_millis(1000);
         while collected.len() < 4 && std::time::Instant::now() < deadline {
-            if let Ok(r) = req_rx.recv_timeout(Duration::from_millis(50)) {
+            if let Ok((r, _meta)) = req_rx.recv_timeout(Duration::from_millis(50)) {
                 collected.push(r);
             }
         }
@@ -1177,7 +1185,7 @@ mod tests {
         );
         let routing = Arc::new(routing);
 
-        let (req_tx, _req_rx) = crossbeam_channel::bounded::<OrderRequest>(1);
+        let (req_tx, _req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(1);
         let cancel = CancellationToken::new();
         let cfg = ShmSubscriberConfig::legacy(
             dir.path().join("orders"),
@@ -1257,7 +1265,7 @@ mod tests {
         );
         let routing = Arc::new(routing);
 
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(32);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(32);
         let cancel = CancellationToken::new();
         let cfg = ShmSubscriberConfig::shared_region(
             Backing::DevShm { path: p.clone() },

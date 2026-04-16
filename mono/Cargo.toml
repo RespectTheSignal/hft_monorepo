@@ -174,6 +174,7 @@ hft-exchange-okx = { path = "crates/exchange/hft-exchange-okx" }
 hft-testkit = { path = "crates/testing/hft-testkit" }
 # service crate (lib + bin). strategy main 이 embed 하기 위해 lib 만 depend.
 subscriber = { path = "crates/services/subscriber" }
+order-gateway = { path = "crates/services/order-gateway" }
 
 # 공유 profile — HFT 핫패스에 맞춘 튜닝
 [profile.release]

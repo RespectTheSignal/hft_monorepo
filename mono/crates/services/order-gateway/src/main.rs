@@ -15,12 +15,13 @@
 //!    실 executor (`GateExecutor` / `BinanceExecutor` / `BybitExecutor` /
 //!    `BitgetExecutor` / `OkxExecutor`) 를 구성. 자격 없으면 `NoopExecutor` 로
 //!    fallback (dev/dry-run 모드).
-//! 4. 주문 채널 `crossbeam_channel::bounded::<OrderRequest>(hwm)` — sender 는
+//! 4. 주문 채널 `crossbeam_channel::bounded::<IngressEnvelope>(hwm)` — sender 는
 //!    embed 환경에서만 실제로 쓰이지만 standalone 에서도 disconnect 를 막기 위해
 //!    `_req_tx` 를 main 의 스코프 끝까지 살려둔다.
 //! 5. `order_gateway::start()` 호출 → `OrderGatewayHandle`.
 //! 6. `cfg.shm.enabled` 면 SHM subscriber 기동, `cfg.zmq.order_ingress_bind=Some(..)` 면
 //!    ZMQ PULL ingress task 기동. 둘 다 같은 request 채널로 fan-in.
+//! 7. `cfg.zmq.result_egress_bind=Some(..)` 면 gateway 결과를 ZMQ PUSH(bind) 로 송신.
 //! 7. ctrlc 핸들러 설치 — SIGINT/SIGTERM 수신 시 `handle.cancel.cancel()`.
 //! 8. `handle.join().await`.
 //!
@@ -38,9 +39,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use hft_exchange_api::{CancellationToken, ExchangeExecutor, OrderRequest};
+use hft_exchange_api::{CancellationToken, ExchangeExecutor};
+use hft_protocol::order_wire::{OrderResultWire, ORDER_RESULT_WIRE_SIZE};
 use hft_exchange_rest::Credentials;
 use hft_types::ExchangeId;
+use hft_zmq::{Context as ZmqContext, SendOutcome};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
@@ -49,7 +52,10 @@ use order_gateway::shm_sub::{
     start_shm_order_subscriber, ShmOrderSubscriberHandle, ShmSubscriberConfig,
 };
 use order_gateway::zmq_ingress::{open_order_ingress_symtab, start_zmq_order_ingress};
-use order_gateway::{start_with_arc, NoopExecutor, Route, RoutingTable, RetryPolicy, DEDUP_CACHE_CAP_DEFAULT};
+use order_gateway::{
+    start_with_arc, IngressEnvelope, NoopExecutor, Route, RoutingTable, RetryPolicy,
+    DEDUP_CACHE_CAP_DEFAULT,
+};
 
 /// 전역 allocator: mimalloc (hot path 외에서도 지연 균일화).
 #[global_allocator]
@@ -209,7 +215,7 @@ fn build_routing_table(cfg: &AppConfig) -> RoutingTable {
 fn build_shm_subscriber(
     cfg: &AppConfig,
     routing: Arc<RoutingTable>,
-    req_tx: crossbeam_channel::Sender<OrderRequest>,
+    req_tx: crossbeam_channel::Sender<IngressEnvelope>,
     rt: tokio::runtime::Handle,
     cancel: hft_exchange_api::CancellationToken,
 ) -> Option<ShmOrderSubscriberHandle> {
@@ -281,7 +287,7 @@ fn build_shm_subscriber(
 /// `cfg.zmq.order_ingress_bind` 가 설정되면 ZMQ PULL ingress 를 시작한다.
 fn build_zmq_ingress(
     cfg: &AppConfig,
-    req_tx: crossbeam_channel::Sender<OrderRequest>,
+    req_tx: crossbeam_channel::Sender<IngressEnvelope>,
     cancel: hft_exchange_api::CancellationToken,
 ) -> Option<JoinHandle<()>> {
     let Some(endpoint) = cfg.zmq.order_ingress_bind.as_deref() else {
@@ -316,6 +322,89 @@ fn build_zmq_ingress(
     }
 }
 
+fn build_zmq_result_egress(
+    cfg: &AppConfig,
+    result_rx: crossbeam_channel::Receiver<OrderResultWire>,
+    cancel: hft_exchange_api::CancellationToken,
+) -> Option<JoinHandle<()>> {
+    let Some(endpoint) = cfg.zmq.result_egress_bind.as_deref() else {
+        info!("ZMQ order result egress disabled by config");
+        return None;
+    };
+
+    let endpoint = endpoint.to_string();
+    let zmq_cfg = cfg.zmq.clone();
+    Some(tokio::task::spawn_blocking(move || {
+        fn send_result_with_retry(
+            push: &hft_zmq::PushSocket,
+            payload: &[u8],
+            client_seq: u64,
+            cancel: &hft_exchange_api::CancellationToken,
+        ) {
+            for attempt in 0..100 {
+                if cancel.is_cancelled() {
+                    return;
+                }
+                match push.send_bytes_dontwait(payload) {
+                    SendOutcome::Sent => return,
+                    SendOutcome::WouldBlock => {
+                        if attempt == 99 {
+                            warn!(
+                                target: "order_gateway::result_egress",
+                                client_seq,
+                                "result PUSH socket still not writable after retry budget — dropping result wire"
+                            );
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    SendOutcome::Error(e) => {
+                        warn!(
+                            target: "order_gateway::result_egress",
+                            client_seq,
+                            error = ?e,
+                            "result PUSH socket send failed"
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+
+        let ctx = ZmqContext::new();
+        let push = match ctx.push_bind(&endpoint, &zmq_cfg) {
+            Ok(sock) => sock,
+            Err(e) => {
+                warn!(
+                    endpoint,
+                    error = %format!("{e:#}"),
+                    "ZMQ order result egress failed to bind"
+                );
+                return;
+            }
+        };
+        info!(endpoint, "ZMQ order result egress started");
+
+        loop {
+            if cancel.is_cancelled() {
+                break;
+            }
+
+            match result_rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                Ok(wire) => {
+                    let mut buf = [0u8; ORDER_RESULT_WIRE_SIZE];
+                    wire.encode(&mut buf);
+                    send_result_with_retry(&push, &buf, wire.client_seq, &cancel);
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        info!(target: "order_gateway::result_egress", "ZMQ order result egress stopped");
+    }))
+}
+
 /// 실제 run 로직. 에러는 main 에서 exitcode 로 변환.
 async fn run() -> Result<()> {
     // 1) config
@@ -345,13 +434,21 @@ async fn run() -> Result<()> {
     //    끝까지 보관해 router 가 Disconnected 로 조기 종료되는 상황을 막는다. SHM 가
     //    off 라면 단순히 idle 대기.
     let cap = cfg.zmq.hwm.max(1) as usize;
-    let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(cap);
+    let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(cap);
+    let (result_tx, result_rx) = match cfg.zmq.result_egress_bind.as_deref() {
+        Some(_) => {
+            let (tx, rx) = crossbeam_channel::bounded::<OrderResultWire>(cap);
+            (Some(tx), Some(rx))
+        }
+        None => (None, None),
+    };
 
     // 5) router start — ack 소비자는 없으므로 None.
     let handle = start_with_arc(
         routing.clone(),
         req_rx,
         None,
+        result_tx,
         DEDUP_CACHE_CAP_DEFAULT,
         RetryPolicy::default(),
     )
@@ -366,6 +463,9 @@ async fn run() -> Result<()> {
         handle.cancel.clone(),
     );
     let zmq_handle = build_zmq_ingress(&cfg, req_tx.clone(), handle.cancel.clone());
+    let result_handle = result_rx
+        .map(|rx| build_zmq_result_egress(&cfg, rx, handle.cancel.clone()))
+        .flatten();
 
     // 7) signal handler (CancellationToken 만 clone 해서 전달 — handle 은 join 으로 소비).
     install_signal_handler(handle.cancel.clone());
@@ -378,6 +478,9 @@ async fn run() -> Result<()> {
         h.join();
     }
     if let Some(h) = zmq_handle {
+        let _ = h.await;
+    }
+    if let Some(h) = result_handle {
         let _ = h.await;
     }
 
@@ -396,5 +499,65 @@ async fn main() -> ExitCode {
             error!(error = %format!("{e:#}"), "order-gateway fatal error");
             ExitCode::from(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn free_tcp_endpoint() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("tcp listener");
+        let port = listener.local_addr().expect("local addr").port();
+        drop(listener);
+        format!("tcp://127.0.0.1:{port}")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn zmq_result_egress_sends_order_result_wire() {
+        let endpoint = free_tcp_endpoint();
+        let mut cfg = AppConfig::default();
+        cfg.zmq.result_egress_bind = Some(endpoint.clone());
+
+        let ctx = ZmqContext::new();
+        let mut pull = ctx
+            .pull_connect(&endpoint, &cfg.zmq)
+            .expect("pull connect result endpoint");
+        let (tx, rx) = crossbeam_channel::bounded::<OrderResultWire>(4);
+        let cancel = CancellationToken::new();
+        let handle = build_zmq_result_egress(&cfg, rx, cancel.clone()).expect("result egress");
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let mut wire = OrderResultWire {
+            client_seq: 42,
+            gateway_ts_ns: 1234,
+            filled_size: 0,
+            reject_code: 0,
+            status: hft_protocol::order_wire::STATUS_ACCEPTED,
+            _pad0: [0; 3],
+            exchange_order_id: [0; 48],
+            text_tag: [0; 32],
+            _reserved: [0; 16],
+        };
+        wire.exchange_order_id[..6].copy_from_slice(b"ord-42");
+        wire.text_tag[..2].copy_from_slice(b"v8");
+        tx.send(wire).expect("send result wire");
+
+        let mut bytes = None;
+        let deadline = std::time::Instant::now() + Duration::from_millis(1000);
+        while bytes.is_none() && std::time::Instant::now() < deadline {
+            bytes = pull.recv_bytes_timeout(100).expect("recv bytes");
+        }
+        let bytes = bytes.expect("result payload");
+        let buf: [u8; ORDER_RESULT_WIRE_SIZE] = bytes.try_into().expect("128B result wire");
+        let decoded = OrderResultWire::decode(&buf).expect("decode result wire");
+        assert_eq!(decoded.client_seq, 42);
+        assert_eq!(decoded.gateway_ts_ns, 1234);
+        assert_eq!(&decoded.text_tag[..2], b"v8");
+
+        cancel.cancel();
+        drop(tx);
+        let _ = handle.await;
     }
 }

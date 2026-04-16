@@ -48,6 +48,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use crossbeam_channel::{Receiver, Sender, TrySendError};
 use hft_exchange_api::{CancellationToken, ExchangeExecutor, OrderAck, OrderRequest};
+use hft_protocol::order_wire::{OrderResultWire, STATUS_ACCEPTED, STATUS_REJECTED};
 use hft_telemetry::{counter_inc, CounterKey};
 use hft_types::ExchangeId;
 use tokio::task::JoinHandle;
@@ -60,6 +61,18 @@ pub const DEDUP_CACHE_CAP_DEFAULT: usize = 4096;
 pub const RETRY_MAX_DEFAULT: u32 = 3;
 pub const RETRY_BASE_MS_DEFAULT: u64 = 100;
 pub const RETRY_CAP_MS_DEFAULT: u64 = 2_000;
+
+/// ingress 구현이 router 로 함께 전달하는 gateway-local 메타데이터.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct IngressMeta {
+    /// SHM path 인 경우 origin strategy VM id. ZMQ path 는 None.
+    pub origin_vm_id: Option<u32>,
+    /// request wire/aux 에서 복원한 strategy text_tag.
+    pub text_tag: [u8; 32],
+}
+
+/// router 내부 채널 payload.
+pub type IngressEnvelope = (OrderRequest, IngressMeta);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Retry policy
@@ -261,8 +274,9 @@ impl ExchangeExecutor for NoopExecutor {
 /// order-gateway router. 채널 `rx` 에서 `OrderRequest` 를 꺼내 dispatch.
 pub struct Router {
     routing: Arc<RoutingTable>,
-    rx: Receiver<OrderRequest>,
+    rx: Receiver<IngressEnvelope>,
     ack_tx: Option<Sender<OrderAck>>,
+    result_tx: Option<Sender<OrderResultWire>>,
     dedup: Arc<DedupCache>,
     retry: RetryPolicy,
 }
@@ -271,8 +285,9 @@ impl Router {
     /// 새 Router.
     pub fn new(
         routing: Arc<RoutingTable>,
-        rx: Receiver<OrderRequest>,
+        rx: Receiver<IngressEnvelope>,
         ack_tx: Option<Sender<OrderAck>>,
+        result_tx: Option<Sender<OrderResultWire>>,
         dedup: Arc<DedupCache>,
         retry: RetryPolicy,
     ) -> Self {
@@ -280,6 +295,7 @@ impl Router {
             routing,
             rx,
             ack_tx,
+            result_tx,
             dedup,
             retry,
         }
@@ -299,6 +315,7 @@ impl Router {
             routing,
             rx,
             ack_tx,
+            result_tx,
             dedup,
             retry,
         } = self;
@@ -309,8 +326,17 @@ impl Router {
             }
 
             match rx.recv_timeout(Duration::from_millis(50)) {
-                Ok(req) => {
-                    handle_request(&routing, &dedup, &retry, ack_tx.as_ref(), req).await;
+                Ok((req, meta)) => {
+                    handle_request(
+                        &routing,
+                        &dedup,
+                        &retry,
+                        ack_tx.as_ref(),
+                        result_tx.as_ref(),
+                        req,
+                        meta,
+                    )
+                    .await;
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     tokio::task::yield_now().await;
@@ -335,7 +361,9 @@ async fn handle_request(
     dedup: &DedupCache,
     retry: &RetryPolicy,
     ack_tx: Option<&Sender<OrderAck>>,
+    result_tx: Option<&Sender<OrderResultWire>>,
     req: OrderRequest,
+    meta: IngressMeta,
 ) {
     if let Err(e) = req.basic_validate() {
         warn!(
@@ -345,6 +373,7 @@ async fn handle_request(
             "order rejected at validation"
         );
         counter_inc(CounterKey::SerializationFail);
+        emit_result_wire(result_tx, &req, &meta, None, STATUS_REJECTED);
         return;
     }
 
@@ -365,6 +394,7 @@ async fn handle_request(
             "no route for exchange — dropping order"
         );
         counter_inc(CounterKey::OrderGatewayExchangeNotFound);
+        emit_result_wire(result_tx, &req, &meta, None, STATUS_REJECTED);
         return;
     };
 
@@ -378,6 +408,7 @@ async fn handle_request(
                 "Go IPC route is not implemented in Phase 1"
             );
             counter_inc(CounterKey::ZmqDropped);
+            emit_result_wire(result_tx, &req, &meta, None, STATUS_REJECTED);
             return;
         }
     };
@@ -394,11 +425,13 @@ async fn handle_request(
                     );
                 }
             }
+            emit_result_wire(result_tx, &req, &meta, Some(&a), STATUS_ACCEPTED);
             counter_inc(CounterKey::OrderGatewayRoutedOk);
             counter_inc(CounterKey::PipelineEvent);
         }
         Err(e) => {
             counter_inc(CounterKey::ZmqDropped);
+            emit_result_wire(result_tx, &req, &meta, None, STATUS_REJECTED);
             error!(
                 target: "order_gateway::router",
                 client_id = %req.client_id,
@@ -454,6 +487,57 @@ async fn place_with_retry(
     Err(last_err.unwrap_or_else(|| anyhow!("place_order failed (no error captured)")))
 }
 
+fn wall_clock_epoch_ns() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
+fn encode_zero_padded<const N: usize>(value: &str) -> [u8; N] {
+    let mut out = [0u8; N];
+    let bytes = value.as_bytes();
+    let len = bytes.len().min(N);
+    out[..len].copy_from_slice(&bytes[..len]);
+    out
+}
+
+fn emit_result_wire(
+    result_tx: Option<&Sender<OrderResultWire>>,
+    req: &OrderRequest,
+    meta: &IngressMeta,
+    ack: Option<&OrderAck>,
+    status: u8,
+) {
+    let Some(tx) = result_tx else {
+        return;
+    };
+
+    let wire = OrderResultWire {
+        client_seq: req.client_seq,
+        gateway_ts_ns: wall_clock_epoch_ns(),
+        filled_size: 0,
+        reject_code: 0,
+        status,
+        _pad0: [0; 3],
+        exchange_order_id: ack
+            .map(|a| encode_zero_padded::<48>(&a.exchange_order_id))
+            .unwrap_or([0; 48]),
+        text_tag: meta.text_tag,
+        _reserved: [0; 16],
+    };
+
+    if let Err(TrySendError::Full(_)) = tx.try_send(wire) {
+        warn!(
+            target: "order_gateway::router",
+            client_id = %req.client_id,
+            "result channel full — dropping order result wire"
+        );
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Handle + start()
 // ─────────────────────────────────────────────────────────────────────────────
@@ -489,13 +573,15 @@ impl OrderGatewayHandle {
 /// 기본 start — dedup cap/retry 는 default.
 pub fn start(
     routing: RoutingTable,
-    rx: Receiver<OrderRequest>,
+    rx: Receiver<IngressEnvelope>,
     ack_tx: Option<Sender<OrderAck>>,
+    result_tx: Option<Sender<OrderResultWire>>,
 ) -> Result<OrderGatewayHandle> {
     start_with(
         routing,
         rx,
         ack_tx,
+        result_tx,
         DEDUP_CACHE_CAP_DEFAULT,
         RetryPolicy::default(),
     )
@@ -506,12 +592,13 @@ pub fn start(
 /// [`start_with_arc`] 를 사용.
 pub fn start_with(
     routing: RoutingTable,
-    rx: Receiver<OrderRequest>,
+    rx: Receiver<IngressEnvelope>,
     ack_tx: Option<Sender<OrderAck>>,
+    result_tx: Option<Sender<OrderResultWire>>,
     dedup_cap: usize,
     retry: RetryPolicy,
 ) -> Result<OrderGatewayHandle> {
-    start_with_arc(Arc::new(routing), rx, ack_tx, dedup_cap, retry)
+    start_with_arc(Arc::new(routing), rx, ack_tx, result_tx, dedup_cap, retry)
 }
 
 /// [`start_with`] 와 동일하나 `Arc<RoutingTable>` 을 직접 받는다. 이 Arc 를 복제해
@@ -521,8 +608,9 @@ pub fn start_with(
 /// 복제 비용 없이 재사용할 수 있게 expose 한 얇은 래퍼.
 pub fn start_with_arc(
     routing: Arc<RoutingTable>,
-    rx: Receiver<OrderRequest>,
+    rx: Receiver<IngressEnvelope>,
     ack_tx: Option<Sender<OrderAck>>,
+    result_tx: Option<Sender<OrderResultWire>>,
     dedup_cap: usize,
     retry: RetryPolicy,
 ) -> Result<OrderGatewayHandle> {
@@ -534,7 +622,7 @@ pub fn start_with_arc(
     let task_cancel = cancel.child_token();
     let dedup = Arc::new(DedupCache::new(dedup_cap));
 
-    let router = Router::new(routing, rx, ack_tx, dedup, retry);
+    let router = Router::new(routing, rx, ack_tx, result_tx, dedup, retry);
     let task = tokio::spawn(async move { router.run(task_cancel).await });
 
     Ok(OrderGatewayHandle { task, cancel })
@@ -563,6 +651,13 @@ mod tests {
             client_seq: 0,
             origin_ts_ns: 0,
             client_id: Arc::from(cid),
+        }
+    }
+
+    fn sample_meta() -> IngressMeta {
+        IngressMeta {
+            origin_vm_id: Some(7),
+            text_tag: encode_zero_padded::<32>("v8"),
         }
     }
 
@@ -621,12 +716,12 @@ mod tests {
             Route::Rust(Arc::new(NoopExecutor::new(ExchangeId::Gate))),
         );
 
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(8);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(8);
         let (ack_tx, ack_rx) = crossbeam_channel::bounded::<OrderAck>(8);
-        let handle = start(routing, req_rx, Some(ack_tx)).unwrap();
+        let handle = start(routing, req_rx, Some(ack_tx), None).unwrap();
 
-        req_tx.send(sample_req("cid-1")).unwrap();
-        req_tx.send(sample_req("cid-2")).unwrap();
+        req_tx.send((sample_req("cid-1"), sample_meta())).unwrap();
+        req_tx.send((sample_req("cid-2"), sample_meta())).unwrap();
 
         let ack1 = ack_rx
             .recv_timeout(Duration::from_millis(500))
@@ -651,13 +746,13 @@ mod tests {
             Route::Rust(Arc::new(NoopExecutor::new(ExchangeId::Gate))),
         );
 
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(8);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(8);
         let (ack_tx, ack_rx) = crossbeam_channel::bounded::<OrderAck>(8);
-        let handle = start(routing, req_rx, Some(ack_tx)).unwrap();
+        let handle = start(routing, req_rx, Some(ack_tx), None).unwrap();
 
-        req_tx.send(sample_req("same")).unwrap();
-        req_tx.send(sample_req("same")).unwrap();
-        req_tx.send(sample_req("same")).unwrap();
+        req_tx.send((sample_req("same"), sample_meta())).unwrap();
+        req_tx.send((sample_req("same"), sample_meta())).unwrap();
+        req_tx.send((sample_req("same"), sample_meta())).unwrap();
 
         // 첫 번째만 ack.
         let ack = ack_rx
@@ -702,7 +797,7 @@ mod tests {
         let mut routing = RoutingTable::new();
         routing.insert(ExchangeId::Gate, Route::Rust(exec));
 
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(8);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(8);
         let (ack_tx, _ack_rx) = crossbeam_channel::bounded::<OrderAck>(8);
 
         // retry 를 짧게 재정의.
@@ -710,6 +805,7 @@ mod tests {
             routing,
             req_rx,
             Some(ack_tx),
+            None,
             128,
             RetryPolicy {
                 max_attempts: 2,
@@ -719,7 +815,7 @@ mod tests {
         )
         .unwrap();
 
-        req_tx.send(sample_req("retry-cid")).unwrap();
+        req_tx.send((sample_req("retry-cid"), sample_meta())).unwrap();
 
         // 2+1 = 3회 호출 후 포기.
         let deadline = std::time::Instant::now() + Duration::from_millis(500);
@@ -741,14 +837,14 @@ mod tests {
             ExchangeId::Gate,
             Route::Rust(Arc::new(NoopExecutor::new(ExchangeId::Gate))),
         );
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(8);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(8);
         let (ack_tx, ack_rx) = crossbeam_channel::bounded::<OrderAck>(8);
-        let handle = start(routing, req_rx, Some(ack_tx)).unwrap();
+        let handle = start(routing, req_rx, Some(ack_tx), None).unwrap();
 
         // Binance 에는 route 가 없음 → drop.
         let mut req = sample_req("cid-bx");
         req.exchange = ExchangeId::Binance;
-        req_tx.send(req).unwrap();
+        req_tx.send((req, sample_meta())).unwrap();
 
         assert!(ack_rx.recv_timeout(Duration::from_millis(100)).is_err());
         handle.shutdown();
@@ -762,14 +858,14 @@ mod tests {
             ExchangeId::Gate,
             Route::Rust(Arc::new(NoopExecutor::new(ExchangeId::Gate))),
         );
-        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(8);
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(8);
         let (ack_tx, ack_rx) = crossbeam_channel::bounded::<OrderAck>(8);
-        let handle = start(routing, req_rx, Some(ack_tx)).unwrap();
+        let handle = start(routing, req_rx, Some(ack_tx), None).unwrap();
 
         // qty=0 → basic_validate 실패.
         let mut bad = sample_req("bad-1");
         bad.qty = 0.0;
-        req_tx.send(bad).unwrap();
+        req_tx.send((bad, sample_meta())).unwrap();
 
         assert!(ack_rx.recv_timeout(Duration::from_millis(100)).is_err());
         handle.shutdown();
@@ -779,11 +875,82 @@ mod tests {
     #[test]
     fn start_rejects_empty_routing() {
         let routing = RoutingTable::new();
-        let (_tx, rx) = crossbeam_channel::bounded::<OrderRequest>(1);
-        let err = match start(routing, rx, None) {
+        let (_tx, rx) = crossbeam_channel::bounded::<IngressEnvelope>(1);
+        let err = match start(routing, rx, None, None) {
             Ok(_) => panic!("start should reject empty routing"),
             Err(err) => err,
         };
         assert!(format!("{err}").contains("at least one route"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn router_emits_result_wire_with_text_tag_and_client_seq() {
+        let mut routing = RoutingTable::new();
+        routing.insert(
+            ExchangeId::Gate,
+            Route::Rust(Arc::new(NoopExecutor::new(ExchangeId::Gate))),
+        );
+
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(8);
+        let (result_tx, result_rx) = crossbeam_channel::bounded::<OrderResultWire>(8);
+        let handle = start(routing, req_rx, None, Some(result_tx)).unwrap();
+
+        req_tx
+            .send((sample_req("cid-r1"), sample_meta()))
+            .expect("send request");
+
+        let wire = result_rx
+            .recv_timeout(Duration::from_millis(500))
+            .expect("result wire");
+        assert_eq!(wire.client_seq, 0);
+        assert_eq!(wire.status, STATUS_ACCEPTED);
+        assert_eq!(&wire.text_tag[..2], b"v8");
+
+        handle.shutdown();
+        handle.join().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn router_emits_rejected_result_wire_on_executor_error() {
+        use std::sync::atomic::AtomicU32;
+
+        let calls = Arc::new(AtomicU32::new(0));
+        let exec = Arc::new(AlwaysFailExecutor {
+            id: ExchangeId::Gate,
+            calls,
+        });
+        let mut routing = RoutingTable::new();
+        routing.insert(ExchangeId::Gate, Route::Rust(exec));
+
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(8);
+        let (result_tx, result_rx) = crossbeam_channel::bounded::<OrderResultWire>(8);
+        let handle = start_with(
+            routing,
+            req_rx,
+            None,
+            Some(result_tx),
+            128,
+            RetryPolicy {
+                max_attempts: 0,
+                base_ms: 1,
+                cap_ms: 1,
+            },
+        )
+        .unwrap();
+
+        req_tx
+            .send((sample_req("cid-rj"), sample_meta()))
+            .expect("send request");
+
+        let wire = result_rx
+            .recv_timeout(Duration::from_millis(500))
+            .expect("rejected result wire");
+        assert_eq!(wire.status, STATUS_REJECTED);
+        assert_eq!(wire.client_seq, 0);
+        assert_eq!(wire.exchange_order_id, [0; 48]);
+        assert_eq!(&wire.text_tag[..2], b"v8");
+
+        handle.shutdown();
+        handle.join().await;
     }
 }
