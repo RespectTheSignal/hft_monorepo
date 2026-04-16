@@ -132,6 +132,10 @@ impl BinanceExecutor {
                 params.push(("price".into(), format_num(price)));
             }
         }
+        params.push((
+            "reduceOnly".into(),
+            if req.reduce_only { "true" } else { "false" }.into(),
+        ));
         params.push(("newClientOrderId".into(), client_id));
         params.push(("recvWindow".into(), self.cfg.recv_window_ms.to_string()));
         params.push(("timestamp".into(), timestamp_ms.to_string()));
@@ -422,6 +426,7 @@ mod tests {
         assert_eq!(map.get("timeInForce").unwrap(), "GTC");
         assert_eq!(map.get("quantity").unwrap(), "0.01");
         assert_eq!(map.get("price").unwrap(), "60000");
+        assert_eq!(map.get("reduceOnly").unwrap(), "false");
         assert_eq!(map.get("newClientOrderId").unwrap(), "abc123");
         assert_eq!(map.get("recvWindow").unwrap(), "5000");
         assert_eq!(map.get("timestamp").unwrap(), "1700000000000");
@@ -444,10 +449,33 @@ mod tests {
             client_id: Arc::from("m2"),
         };
         let params = exec.build_place_params(&req, 1).unwrap();
+        let map: std::collections::HashMap<_, _> = params.iter().cloned().collect();
         let keys: Vec<&str> = params.iter().map(|p| p.0.as_str()).collect();
         assert!(keys.contains(&"type"));
         assert!(!keys.contains(&"price"));
         assert!(!keys.contains(&"timeInForce"));
+        assert_eq!(map.get("reduceOnly").unwrap(), "false");
+    }
+
+    #[test]
+    fn build_place_params_includes_reduce_only_when_true() {
+        let exec = mk_exec();
+        let req = OrderRequest {
+            exchange: ExchangeId::Binance,
+            symbol: Symbol::new("BTC_USDT"),
+            side: OrderSide::Sell,
+            order_type: OrderType::Market,
+            qty: 1.0,
+            price: None,
+            reduce_only: true,
+            tif: TimeInForce::Ioc,
+            client_seq: 0,
+            origin_ts_ns: 0,
+            client_id: Arc::from("reduce-binance"),
+        };
+        let params = exec.build_place_params(&req, 7).unwrap();
+        let map: std::collections::HashMap<_, _> = params.iter().cloned().collect();
+        assert_eq!(map.get("reduceOnly").unwrap(), "true");
     }
 
     #[test]
