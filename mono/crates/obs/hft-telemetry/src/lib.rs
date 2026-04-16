@@ -362,6 +362,11 @@ struct Counters {
     order_egress_backpressure_block_timeout: AtomicU64,
     order_egress_zmq_fallback_activated: AtomicU64,
     order_egress_serialize_error: AtomicU64,
+    // order-gateway vocabulary (Phase 2 E / Step 3).
+    order_gateway_routed_ok: AtomicU64,
+    order_gateway_router_queue_full: AtomicU64,
+    order_gateway_exchange_not_found: AtomicU64,
+    order_gateway_unknown_symbol: AtomicU64,
     // 기타 ad-hoc 용 — rare.
     extras: Mutex<ahash::AHashMap<&'static str, Arc<AtomicU64>>>,
 }
@@ -396,6 +401,10 @@ fn counters() -> &'static Counters {
         order_egress_backpressure_block_timeout: AtomicU64::new(0),
         order_egress_zmq_fallback_activated: AtomicU64::new(0),
         order_egress_serialize_error: AtomicU64::new(0),
+        order_gateway_routed_ok: AtomicU64::new(0),
+        order_gateway_router_queue_full: AtomicU64::new(0),
+        order_gateway_exchange_not_found: AtomicU64::new(0),
+        order_gateway_unknown_symbol: AtomicU64::new(0),
         extras: Mutex::new(ahash::AHashMap::default()),
     })
 }
@@ -459,6 +468,20 @@ pub enum CounterKey {
     OrderEgressZmqFallbackActivated,
     /// Wire encode 실패. 이론상 발생 불가, defensive.
     OrderEgressSerializeError,
+    // NOTE: `OrderGatewayExchangeNotFound` / `OrderGatewayUnknownSymbol` 은
+    // `ShmOrderInvalid` 의 의도된 subset 이다. gateway 측 호출자는 총합 축으로
+    // `ShmOrderInvalid` 를, 원인 축으로 subset counter 를 함께 증가시킨다.
+    /// Gateway router 전달 성공. `PipelineEvent` 범용과 구분.
+    OrderGatewayRoutedOk,
+    /// Gateway internal tokio channel full → drop.
+    /// NOTE: `ZmqDropped` 는 transport-agnostic, 이건 gateway internal queue 전용.
+    OrderGatewayRouterQueueFull,
+    /// Wire decode 에서 ExchangeId 매핑 실패.
+    /// NOTE: `ShmOrderInvalid` 의 subset 으로 이중 집계됨 (총합 + 세부 원인 축).
+    OrderGatewayExchangeNotFound,
+    /// Wire decode 에서 symbol_id 매핑 실패.
+    /// NOTE: `ShmOrderInvalid` 의 subset 으로 이중 집계됨.
+    OrderGatewayUnknownSymbol,
 }
 
 /// 알려진 counter 를 1 증가. hot path — atomic fetch_add 만.
@@ -502,6 +525,10 @@ pub fn counter_add(k: CounterKey, n: u64) {
         }
         CounterKey::OrderEgressZmqFallbackActivated => &c.order_egress_zmq_fallback_activated,
         CounterKey::OrderEgressSerializeError => &c.order_egress_serialize_error,
+        CounterKey::OrderGatewayRoutedOk => &c.order_gateway_routed_ok,
+        CounterKey::OrderGatewayRouterQueueFull => &c.order_gateway_router_queue_full,
+        CounterKey::OrderGatewayExchangeNotFound => &c.order_gateway_exchange_not_found,
+        CounterKey::OrderGatewayUnknownSymbol => &c.order_gateway_unknown_symbol,
     };
     target.fetch_add(n, Ordering::Relaxed);
 }
@@ -619,6 +646,22 @@ pub fn counters_snapshot() -> Vec<(String, u64)> {
         (
             "order_egress_serialize_error".into(),
             c.order_egress_serialize_error.load(Ordering::Relaxed),
+        ),
+        (
+            "order_gateway_routed_ok".into(),
+            c.order_gateway_routed_ok.load(Ordering::Relaxed),
+        ),
+        (
+            "order_gateway_router_queue_full".into(),
+            c.order_gateway_router_queue_full.load(Ordering::Relaxed),
+        ),
+        (
+            "order_gateway_exchange_not_found".into(),
+            c.order_gateway_exchange_not_found.load(Ordering::Relaxed),
+        ),
+        (
+            "order_gateway_unknown_symbol".into(),
+            c.order_gateway_unknown_symbol.load(Ordering::Relaxed),
         ),
     ];
     for (k, v) in c.extras.lock().iter() {
