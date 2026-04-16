@@ -22,7 +22,7 @@
 | **Phase 2 B** — `ExchangeExecutor` × 5 + REST/서명 infra | ✅ **완료** | `hft-exchange-rest` 중앙화 + Gate/Binance/Bybit/Bitget/OKX executor 각 place+cancel + RFC 4231 벡터 검증. order-gateway env-var wiring. |
 | **Phase 2 C** — SHM intra-host IPC (MdRing + OrderRing + SymbolTable) | ✅ **완료 (Rust 사이드)** | publisher SHM egress + order-gateway SHM ingress 양방향. `INFRA_REQUIREMENTS.md` + `MULTI_VM_TOPOLOGY.md` / ADR-0003 / `SHM_DESIGN.md`. Python ctypes reader/writer 는 pending. |
 | **Phase 2 D** — runtime feeders + main.rs variant dispatch + rate-decay 정책 | ✅ **완료** (이번 트랙) | Gate REST AccountPoller (SymbolMeta/Position provider), `OrderRateTracker::decay_before[_now]`, `StrategyControl` 채널 + V6/V7/V8 `on_control`, `services/strategy/main.rs` 전면 재작성. |
-| **Phase 2 E** — order egress (strategy → SHM 정상 / ZMQ fallback → order-gateway) | 🔄 **진행 중** | Step 1 order wire + Step 2 `OrderEgressConfig` + Step 3 CounterKey vocabulary 완료. result back-channel / naming cleanup 은 분리. |
+| **Phase 2 E** — order egress (strategy → SHM 정상 / ZMQ fallback → order-gateway) | 🔄 **진행 중** | Step 1 order wire + Step 2 `OrderEgressConfig` + Step 3 CounterKey vocabulary + Step 4a adapter 완료. result back-channel / naming cleanup 은 분리. |
 | **Phase 2 F** — 실 toolchain 에서 `cargo check/test --workspace` 1회 통과 | ⏳ **다음** | 샌드박스 rustc 부재로 정적 검증만 수행. |
 | **Phase 3** — monitoring / analytics / ops 자동화 | ⏸ | §13 ~ §14. Docker infra 이관 + error manager + telegram bot. |
 | **Flipster / Python ops** | ⏸ | `feed/`, `strategy_flipster_python/` workspace exclude 유지. 대부분 Python 그대로 운영. |
@@ -44,10 +44,13 @@
 - [x] Step 1: `OrderRequestWire` / `OrderResultWire` 128B 레이아웃 + design invariance fixture
 - [x] Step 2: `OrderEgressConfig` (request egress only)
 - [x] Step 3: `CounterKey` order egress / gateway vocabulary 확장
+- [x] Step 4a: `OrderRequest` → `OrderFrame` / `OrderRequestWire` adapter
 - [ ] ADR-0004 draft: Order Result Return Path (TBD)
 - [ ] Heartbeat: Strategy ↔ Gateway liveness (TBD)
 - [ ] Naming cleanup: `shared_path` 드리프트 정렬 (TBD, 별도 PR)
 - [ ] `ShmOrderInvalid` → `OrderGatewayInvalidTotal` rename + `OrderGatewayInvalidWire` subset 분리 (별도 PR, dashboard rename 주의)
+- [ ] SHM limit price scale 통일 (`OrderFrame.price: i64`) — Step 5 이후 `OrderRequestWire` 통일과 함께 정리
+- [ ] Python `price_raw` fixed-point 의미와 Rust gateway decode 규약 정렬 (별도 PR)
 
 ---
 
