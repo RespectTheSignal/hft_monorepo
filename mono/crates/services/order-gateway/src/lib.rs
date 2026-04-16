@@ -26,11 +26,18 @@
 //! [`shm_sub::ShmOrderSubscriber`] 가 dedicated OS thread 로 그것을 소비해
 //! Place 는 `req_tx`, Cancel 은 `RoutingTable` 를 통해 직접 executor 로 dispatch 한다.
 //! 자세한 내용은 [`shm_sub`] 참고.
+//!
+//! # ZMQ ingestion (Phase 2 E Step 5)
+//! Rust strategy 가 `OrderRequestWire` 128B frame 을 PUSH 하면
+//! [`zmq_ingress`] 가 PULL socket 으로 수신해 [`OrderRequest`] 로 정규화한 뒤
+//! 같은 `req_tx` 로 fan-in 한다. SHM/ZMQ ingress 모두 Router 는 동일 구현을 재사용한다.
 
 #![deny(rust_2018_idioms)]
 
 /// Python strategy → Rust order-gateway 주문 수신 (SHM ingress).
 pub mod shm_sub;
+/// Strategy ZMQ PUSH → Rust order-gateway raw wire ingress.
+pub mod zmq_ingress;
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -350,7 +357,7 @@ async fn handle_request(
             client_id = %req.client_id,
             "no route for exchange — dropping order"
         );
-        counter_inc(CounterKey::ZmqDropped);
+        counter_inc(CounterKey::OrderGatewayExchangeNotFound);
         return;
     };
 
@@ -380,6 +387,7 @@ async fn handle_request(
                     );
                 }
             }
+            counter_inc(CounterKey::OrderGatewayRoutedOk);
             counter_inc(CounterKey::PipelineEvent);
         }
         Err(e) => {
@@ -543,7 +551,10 @@ mod tests {
             order_type: OrderType::Limit,
             qty: 0.01,
             price: Some(100.0),
+            reduce_only: false,
             tif: TimeInForce::Gtc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from(cid),
         }
     }

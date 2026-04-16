@@ -5,7 +5,7 @@
 //!
 //! - [`OrderKind::Place`] → `OrderFrame` 을 [`OrderRequest`] 로 디코드 후
 //!   `req_tx` (Router 가 consume 하는 crossbeam 채널) 로 try_send. full 이면 drop +
-//!   `ZmqDropped` counter.
+//!   `OrderGatewayRouterQueueFull` counter.
 //! - [`OrderKind::Cancel`] → `aux` 필드를 UTF-8 ASCII (null-padded) 로 디코드해
 //!   `routing.get(...).cancel()` 를 tokio runtime 에서 `spawn` 으로 실행.
 //!
@@ -23,8 +23,9 @@
 //! 3. shutdown 시 `cancel.is_cancelled()` 체크로 즉시 break.
 //!
 //! # 실패 정책
-//! Malformed frame (알 수 없는 exchange_id, symbol resolve 실패, 알 수 없는
-//! side/tif/ord_type) 은 [`CounterKey::ShmOrderInvalid`] 만 증가시키고 skip.
+//! - wire/format 손상(알 수 없는 kind/side/tif/ord_type 등) → `ShmOrderInvalid`
+//! - 알 수 없는 exchange_id → `OrderGatewayExchangeNotFound`
+//! - symtab.resolve miss → `OrderGatewayUnknownSymbol`
 //! 파이프라인은 절대 정지시키지 않는다.
 
 use std::path::{Path, PathBuf};
@@ -40,7 +41,7 @@ use hft_shm::{
     exchange_from_u8, Backing, LayoutSpec, MultiOrderRingReader, OrderFrame, OrderKind,
     OrderRingReader, Role, SharedRegion, SubKind, SymbolTable,
 };
-use hft_telemetry::{counter_inc, CounterKey};
+use hft_telemetry::{counter_add, counter_inc, CounterKey};
 use hft_types::Symbol;
 use tokio::runtime::Handle as TokioHandle;
 use tracing::{debug, error, info, warn};
@@ -263,6 +264,16 @@ struct Worker {
     scratch_batch: Vec<(u32, OrderFrame)>,
 }
 
+/// SHM frame 처리 분류 오류.
+enum HandleFrameError {
+    /// wire/enum/포맷 자체가 손상됨.
+    Invalid(anyhow::Error),
+    /// exchange id 를 ExchangeId 로 해석할 수 없음.
+    UnknownExchangeId(u8),
+    /// symbol table 역조회 실패.
+    UnknownSymbol(u32),
+}
+
 impl Worker {
     fn run(mut self) {
         let kind = match &self.reader {
@@ -356,7 +367,7 @@ impl Worker {
             }
         }; // 여기서 reader/scratch 의 &mut 가 drop 되어 아래에서 self 사용 가능.
         if consumed > 0 {
-            counter_inc(CounterKey::ShmOrderConsumed);
+            counter_add(CounterKey::ShmOrderConsumed, consumed as u64);
             counter_inc(CounterKey::ShmOrderBatch);
             // clone 없이 iter 로 처리 (OrderFrame 은 Copy).
             // Borrowing self.scratch_batch 로 읽기만 하고, handle_one 은 &self.
@@ -372,36 +383,62 @@ impl Worker {
     /// frame 처리 wrapper — `handle_frame` 의 에러를 swallow 해 counter 로 집계.
     fn handle_one(&self, vm_id: u32, frame: &OrderFrame) {
         if let Err(e) = self.handle_frame(vm_id, frame) {
-            counter_inc(CounterKey::ShmOrderInvalid);
-            debug!(
-                target: "order_gateway::shm_sub",
-                vm_id,
-                seq = frame.seq,
-                kind = frame.kind,
-                error = %e,
-                "order frame decode failed — skipping"
-            );
+            match e {
+                HandleFrameError::Invalid(err) => {
+                    counter_inc(CounterKey::ShmOrderInvalid);
+                    debug!(
+                        target: "order_gateway::shm_sub",
+                        vm_id,
+                        seq = frame.seq,
+                        kind = frame.kind,
+                        error = %err,
+                        "order frame decode failed — skipping"
+                    );
+                }
+                HandleFrameError::UnknownExchangeId(exchange_id) => {
+                    counter_inc(CounterKey::OrderGatewayExchangeNotFound);
+                    debug!(
+                        target: "order_gateway::shm_sub",
+                        vm_id,
+                        seq = frame.seq,
+                        kind = frame.kind,
+                        exchange_id,
+                        "order frame exchange_id not found — skipping"
+                    );
+                }
+                HandleFrameError::UnknownSymbol(symbol_idx) => {
+                    counter_inc(CounterKey::OrderGatewayUnknownSymbol);
+                    debug!(
+                        target: "order_gateway::shm_sub",
+                        vm_id,
+                        seq = frame.seq,
+                        kind = frame.kind,
+                        symbol_idx,
+                        "order frame symbol_idx not found — skipping"
+                    );
+                }
+            }
         }
     }
 
     /// 한 frame 을 decode 후 적절한 경로로 dispatch. 실패 시 `Err` 로 counter 증가.
-    fn handle_frame(&self, vm_id: u32, frame: &OrderFrame) -> Result<()> {
+    fn handle_frame(&self, vm_id: u32, frame: &OrderFrame) -> Result<(), HandleFrameError> {
         // 1) exchange id.
         let exchange = exchange_from_u8(frame.exchange_id)
-            .ok_or_else(|| anyhow!("unknown exchange_id={}", frame.exchange_id))?;
+            .ok_or(HandleFrameError::UnknownExchangeId(frame.exchange_id))?;
 
         // 2) symbol resolve via symbol table.
         let (ex_resolved, symbol_name) = self
             .symtab
             .resolve(frame.symbol_idx)
-            .ok_or_else(|| anyhow!("symbol_idx={} not in table", frame.symbol_idx))?;
+            .ok_or(HandleFrameError::UnknownSymbol(frame.symbol_idx))?;
         if ex_resolved != exchange {
-            return Err(anyhow!(
+            return Err(HandleFrameError::Invalid(anyhow!(
                 "symbol_idx={} belongs to {:?}, not {:?}",
                 frame.symbol_idx,
                 ex_resolved,
                 exchange
-            ));
+            )));
         }
         let symbol = Symbol::new(&symbol_name);
 
@@ -409,7 +446,7 @@ impl Worker {
         let kind = match frame.kind {
             x if x == OrderKind::Place as u8 => OrderKind::Place,
             x if x == OrderKind::Cancel as u8 => OrderKind::Cancel,
-            x => return Err(anyhow!("unknown OrderKind={}", x)),
+            x => return Err(HandleFrameError::Invalid(anyhow!("unknown OrderKind={}", x))),
         };
 
         match kind {
@@ -424,35 +461,41 @@ impl Worker {
         frame: &OrderFrame,
         exchange: hft_types::ExchangeId,
         symbol: Symbol,
-    ) -> Result<()> {
+    ) -> Result<(), HandleFrameError> {
         let side = match frame.side {
             0 => OrderSide::Buy,
             1 => OrderSide::Sell,
-            x => return Err(anyhow!("unknown side={}", x)),
+            x => return Err(HandleFrameError::Invalid(anyhow!("unknown side={}", x))),
         };
         let tif = match frame.tif {
             0 => TimeInForce::Gtc,
             1 => TimeInForce::Ioc,
             2 => TimeInForce::Fok,
-            x => return Err(anyhow!("unknown tif={}", x)),
+            x => return Err(HandleFrameError::Invalid(anyhow!("unknown tif={}", x))),
         };
         let order_type = match frame.ord_type {
             0 => OrderType::Limit,
             1 => OrderType::Market,
-            x => return Err(anyhow!("unknown ord_type={}", x)),
+            x => return Err(HandleFrameError::Invalid(anyhow!("unknown ord_type={}", x))),
         };
 
         // SHM 는 i64-scaled 표현이지만 legacy publisher 와 동일하게 `as i64 / as f64`
         // 직접 cast 규약을 따른다. (Phase 2 이후 고정밀 Decimal 도입 가능.)
         let qty = frame.size as f64;
         if !qty.is_finite() || qty <= 0.0 {
-            return Err(anyhow!("non-positive size={}", frame.size));
+            return Err(HandleFrameError::Invalid(anyhow!(
+                "non-positive size={}",
+                frame.size
+            )));
         }
         let price = match order_type {
             OrderType::Limit => {
                 let p = frame.price as f64;
                 if !p.is_finite() || p <= 0.0 {
-                    return Err(anyhow!("non-positive limit price={}", frame.price));
+                    return Err(HandleFrameError::Invalid(anyhow!(
+                        "non-positive limit price={}",
+                        frame.price
+                    )));
                 }
                 Some(p)
             }
@@ -476,7 +519,11 @@ impl Worker {
             order_type,
             qty,
             price,
+            // TODO(Step5-debt): OrderFrame 에 reduce_only 부재. SHM path 는 현재 false 고정.
+            reduce_only: false,
             tif,
+            client_seq: frame.client_id,
+            origin_ts_ns: frame.ts_ns,
             client_id,
         };
 
@@ -484,7 +531,7 @@ impl Worker {
         match self.req_tx.try_send(req) {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(req)) => {
-                counter_inc(CounterKey::ZmqDropped);
+                counter_inc(CounterKey::OrderGatewayRouterQueueFull);
                 warn!(
                     target: "order_gateway::shm_sub",
                     vm_id,
@@ -492,7 +539,7 @@ impl Worker {
                     exchange = ?req.exchange,
                     "order router channel full — dropping SHM-ingested order"
                 );
-                Err(anyhow!("req_tx full"))
+                Ok(())
             }
             Err(TrySendError::Disconnected(_)) => {
                 error!(
@@ -500,7 +547,7 @@ impl Worker {
                     "order router channel disconnected — stopping SHM subscriber"
                 );
                 self.stop.store(true, Ordering::Release);
-                Err(anyhow!("req_tx disconnected"))
+                Ok(())
             }
         }
     }
@@ -510,7 +557,7 @@ impl Worker {
         vm_id: u32,
         frame: &OrderFrame,
         exchange: hft_types::ExchangeId,
-    ) -> Result<()> {
+    ) -> Result<(), HandleFrameError> {
         // aux (5 × u64 = 40B) 를 little-endian bytes 로 읽어 null-trimmed ASCII 로 해석.
         let mut raw = [0u8; 40];
         for (i, w) in frame.aux.iter().enumerate() {
@@ -518,23 +565,25 @@ impl Worker {
         }
         let trimmed = raw.split(|b| *b == 0).next().unwrap_or(&[]);
         let exchange_order_id = std::str::from_utf8(trimmed)
-            .map_err(|e| anyhow!("aux is not ASCII: {e}"))?
+            .map_err(|e| HandleFrameError::Invalid(anyhow!("aux is not ASCII: {e}")))?
             .trim();
         if exchange_order_id.is_empty() {
-            return Err(anyhow!("empty exchange_order_id in Cancel frame"));
+            return Err(HandleFrameError::Invalid(anyhow!(
+                "empty exchange_order_id in Cancel frame"
+            )));
         }
 
         let route = self
             .routing
             .get(exchange)
-            .ok_or_else(|| anyhow!("no route for {:?}", exchange))?;
+            .ok_or(HandleFrameError::UnknownExchangeId(frame.exchange_id))?;
 
         let exec = match route {
             Route::Rust(e) => e.clone(),
             Route::GoIpc { endpoint } => {
-                return Err(anyhow!(
+                return Err(HandleFrameError::Invalid(anyhow!(
                     "cancel via Go IPC (endpoint={endpoint}) not implemented"
-                ));
+                )));
             }
         };
 
@@ -669,9 +718,18 @@ mod tests {
     use async_trait::async_trait;
     use hft_exchange_api::{ExchangeExecutor, OrderAck};
     use hft_shm::OrderRingWriter;
+    use hft_telemetry::counters_snapshot;
     use hft_types::ExchangeId;
     use std::sync::atomic::AtomicU32;
     use tempfile::tempdir;
+
+    fn counter_value(key: &str) -> u64 {
+        counters_snapshot()
+            .into_iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
+            .unwrap_or(0)
+    }
 
     fn sample_place_frame(symbol_idx: u32, client_id: u64) -> OrderFrame {
         OrderFrame {
@@ -983,6 +1041,139 @@ mod tests {
         }
         assert_eq!(vm1, 2);
         assert_eq!(vm2, 2);
+
+        handle.join();
+    }
+
+    #[tokio::test]
+    async fn request_channel_full_counts_router_queue_full() {
+        let dir = tempdir().unwrap();
+        let (writer, _sym, sym_idx) = setup_shm(dir.path());
+
+        let mut routing = RoutingTable::new();
+        routing.insert(
+            ExchangeId::Gate,
+            Route::Rust(Arc::new(crate::NoopExecutor::new(ExchangeId::Gate))),
+        );
+        let routing = Arc::new(routing);
+
+        let (req_tx, _req_rx) = crossbeam_channel::bounded::<OrderRequest>(1);
+        let cancel = CancellationToken::new();
+        let cfg = ShmSubscriberConfig::legacy(
+            dir.path().join("orders"),
+            dir.path().join("symtab"),
+        );
+        let handle = start_shm_order_subscriber(
+            &cfg,
+            routing,
+            req_tx,
+            TokioHandle::current(),
+            cancel.clone(),
+        )
+        .unwrap();
+
+        let before = counter_value("order_gateway_router_queue_full");
+        assert!(writer.publish(&sample_place_frame(sym_idx, 1)));
+        assert!(writer.publish(&sample_place_frame(sym_idx, 2)));
+
+        let deadline = std::time::Instant::now() + Duration::from_millis(500);
+        while counter_value("order_gateway_router_queue_full") <= before
+            && std::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(counter_value("order_gateway_router_queue_full") > before);
+
+        handle.join();
+    }
+
+    #[tokio::test]
+    async fn multi_vm_consumed_counter_is_per_frame() {
+        use hft_shm::{LayoutSpec, OrderRingWriter};
+
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("v2-shared-counter");
+        let spec = LayoutSpec {
+            quote_slot_count: 8,
+            trade_ring_capacity: 16,
+            symtab_capacity: 32,
+            order_ring_capacity: 16,
+            n_max: 3,
+        };
+
+        let sr_pub = SharedRegion::create_or_attach(
+            Backing::DevShm { path: p.clone() },
+            spec,
+            Role::Publisher,
+        )
+        .unwrap();
+        let sym_w = SymbolTable::from_region(
+            sr_pub.sub_region(SubKind::Symtab).unwrap(),
+            spec.symtab_capacity,
+        )
+        .unwrap();
+        let sym_idx = sym_w.get_or_intern(ExchangeId::Gate, "BTC_USDT").unwrap();
+
+        let w1 = OrderRingWriter::from_region(
+            sr_pub.sub_region(SubKind::OrderRing { vm_id: 1 }).unwrap(),
+            spec.order_ring_capacity,
+        )
+        .unwrap();
+        let w2 = OrderRingWriter::from_region(
+            sr_pub.sub_region(SubKind::OrderRing { vm_id: 2 }).unwrap(),
+            spec.order_ring_capacity,
+        )
+        .unwrap();
+        let _w0 = OrderRingWriter::from_region(
+            sr_pub.sub_region(SubKind::OrderRing { vm_id: 0 }).unwrap(),
+            spec.order_ring_capacity,
+        )
+        .unwrap();
+
+        let mut routing = RoutingTable::new();
+        routing.insert(
+            ExchangeId::Gate,
+            Route::Rust(Arc::new(crate::NoopExecutor::new(ExchangeId::Gate))),
+        );
+        let routing = Arc::new(routing);
+
+        let (req_tx, req_rx) = crossbeam_channel::bounded::<OrderRequest>(32);
+        let cancel = CancellationToken::new();
+        let cfg = ShmSubscriberConfig::shared_region(
+            Backing::DevShm { path: p.clone() },
+            spec,
+        );
+        let handle = start_shm_order_subscriber(
+            &cfg,
+            routing,
+            req_tx,
+            TokioHandle::current(),
+            cancel.clone(),
+        )
+        .unwrap();
+
+        let before = counter_value("shm_order_consumed");
+        for i in 0..2u64 {
+            assert!(w1.publish(&sample_place_frame(sym_idx, 10 + i)));
+            assert!(w2.publish(&sample_place_frame(sym_idx, 20 + i)));
+        }
+
+        let deadline = std::time::Instant::now() + Duration::from_millis(1000);
+        let mut received = 0usize;
+        while received < 4 && std::time::Instant::now() < deadline {
+            if req_rx.recv_timeout(Duration::from_millis(50)).is_ok() {
+                received += 1;
+            }
+        }
+        assert_eq!(received, 4);
+
+        let deadline = std::time::Instant::now() + Duration::from_millis(500);
+        while counter_value("shm_order_consumed") < before + 4
+            && std::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(counter_value("shm_order_consumed") >= before + 4);
 
         handle.join();
     }
