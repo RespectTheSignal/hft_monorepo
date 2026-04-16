@@ -19,8 +19,10 @@
 //!    embed 환경에서만 실제로 쓰이지만 standalone 에서도 disconnect 를 막기 위해
 //!    `_req_tx` 를 main 의 스코프 끝까지 살려둔다.
 //! 5. `order_gateway::start()` 호출 → `OrderGatewayHandle`.
-//! 6. ctrlc 핸들러 설치 — SIGINT/SIGTERM 수신 시 `handle.cancel.cancel()`.
-//! 7. `handle.join().await`.
+//! 6. `cfg.shm.enabled` 면 SHM subscriber 기동, `cfg.zmq.order_ingress_bind=Some(..)` 면
+//!    ZMQ PULL ingress task 기동. 둘 다 같은 request 채널로 fan-in.
+//! 7. ctrlc 핸들러 설치 — SIGINT/SIGTERM 수신 시 `handle.cancel.cancel()`.
+//! 8. `handle.join().await`.
 //!
 //! # 안정성 메모
 //! - mimalloc 을 global allocator 로 지정 (hot path 가 아니어도 지연 균일화).
@@ -39,12 +41,14 @@ use anyhow::{anyhow, Context, Result};
 use hft_exchange_api::{CancellationToken, ExchangeExecutor, OrderRequest};
 use hft_exchange_rest::Credentials;
 use hft_types::ExchangeId;
+use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
 use hft_config::AppConfig;
 use order_gateway::shm_sub::{
     start_shm_order_subscriber, ShmOrderSubscriberHandle, ShmSubscriberConfig,
 };
+use order_gateway::zmq_ingress::{open_order_ingress_symtab, start_zmq_order_ingress};
 use order_gateway::{start_with_arc, NoopExecutor, Route, RoutingTable, RetryPolicy, DEDUP_CACHE_CAP_DEFAULT};
 
 /// 전역 allocator: mimalloc (hot path 외에서도 지연 균일화).
@@ -274,6 +278,44 @@ fn build_shm_subscriber(
     }
 }
 
+/// `cfg.zmq.order_ingress_bind` 가 설정되면 ZMQ PULL ingress 를 시작한다.
+fn build_zmq_ingress(
+    cfg: &AppConfig,
+    req_tx: crossbeam_channel::Sender<OrderRequest>,
+    cancel: hft_exchange_api::CancellationToken,
+) -> Option<JoinHandle<()>> {
+    let Some(endpoint) = cfg.zmq.order_ingress_bind.as_deref() else {
+        info!("ZMQ order ingress disabled by config");
+        return None;
+    };
+
+    let symtab = match open_order_ingress_symtab(cfg) {
+        Ok(symtab) => symtab,
+        Err(e) => {
+            warn!(
+                error = %format!("{e:#}"),
+                "ZMQ order ingress symtab open failed — SHM path only"
+            );
+            return None;
+        }
+    };
+
+    match start_zmq_order_ingress(endpoint, &cfg.zmq, symtab, req_tx, cancel) {
+        Ok(handle) => {
+            info!(endpoint, "ZMQ order ingress started");
+            Some(handle)
+        }
+        Err(e) => {
+            warn!(
+                endpoint,
+                error = %format!("{e:#}"),
+                "ZMQ order ingress failed to start — SHM path only"
+            );
+            None
+        }
+    }
+}
+
 /// 실제 run 로직. 에러는 main 에서 exitcode 로 변환.
 async fn run() -> Result<()> {
     // 1) config
@@ -323,6 +365,7 @@ async fn run() -> Result<()> {
         tokio::runtime::Handle::current(),
         handle.cancel.clone(),
     );
+    let zmq_handle = build_zmq_ingress(&cfg, req_tx.clone(), handle.cancel.clone());
 
     // 7) signal handler (CancellationToken 만 clone 해서 전달 — handle 은 join 으로 소비).
     install_signal_handler(handle.cancel.clone());
@@ -333,6 +376,9 @@ async fn run() -> Result<()> {
     // 9) SHM subscriber 정리.
     if let Some(h) = shm_handle {
         h.join();
+    }
+    if let Some(h) = zmq_handle {
+        let _ = h.await;
     }
 
     info!("order-gateway exited cleanly");

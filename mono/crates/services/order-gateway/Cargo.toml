@@ -29,6 +29,8 @@ hft-config = { workspace = true }
 hft-telemetry = { workspace = true }
 hft-time = { workspace = true }
 hft-shm = { workspace = true }
+hft-protocol = { workspace = true }
+hft-zmq = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 crossbeam-channel = { workspace = true }
@@ -41,5 +43,6 @@ ctrlc = { workspace = true }
 
 [dev-dependencies]
 hft-testkit = { workspace = true }
+hft-order-egress = { workspace = true }
 tempfile = "3"
 parking_lot = { workspace = true }
