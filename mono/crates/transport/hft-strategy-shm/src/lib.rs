@@ -235,6 +235,15 @@ impl StrategyShmClient {
         self.order.publish(&frame)
     }
 
+    /// 이미 완성된 raw [`OrderFrame`] 을 현재 VM 의 order ring 에 그대로 쓴다.
+    ///
+    /// symbol intern / exchange_id 보정 없이 caller 가 채운 값을 신뢰한다.
+    /// Step 4b 이후 `ShmOrderEgress` 가 adapter + symtab lookup 을 끝낸 뒤 이 경로를
+    /// 사용한다.
+    pub fn publish_frame(&self, frame: &OrderFrame) -> bool {
+        self.order.publish(frame)
+    }
+
     /// 최신 QuoteSnapshot 을 symbol_idx 로 읽는다.
     pub fn read_quote(&self, symbol_idx: u32) -> Option<QuoteSnapshot> {
         self.quote.read(symbol_idx)
@@ -425,6 +434,33 @@ mod tests {
             let mut r = hft_shm::OrderRingReader::from_region(sub).unwrap();
             assert!(r.try_consume().is_none(), "vm {} should be empty", other_vm);
         }
+    }
+
+    #[test]
+    fn publish_frame_writes_raw_frame_without_symbol_rewrite() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("sr2_raw");
+        let s = spec(2);
+        let sr_pub = boot_publisher(&path, s);
+
+        let client = StrategyShmClient::attach(
+            Backing::DevShm { path: path.clone() },
+            s,
+            0,
+        )
+        .unwrap();
+
+        let mut frame = sample_frame(77);
+        frame.exchange_id = hft_shm::exchange_to_u8(ExchangeId::Bybit);
+        frame.symbol_idx = 9;
+        assert!(client.publish_frame(&frame));
+
+        let sub = sr_pub.sub_region(SubKind::OrderRing { vm_id: 0 }).unwrap();
+        let mut reader = hft_shm::OrderRingReader::from_region(sub).unwrap();
+        let got = reader.try_consume().expect("one raw frame");
+        assert_eq!(got.client_id, 77);
+        assert_eq!(got.exchange_id, hft_shm::exchange_to_u8(ExchangeId::Bybit));
+        assert_eq!(got.symbol_idx, 9);
     }
 
     #[test]
