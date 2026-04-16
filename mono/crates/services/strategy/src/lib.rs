@@ -36,6 +36,8 @@ use std::time::Duration;
 use anyhow::{Context as _, Result};
 use crossbeam_channel::{Receiver, Sender, TrySendError};
 use hft_exchange_api::{CancellationToken, OrderRequest};
+use hft_protocol::WireLevel;
+use hft_strategy_core::decision::OrderLevel;
 use hft_telemetry::{counter_inc, record_stage_nanos, CounterKey};
 use hft_time::{Clock, LatencyStamps, Stage, SystemClock};
 use hft_types::MarketEvent;
@@ -44,8 +46,28 @@ use tracing::{info, warn};
 
 pub use egress_seed::OrderEgressMetaSeed;
 
+/// 전략이 drain 쪽으로 넘기는 주문 payload.
+pub type OrderEnvelope = (OrderRequest, OrderEgressMetaSeed);
+
 /// `Strategy::eval` 반환값의 별칭.
-pub type Orders = Vec<OrderRequest>;
+pub type Orders = Vec<OrderEnvelope>;
+
+/// decision layer 의 `OrderLevel` 을 drain seed 로 정규화한다.
+pub fn make_order_seed(
+    client_seq: u64,
+    level: OrderLevel,
+    strategy_tag: &'static str,
+) -> OrderEgressMetaSeed {
+    OrderEgressMetaSeed {
+        client_seq,
+        level: match level {
+            OrderLevel::LimitOpen => WireLevel::Open,
+            OrderLevel::LimitClose | OrderLevel::MarketClose => WireLevel::Close,
+        },
+        reduce_only: level.is_close(),
+        strategy_tag,
+    }
+}
 
 /// 한 이벤트에 대응하는 strategy 로직.
 ///
@@ -140,20 +162,20 @@ impl Strategy for NoopStrategy {
 ///
 /// hot path 에서 `try_send` 만 호출 — full 이면 drop + counter.
 pub struct OrderSender {
-    tx: Sender<OrderRequest>,
+    tx: Sender<OrderEnvelope>,
 }
 
 impl OrderSender {
     /// bounded(N) 로 생성. 반환한 (sender, receiver) 중 receiver 는 order-gateway 가 보유.
-    pub fn bounded(cap: usize) -> (Self, Receiver<OrderRequest>) {
+    pub fn bounded(cap: usize) -> (Self, Receiver<OrderEnvelope>) {
         let (tx, rx) = crossbeam_channel::bounded(cap);
         (Self { tx }, rx)
     }
 
     /// try_send. full 이면 Err, disconnected 면 Err (로그는 caller 책임).
     #[inline]
-    pub fn try_send(&self, req: OrderRequest) -> Result<(), OrderSendError> {
-        match self.tx.try_send(req) {
+    pub fn try_send(&self, order: OrderEnvelope) -> Result<(), OrderSendError> {
+        match self.tx.try_send(order) {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(_)) => Err(OrderSendError::Full),
             Err(TrySendError::Disconnected(_)) => Err(OrderSendError::Disconnected),
@@ -280,10 +302,11 @@ impl<S: Strategy> StrategyRunner<S> {
             return;
         }
 
-        for req in orders {
-            match self.orders.try_send(req) {
+        for order in orders {
+            match self.orders.try_send(order) {
                 Ok(()) => {}
                 Err(OrderSendError::Full) => {
+                    // TODO(4c-followup): rename to StrategyOrderChannelFull; see CounterKey vocabulary cleanup.
                     counter_inc(CounterKey::ZmqDropped);
                     warn!(
                         target: "strategy::runner",
@@ -436,13 +459,19 @@ mod tests {
             tif: TimeInForce::Gtc,
             client_id: Arc::from("cid-1"),
         };
+        let seed = OrderEgressMetaSeed {
+            client_seq: 1,
+            level: WireLevel::Open,
+            reduce_only: false,
+            strategy_tag: "test",
+        };
 
-        tx.try_send(req.clone()).unwrap();
-        assert!(matches!(tx.try_send(req.clone()), Err(OrderSendError::Full)));
+        tx.try_send((req.clone(), seed)).unwrap();
+        assert!(matches!(tx.try_send((req.clone(), seed)), Err(OrderSendError::Full)));
 
         drop(rx);
         assert!(matches!(
-            tx.try_send(req),
+            tx.try_send((req, seed)),
             Err(OrderSendError::Disconnected)
         ));
     }
@@ -509,16 +538,28 @@ mod tests {
             let id: Arc<str> = Arc::from(format!("echo-{}", self.client_seq));
             let sym = ev.symbol();
             let exch = ev.exchange();
-            vec![OrderRequest {
-                exchange: exch,
-                symbol: sym,
-                side: OrderSide::Buy,
-                order_type: OrderType::Limit,
-                qty: 1.0,
-                price: Some(1.0),
-                tif: TimeInForce::Gtc,
-                client_id: id,
-            }]
+            vec![(
+                OrderRequest {
+                    exchange: exch,
+                    symbol: sym,
+                    side: OrderSide::Buy,
+                    order_type: OrderType::Limit,
+                    qty: 1.0,
+                    price: Some(1.0),
+                    tif: TimeInForce::Gtc,
+                    client_id: id,
+                },
+                OrderEgressMetaSeed {
+                    client_seq: self.client_seq,
+                    level: WireLevel::Open,
+                    reduce_only: false,
+                    strategy_tag: "echo",
+                },
+            )]
+        }
+
+        fn tag(&self) -> &'static str {
+            "echo"
         }
     }
 
@@ -535,8 +576,9 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(80)).await;
 
         let mut got = 0usize;
-        while orders_rx.try_recv().is_ok() {
+        while let Ok((_, seed)) = orders_rx.try_recv() {
             got += 1;
+            assert_eq!(seed.strategy_tag, "echo");
         }
         assert_eq!(got, 5, "expected 5 echo orders, got {got}");
 

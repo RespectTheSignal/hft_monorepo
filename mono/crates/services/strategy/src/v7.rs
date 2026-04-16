@@ -34,7 +34,7 @@ use hft_types::{ExchangeId, MarketEvent, Symbol};
 use parking_lot::RwLock;
 use tracing::{debug, trace};
 
-use crate::{Orders, Strategy};
+use crate::{make_order_seed, Orders, Strategy};
 
 #[derive(Debug, Clone, Default)]
 struct SymbolCache {
@@ -273,16 +273,19 @@ impl V7Strategy {
         };
 
         let symbol_ref = Symbol::new(symbol);
-        orders.push(OrderRequest {
-            exchange: ExchangeId::Gate,
-            symbol: symbol_ref.clone(),
-            side: api_side,
-            order_type,
-            qty,
-            price,
-            tif,
-            client_id,
-        });
+        orders.push((
+            OrderRequest {
+                exchange: ExchangeId::Gate,
+                symbol: symbol_ref.clone(),
+                side: api_side,
+                order_type,
+                qty,
+                price,
+                tif,
+                client_id,
+            },
+            make_order_seed(seq, dec.level, self.tag()),
+        ));
         self.orders_emitted = self.orders_emitted.saturating_add(1);
         if let Some(rt) = self.rate.as_ref() {
             rt.push(&symbol_ref, now_ms);

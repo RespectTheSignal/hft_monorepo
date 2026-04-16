@@ -35,7 +35,7 @@ use hft_types::{ExchangeId, MarketEvent, Symbol};
 use parking_lot::RwLock;
 use tracing::{debug, trace};
 
-use crate::{Orders, Strategy};
+use crate::{make_order_seed, Orders, Strategy};
 
 /// 심볼별 hot cache. v8 와 동일 구조.
 #[derive(Debug, Clone, Default)]
@@ -304,16 +304,19 @@ impl V6Strategy {
             Some(chance.price)
         };
 
-        orders.push(OrderRequest {
-            exchange: ExchangeId::Gate,
-            symbol: symbol_ref.clone(),
-            side: api_side,
-            order_type,
-            qty,
-            price,
-            tif,
-            client_id,
-        });
+        orders.push((
+            OrderRequest {
+                exchange: ExchangeId::Gate,
+                symbol: symbol_ref.clone(),
+                side: api_side,
+                order_type,
+                qty,
+                price,
+                tif,
+                client_id,
+            },
+            make_order_seed(seq, dec.level, self.tag()),
+        ));
         self.orders_emitted = self.orders_emitted.saturating_add(1);
         self.rate.push(&symbol_ref, now_ms);
 
@@ -537,7 +540,10 @@ mod tests {
         });
         let out = strat.eval(&ev);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].order_type, OrderType::Market);
-        assert_eq!(out[0].tif, TimeInForce::Ioc);
+        assert_eq!(out[0].0.order_type, OrderType::Market);
+        assert_eq!(out[0].0.tif, TimeInForce::Ioc);
+        assert_eq!(out[0].1.strategy_tag, "v6");
+        assert_eq!(out[0].1.level, hft_protocol::WireLevel::Close);
+        assert!(out[0].1.reduce_only);
     }
 }
