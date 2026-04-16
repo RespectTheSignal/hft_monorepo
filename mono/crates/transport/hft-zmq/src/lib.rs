@@ -130,6 +130,22 @@ impl Context {
         Ok(PushSocket { inner: sock })
     }
 
+    /// PUSH 소켓 생성 및 `connect` + reconnect 간격 적용.
+    pub fn push_with_reconnect(
+        &self,
+        endpoint: &str,
+        cfg: &ZmqConfig,
+        reconnect_interval_ms: i32,
+        reconnect_interval_max_ms: i32,
+    ) -> ZmqResult<PushSocket> {
+        let sock = self.0.socket(zmq::PUSH)?;
+        apply_common_opts(&sock, cfg)?;
+        sock.set_reconnect_ivl(reconnect_interval_ms)?;
+        sock.set_reconnect_ivl_max(reconnect_interval_max_ms)?;
+        sock.connect(endpoint)?;
+        Ok(PushSocket { inner: sock })
+    }
+
     /// PUSH 소켓을 `bind` 로 열기 (aggregator ↔ bg-writer 같은 역방향 토폴로지).
     pub fn push_bind(&self, endpoint: &str, cfg: &ZmqConfig) -> ZmqResult<PushSocket> {
         let sock = self.0.socket(zmq::PUSH)?;
@@ -244,6 +260,22 @@ fn send_multipart_nonblocking(
     }
 }
 
+/// 단일 프레임 raw payload 를 `DONTWAIT` 로 전송한다.
+fn send_single_nonblocking(sock: &zmq::Socket, payload: &[u8]) -> SendOutcome {
+    match sock.send(payload, zmq::DONTWAIT) {
+        Ok(()) => SendOutcome::Sent,
+        Err(zmq::Error::EAGAIN) => {
+            counter_inc(CounterKey::ZmqHwmBlock);
+            counter_inc(CounterKey::ZmqDropped);
+            SendOutcome::WouldBlock
+        }
+        Err(e) => {
+            warn!(target: "hft_zmq", error = ?e, "send_single payload frame failed");
+            SendOutcome::Error(e)
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PushSocket
 // ─────────────────────────────────────────────────────────────────────────────
@@ -258,6 +290,12 @@ impl PushSocket {
     #[inline]
     pub fn send_dontwait(&self, topic: &[u8], payload: &[u8]) -> SendOutcome {
         send_multipart_nonblocking(&self.inner, topic, payload)
+    }
+
+    /// 단일 프레임 raw payload 를 non-blocking 으로 전송한다.
+    #[inline]
+    pub fn send_bytes_dontwait(&self, payload: &[u8]) -> SendOutcome {
+        send_single_nonblocking(&self.inner, payload)
     }
 
     /// raw fd (tokio AsyncFd 어댑터 용).

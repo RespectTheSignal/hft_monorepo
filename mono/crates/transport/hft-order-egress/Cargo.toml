@@ -18,4 +18,5 @@ hft-protocol.workspace = true
 hft-config.workspace = true
 hft-telemetry.workspace = true
 hft-strategy-shm.workspace = true
+hft-zmq.workspace = true
 thiserror.workspace = true

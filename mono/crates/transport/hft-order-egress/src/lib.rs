@@ -7,6 +7,7 @@
 
 mod policy;
 mod shm;
+mod zmq;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
@@ -17,6 +18,7 @@ use thiserror::Error;
 
 pub use policy::PolicyOrderEgress;
 pub use shm::ShmOrderEgress;
+pub use zmq::ZmqOrderEgress;
 
 /// one-shot 전송 시도 결과.
 ///
