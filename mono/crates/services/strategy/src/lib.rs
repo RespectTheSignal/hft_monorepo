@@ -67,6 +67,11 @@ pub trait Strategy: Send + 'static {
         "anonymous"
     }
 
+    /// wire/text tag 용 정규화된 strategy 식별자.
+    fn tag(&self) -> &'static str {
+        "anonymous"
+    }
+
     /// hot-path 외 제어 메시지. 기본 no-op — 계정 잔고 / net-position 업데이트 등
     /// 비동기 주기 이벤트를 hot path (`update`/`eval`) 와 **분리** 하기 위한 훅.
     ///
@@ -119,6 +124,10 @@ impl Strategy for NoopStrategy {
     }
 
     fn label(&self) -> &str {
+        "noop"
+    }
+
+    fn tag(&self) -> &'static str {
         "noop"
     }
 }

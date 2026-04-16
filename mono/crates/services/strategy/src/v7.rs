@@ -264,7 +264,7 @@ impl V7Strategy {
             _ => TimeInForce::Fok,
         };
         let seq = self.client_seq.fetch_add(1, Ordering::Relaxed);
-        let client_id: Arc<str> = Arc::from(format!("v7-{seq}"));
+        let client_id: Arc<str> = Arc::from(format!("{}-{seq}", self.tag()));
         let qty = rc.order_size.unsigned_abs() as f64;
         let price = if matches!(order_type, OrderType::Market) {
             None
@@ -331,6 +331,10 @@ impl Strategy for V7Strategy {
         "V7"
     }
 
+    fn tag(&self) -> &'static str {
+        "v7"
+    }
+
     #[inline]
     fn on_control(&mut self, ctrl: &crate::StrategyControl) {
         use crate::StrategyControl::*;
@@ -381,6 +385,7 @@ mod tests {
     fn v7_strategy_label() {
         let s = strat();
         assert_eq!(s.label(), "V7");
+        assert_eq!(s.tag(), "v7");
     }
 
     #[test]
