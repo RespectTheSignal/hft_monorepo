@@ -861,6 +861,8 @@ mod tests {
         assert!(d.warmup.enabled);
         assert_eq!(d.warmup.events, 5_000);
         assert_eq!(d.supabase.refresh_interval_s, 300);
+        assert_eq!(d.order_egress.mode, order_egress::OrderEgressMode::Shm);
+        assert_eq!(d.order_egress.shm.ring_capacity, 1024);
     }
 
     #[test]
@@ -1264,6 +1266,50 @@ mod tests {
         assert!(!cfg.shm.enabled);
         assert_eq!(cfg.shm.trade_ring_capacity, 65_536);
         assert_eq!(cfg.shm.quote_path, PathBuf::from("/tmp/custom_quotes"));
+
+        clear_hft_env();
+    }
+
+    #[test]
+    fn order_egress_env_overlay_works() {
+        let _g = env_lock();
+        clear_hft_env();
+        std::env::set_var("HFT_ORDER_EGRESS__MODE", "zmq");
+        std::env::set_var("HFT_ORDER_EGRESS__SHM__STRATEGY_RING_ID", "3");
+        std::env::set_var("HFT_ORDER_EGRESS__SHM__RING_CAPACITY", "2048");
+        std::env::set_var("HFT_ORDER_EGRESS__ZMQ__ENDPOINT", "tcp://infra-vm:5560");
+        std::env::set_var("HFT_ORDER_EGRESS__ZMQ__SEND_HWM", "4096");
+        std::env::set_var("HFT_ORDER_EGRESS__BACKPRESSURE__MODE", "retry");
+        std::env::set_var("HFT_ORDER_EGRESS__BACKPRESSURE__MAX_RETRIES", "3");
+        std::env::set_var("HFT_ORDER_EGRESS__BACKPRESSURE__BACKOFF_NS", "1000");
+        std::env::set_var(
+            "HFT_ORDER_EGRESS__BACKPRESSURE__TOTAL_TIMEOUT_NS",
+            "3000",
+        );
+
+        let toml = r#"
+            service_name = "svc"
+            hot_workers = 1
+            bg_workers = 1
+            [[exchanges]]
+            id = "gate"
+            symbols = ["BTC_USDT"]
+        "#;
+        let cfg = load_from_toml_str(toml).unwrap();
+        assert_eq!(cfg.order_egress.mode, order_egress::OrderEgressMode::Zmq);
+        assert_eq!(cfg.order_egress.shm.strategy_ring_id, 3);
+        assert_eq!(cfg.order_egress.shm.ring_capacity, 2048);
+        let zmq = cfg.order_egress.zmq.as_ref().expect("zmq config");
+        assert_eq!(zmq.endpoint, "tcp://infra-vm:5560");
+        assert_eq!(zmq.send_hwm, 4096);
+        assert_eq!(
+            cfg.order_egress.backpressure,
+            order_egress::BackpressurePolicy::RetryWithTimeout {
+                max_retries: 3,
+                backoff_ns: 1000,
+                total_timeout_ns: 3000,
+            }
+        );
 
         clear_hft_env();
     }

@@ -214,3 +214,111 @@ pub enum BackpressurePolicy {
         timeout_ns: u64,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn order_egress_defaults_are_sensible() {
+        let cfg = OrderEgressConfig::default();
+        assert_eq!(cfg.mode, OrderEgressMode::Shm);
+        assert_eq!(cfg.shm.strategy_ring_id, 0);
+        assert_eq!(cfg.shm.ring_capacity, 1024);
+        assert!(cfg.zmq.is_none());
+        assert_eq!(cfg.backpressure, BackpressurePolicy::Drop);
+    }
+
+    #[test]
+    fn order_egress_serde_roundtrip_default() {
+        let cfg = OrderEgressConfig::default();
+        let toml = toml::to_string(&cfg).expect("serialize default");
+        let back: OrderEgressConfig = toml::from_str(&toml).expect("parse default");
+        assert_eq!(back, cfg);
+    }
+
+    #[test]
+    fn order_egress_serde_roundtrip_full() {
+        let cfg = OrderEgressConfig {
+            mode: OrderEgressMode::Zmq,
+            shm: ShmOrderEgressConfig {
+                strategy_ring_id: 7,
+                ring_capacity: 4096,
+            },
+            zmq: Some(ZmqOrderEgressConfig {
+                endpoint: "tcp://infra-vm:5560".into(),
+                send_hwm: 2048,
+                linger_ms: 0,
+                reconnect_interval_ms: 50,
+                reconnect_interval_max_ms: 500,
+            }),
+            backpressure: BackpressurePolicy::RetryWithTimeout {
+                max_retries: 4,
+                backoff_ns: 1_000,
+                total_timeout_ns: 8_000,
+            },
+        };
+        let toml = toml::to_string_pretty(&cfg).expect("serialize full");
+        let back: OrderEgressConfig = toml::from_str(&toml).expect("parse full");
+        assert_eq!(back, cfg);
+    }
+
+    #[test]
+    fn order_egress_rejects_unknown_fields() {
+        let err = toml::from_str::<OrderEgressConfig>(
+            r#"
+                mode = "shm"
+                unknown_field = 1
+            "#,
+        )
+        .expect_err("unknown field must fail");
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn order_egress_ring_capacity_is_power_of_two_validation() {
+        let mut cfg = OrderEgressConfig::default();
+        cfg.shm.ring_capacity = 0;
+        assert!(cfg.validate().is_err());
+
+        cfg.shm.ring_capacity = 1000;
+        assert!(cfg.validate().is_err());
+
+        cfg.shm.ring_capacity = 1 << 21;
+        assert!(cfg.validate().is_err());
+
+        cfg.shm.ring_capacity = 1 << 10;
+        cfg.validate().expect("power-of-two capacity");
+    }
+
+    #[test]
+    fn order_egress_zmq_required_when_mode_zmq() {
+        let cfg = OrderEgressConfig {
+            mode: OrderEgressMode::Zmq,
+            zmq: None,
+            ..OrderEgressConfig::default()
+        };
+        let err = cfg.validate().expect_err("zmq config must be required");
+        assert!(err
+            .to_string()
+            .contains("order_egress.zmq must be set when order_egress.mode=zmq"));
+    }
+
+    #[test]
+    fn order_egress_backpressure_retry_policy_bounds() {
+        let cfg = OrderEgressConfig {
+            backpressure: BackpressurePolicy::RetryWithTimeout {
+                max_retries: 4,
+                backoff_ns: 1_000,
+                total_timeout_ns: 3_000,
+            },
+            ..OrderEgressConfig::default()
+        };
+        let err = cfg
+            .validate()
+            .expect_err("too-small timeout must fail validation");
+        assert!(err
+            .to_string()
+            .contains("total_timeout_ns must be >= max_retries * backoff_ns"));
+    }
+}
