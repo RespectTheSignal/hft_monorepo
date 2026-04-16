@@ -51,13 +51,15 @@
 - [x] Step 6: SHM `OrderFrame.aux` kind-dependent union (`PlaceAuxMeta`) 으로 `reduce_only` / `level` / `text_tag` 보존
 - [x] Step 7: executor reduce_only 실사용 (Gate/Binance/Bybit/Bitget/OKX REST body 반영)
 - [x] Step 8: order result back-channel (gateway ZMQ PUSH → strategy ZMQ PULL → `StrategyControl::OrderResult`)
+- [x] Cleanup: `StrategyAccountPollErr` / `StrategyControlDropped` CounterKey 정식 등재 + call site 전환
+- [x] Cleanup: mock Gate REST style strategy↔gateway result roundtrip integration test 추가 (`crates/testing/integration/tests/e2e_strategy_result.rs`)
 - [ ] ADR-0004 draft: SHM result ring / heartbeat / fill-stream 확장 범위 (현재 ZMQ reverse path 만 완료)
 - [ ] Heartbeat: Strategy ↔ Gateway liveness (TBD)
 - [ ] Naming cleanup: `shared_path` 드리프트 정렬 (TBD, 별도 PR)
-- [ ] `ShmOrderInvalid` → `OrderGatewayInvalidTotal` rename + `OrderGatewayInvalidWire` subset 분리 (별도 PR, dashboard rename 주의)
+- [~] `ShmOrderInvalid` → `OrderGatewayInvalidTotal` rename + `OrderGatewayInvalidWire` subset 분리 (ZMQ ingress invalid-wire path 는 `OrderGatewayInvalidWire` 로 이동 완료, SHM total/dashboard rename TBD)
 - [ ] price regime + symbol-meta layer 정리 (`OrderFrame.price: i64`, Python `price_raw`, executor quantize 책임)
 - [ ] `Clock::epoch_ns()` 또는 `decision_ts_ns` 필드 추가 — queue 대기 지연 분리 관측
-- [ ] `ZmqDropped` → `StrategyOrderChannelFull` rename (dashboard 호환 고려)
+- [~] `ZmqDropped` → `StrategyOrderChannelFull` rename (strategy order channel full path 는 이동 완료, dashboard/migration 정리는 별도)
 - [ ] `Strategy::label()` vs `tag()` 역할 정리 (logging/display vs wire text_tag)
 - [ ] `order_egress.shm.ring_capacity` 와 shared-region layout spec 단일화 (현재는 mismatch guard만 존재)
 - [ ] ADR-0005: SHM/ZMQ wire format 단일화 (`slot.seq` 탈결합, cancel wire, PyO3 v2 API)
