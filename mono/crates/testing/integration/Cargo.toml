@@ -30,6 +30,7 @@ tokio = { workspace = true }
 # 파이프라인 다른 층들 — integration 에서만 사용.
 subscriber = { path = "../../services/subscriber" }
 strategy = { path = "../../services/strategy" }
+order-gateway = { path = "../../services/order-gateway" }
 
 # config layering 검증
 hft-config = { workspace = true }
