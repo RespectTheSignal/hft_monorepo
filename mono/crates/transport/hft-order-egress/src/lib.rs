@@ -6,6 +6,7 @@
 #![deny(rust_2018_idioms)]
 
 mod policy;
+mod shm;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
@@ -15,6 +16,7 @@ use hft_protocol::{OrderAdaptError, OrderEgressMeta, WireLevel};
 use thiserror::Error;
 
 pub use policy::PolicyOrderEgress;
+pub use shm::ShmOrderEgress;
 
 /// one-shot 전송 시도 결과.
 ///

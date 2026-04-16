@@ -17,4 +17,5 @@ hft-exchange-api.workspace = true
 hft-protocol.workspace = true
 hft-config.workspace = true
 hft-telemetry.workspace = true
+hft-strategy-shm.workspace = true
 thiserror.workspace = true
