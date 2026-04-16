@@ -20,6 +20,9 @@ pub use policy::PolicyOrderEgress;
 pub use shm::ShmOrderEgress;
 pub use zmq::ZmqOrderEgress;
 
+#[cfg(test)]
+mod tests;
+
 /// one-shot 전송 시도 결과.
 ///
 /// `WouldBlock` 은 에러가 아니라 downstream 이 가득 찬 상태를 뜻한다.

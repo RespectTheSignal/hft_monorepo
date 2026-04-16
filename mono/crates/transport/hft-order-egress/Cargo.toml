@@ -20,3 +20,9 @@ hft-telemetry.workspace = true
 hft-strategy-shm.workspace = true
 hft-zmq.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+hft-shm.workspace = true
+hft-types.workspace = true
+tempfile = "3"
+zmq.workspace = true
