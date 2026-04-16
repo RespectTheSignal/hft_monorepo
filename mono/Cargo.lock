@@ -1063,6 +1063,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "hft-types",
+ "rand 0.8.5",
  "serde",
  "thiserror 1.0.69",
 ]
