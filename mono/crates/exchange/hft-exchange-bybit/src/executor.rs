@@ -120,6 +120,7 @@ impl BybitExecutor {
         body.insert("side".into(), side.into());
         body.insert("qty".into(), format_num(req.qty).into());
         body.insert("orderLinkId".into(), client_id.into());
+        body.insert("reduceOnly".into(), req.reduce_only.into());
 
         match req.order_type {
             OrderType::Market => {
@@ -400,6 +401,7 @@ mod tests {
         assert_eq!(v["orderType"], "Market");
         assert_eq!(v["qty"], "0.1");
         assert_eq!(v["orderLinkId"], "link1");
+        assert_eq!(v["reduceOnly"], false);
         assert!(v.get("price").is_none());
         // Market 이면 timeInForce 는 불필요 — Bybit 는 허용.
         assert!(v.get("timeInForce").is_none());
@@ -426,6 +428,28 @@ mod tests {
         assert_eq!(v["price"], "3500");
         assert_eq!(v["timeInForce"], "FOK");
         assert_eq!(v["side"], "Sell");
+        assert_eq!(v["reduceOnly"], false);
+    }
+
+    #[test]
+    fn build_place_body_includes_reduce_only_when_true() {
+        let exec = mk_exec();
+        let req = OrderRequest {
+            exchange: ExchangeId::Bybit,
+            symbol: Symbol::new("BTC_USDT"),
+            side: OrderSide::Sell,
+            order_type: OrderType::Limit,
+            qty: 1.0,
+            price: Some(61_000.0),
+            reduce_only: true,
+            tif: TimeInForce::Ioc,
+            client_seq: 0,
+            origin_ts_ns: 0,
+            client_id: Arc::from("reduce-bybit"),
+        };
+        let body = exec.build_place_body(&req).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["reduceOnly"], true);
     }
 
     #[test]
