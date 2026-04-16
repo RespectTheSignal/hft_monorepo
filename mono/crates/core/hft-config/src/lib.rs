@@ -114,6 +114,9 @@ pub struct AppConfig {
     /// SHM (shared memory) transport 설정 — intra-host sub-μs fast path.
     #[serde(default)]
     pub shm: ShmConfig,
+    /// 주문 request egress 설정 — SHM 정상 경로 + ZMQ fallback 선택.
+    #[serde(default)]
+    pub order_egress: OrderEgressConfig,
 }
 
 impl Default for AppConfig {
@@ -129,6 +132,7 @@ impl Default for AppConfig {
             telemetry: TelemetryConfig::default(),
             warmup: WarmupConfig::default(),
             shm: ShmConfig::default(),
+            order_egress: OrderEgressConfig::default(),
         }
     }
 }
@@ -760,6 +764,8 @@ pub fn validate(cfg: &AppConfig) -> ConfigResult<()> {
             }
         }
     }
+
+    cfg.order_egress.validate()?;
 
     Ok(())
 }

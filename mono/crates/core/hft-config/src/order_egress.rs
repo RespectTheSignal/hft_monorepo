@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::{ConfigError, ConfigResult};
+
 /// 전략 프로세스의 주문 egress 설정.
 ///
 /// `ShmConfig` 가 shared region 경로/role/vm_id 를 담당하고, 이 구조체는
@@ -30,6 +32,97 @@ impl Default for OrderEgressConfig {
             zmq: None,
             backpressure: BackpressurePolicy::default(),
         }
+    }
+}
+
+impl OrderEgressConfig {
+    /// 설정값 sanity check.
+    pub fn validate(&self) -> ConfigResult<()> {
+        macro_rules! ensure {
+            ($cond:expr, $msg:expr) => {
+                if !$cond {
+                    return Err(ConfigError::Invalid($msg.to_string()));
+                }
+            };
+        }
+
+        ensure!(
+            self.shm.ring_capacity > 0,
+            "order_egress.shm.ring_capacity must be > 0"
+        );
+        ensure!(
+            self.shm.ring_capacity.is_power_of_two(),
+            "order_egress.shm.ring_capacity must be a power of two"
+        );
+        ensure!(
+            self.shm.ring_capacity <= (1 << 20),
+            "order_egress.shm.ring_capacity must be <= 1<<20"
+        );
+
+        if matches!(self.mode, OrderEgressMode::Zmq) {
+            ensure!(
+                self.zmq.is_some(),
+                "order_egress.zmq must be set when order_egress.mode=zmq"
+            );
+        }
+
+        if let Some(zmq) = &self.zmq {
+            ensure!(
+                !zmq.endpoint.is_empty(),
+                "order_egress.zmq.endpoint must not be empty"
+            );
+            ensure!(
+                zmq.send_hwm > 0,
+                "order_egress.zmq.send_hwm must be > 0"
+            );
+            ensure!(
+                zmq.linger_ms >= 0,
+                "order_egress.zmq.linger_ms must be >= 0"
+            );
+            ensure!(
+                zmq.reconnect_interval_ms >= 0,
+                "order_egress.zmq.reconnect_interval_ms must be >= 0"
+            );
+            ensure!(
+                zmq.reconnect_interval_max_ms >= zmq.reconnect_interval_ms,
+                "order_egress.zmq.reconnect_interval_max_ms must be >= reconnect_interval_ms"
+            );
+        }
+
+        match self.backpressure {
+            BackpressurePolicy::Drop => {}
+            BackpressurePolicy::RetryWithTimeout {
+                max_retries,
+                backoff_ns,
+                total_timeout_ns,
+            } => {
+                ensure!(
+                    max_retries > 0,
+                    "order_egress.backpressure.max_retries must be > 0"
+                );
+                ensure!(
+                    backoff_ns > 0,
+                    "order_egress.backpressure.backoff_ns must be > 0"
+                );
+                ensure!(
+                    total_timeout_ns > 0,
+                    "order_egress.backpressure.total_timeout_ns must be > 0"
+                );
+                let min_budget = u64::from(max_retries).saturating_mul(backoff_ns);
+                ensure!(
+                    total_timeout_ns >= min_budget,
+                    "order_egress.backpressure.total_timeout_ns must be >= max_retries * backoff_ns"
+                );
+            }
+            BackpressurePolicy::BlockWithTimeout { timeout_ns } => {
+                ensure!(
+                    timeout_ns > 0,
+                    "order_egress.backpressure.timeout_ns must be > 0"
+                );
+            }
+        }
+
+        Ok(())
     }
 }
 
