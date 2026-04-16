@@ -22,7 +22,7 @@
 | **Phase 2 B** — `ExchangeExecutor` × 5 + REST/서명 infra | ✅ **완료** | `hft-exchange-rest` 중앙화 + Gate/Binance/Bybit/Bitget/OKX executor 각 place+cancel + RFC 4231 벡터 검증. order-gateway env-var wiring. |
 | **Phase 2 C** — SHM intra-host IPC (MdRing + OrderRing + SymbolTable) | ✅ **완료 (Rust 사이드)** | publisher SHM egress + order-gateway SHM ingress 양방향. `INFRA_REQUIREMENTS.md` + `MULTI_VM_TOPOLOGY.md` / ADR-0003 / `SHM_DESIGN.md`. Python ctypes reader/writer 는 pending. |
 | **Phase 2 D** — runtime feeders + main.rs variant dispatch + rate-decay 정책 | ✅ **완료** (이번 트랙) | Gate REST AccountPoller (SymbolMeta/Position provider), `OrderRateTracker::decay_before[_now]`, `StrategyControl` 채널 + V6/V7/V8 `on_control`, `services/strategy/main.rs` 전면 재작성. |
-| **Phase 2 E** — order egress (strategy → SHM 정상 / ZMQ fallback → order-gateway) | ✅ **완료 (request path)** | Step 1~6 완료: order wire, config, counter vocabulary, strategy drain, order-gateway SHM/ZMQ ingress fan-in, SHM `aux` Place packing 으로 `reduce_only`/`text_tag` parity 확보. result back-channel / naming cleanup / price regime / executor reduce_only 반영은 분리. |
+| **Phase 2 E** — order egress (strategy → SHM 정상 / ZMQ fallback → order-gateway) | ✅ **완료** | Step 1~7 완료: order wire, config, counter vocabulary, strategy drain, order-gateway SHM/ZMQ ingress fan-in, SHM `aux` Place packing, executor 5종 `reduce_only` 반영까지 연결. result back-channel / naming cleanup / price regime 은 분리. |
 | **Phase 2 F** — 실 toolchain 에서 `cargo check/test --workspace` 1회 통과 | ⏳ **다음** | 샌드박스 rustc 부재로 정적 검증만 수행. |
 | **Phase 3** — monitoring / analytics / ops 자동화 | ⏸ | §13 ~ §14. Docker infra 이관 + error manager + telegram bot. |
 | **Flipster / Python ops** | ⏸ | `feed/`, `strategy_flipster_python/` workspace exclude 유지. 대부분 Python 그대로 운영. |
@@ -49,7 +49,7 @@
 - [x] Step 4c: `services/strategy` drain 결선 (`OrderEgressMetaSeed`, `Strategy::tag`, `DrainEgress`, mode=shm|zmq)
 - [x] Step 5: `services/order-gateway` SHM/ZMQ decode fan-in + `OrderRequest` 정규화 + router counter split + `ZmqConfig.order_ingress_bind`
 - [x] Step 6: SHM `OrderFrame.aux` kind-dependent union (`PlaceAuxMeta`) 으로 `reduce_only` / `level` / `text_tag` 보존
-- [ ] Step 7: executor reduce_only 실사용 (Gate/Binance/Bybit/Bitget/OKX REST body 반영)
+- [x] Step 7: executor reduce_only 실사용 (Gate/Binance/Bybit/Bitget/OKX REST body 반영)
 - [ ] ADR-0004 draft: Order Result Return Path (TBD)
 - [ ] Heartbeat: Strategy ↔ Gateway liveness (TBD)
 - [ ] Naming cleanup: `shared_path` 드리프트 정렬 (TBD, 별도 PR)

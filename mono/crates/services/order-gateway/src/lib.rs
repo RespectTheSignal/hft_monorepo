@@ -230,6 +230,13 @@ impl ExchangeExecutor for NoopExecutor {
     }
 
     async fn place_order(&self, req: OrderRequest) -> Result<OrderAck> {
+        debug!(
+            target: "order-gateway::noop",
+            exchange = %self.id.as_str(),
+            symbol = req.symbol.as_str(),
+            reduce_only = req.reduce_only,
+            "noop executor accepted order"
+        );
         Ok(OrderAck {
             exchange: self.id,
             exchange_order_id: format!("noop-{}", req.client_id),
