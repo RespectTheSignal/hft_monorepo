@@ -28,6 +28,8 @@
 
 #![deny(rust_2018_idioms)]
 
+pub mod order_egress;
+
 use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
@@ -38,6 +40,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use hft_types::{DataRole, ExchangeId, Symbol};
+pub use order_egress::OrderEgressConfig;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Error
