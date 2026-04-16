@@ -125,6 +125,10 @@ impl BitgetExecutor {
         body.insert("side".into(), side.into());
         body.insert("size".into(), format_num(req.qty).into());
         body.insert("clientOid".into(), client_oid.into());
+        body.insert(
+            "reduceOnly".into(),
+            if req.reduce_only { "YES" } else { "NO" }.into(),
+        );
 
         match req.order_type {
             OrderType::Market => {
@@ -405,6 +409,7 @@ mod tests {
         assert_eq!(v["symbol"], "BTCUSDT");
         assert_eq!(v["size"], "0.1");
         assert_eq!(v["productType"], "USDT-FUTURES");
+        assert_eq!(v["reduceOnly"], "NO");
     }
 
     #[test]
@@ -427,6 +432,28 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["price"], "2500");
         assert_eq!(v["force"], "fok");
+        assert_eq!(v["reduceOnly"], "NO");
+    }
+
+    #[test]
+    fn build_place_body_includes_reduce_only_when_true() {
+        let exec = mk_exec();
+        let req = OrderRequest {
+            exchange: ExchangeId::Bitget,
+            symbol: Symbol::new("BTC_USDT"),
+            side: OrderSide::Sell,
+            order_type: OrderType::Limit,
+            qty: 1.0,
+            price: Some(59_500.0),
+            reduce_only: true,
+            tif: TimeInForce::Gtc,
+            client_seq: 0,
+            origin_ts_ns: 0,
+            client_id: Arc::from("reduce-bitget"),
+        };
+        let body = exec.build_place_body(&req).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["reduceOnly"], "YES");
     }
 
     #[test]
