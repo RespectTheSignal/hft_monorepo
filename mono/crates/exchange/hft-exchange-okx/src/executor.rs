@@ -409,7 +409,10 @@ mod tests {
             order_type: OrderType::Limit,
             qty: 1.0,
             price: Some(100.0),
+            reduce_only: false,
             tif: TimeInForce::Gtc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("c"),
         };
         assert_eq!(OkxExecutor::ord_type_for(&base), "limit");
@@ -435,7 +438,10 @@ mod tests {
             order_type: OrderType::Limit,
             qty: 1.0,
             price: Some(60_000.0),
+            reduce_only: false,
             tif: TimeInForce::Gtc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("cl01abc"),
         };
         let body = e.build_place_body(&req).unwrap();
@@ -459,7 +465,10 @@ mod tests {
             order_type: OrderType::Market,
             qty: 2.0,
             price: None,
+            reduce_only: false,
             tif: TimeInForce::Ioc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("m1"),
         };
         let body = e.build_place_body(&req).unwrap();

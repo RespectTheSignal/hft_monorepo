@@ -497,6 +497,10 @@ where
             match rx.recv_timeout(Duration::from_millis(50)) {
                 Ok((req, seed)) => {
                     let origin_ts_ns = now_ns();
+                    let mut req = req;
+                    req.reduce_only = seed.reduce_only;
+                    req.client_seq = seed.client_seq;
+                    req.origin_ts_ns = origin_ts_ns;
                     match egress.try_submit(&req, &seed, origin_ts_ns) {
                         Ok(SubmitOutcome::Sent | SubmitOutcome::WouldBlock) => {}
                         Err(e) => {
@@ -709,6 +713,18 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
+#[tokio::main(flavor = "multi_thread")]
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("[strategy] fatal: {e:#}");
+            error!(error = %format!("{e:#}"), "strategy fatal");
+            ExitCode::from(1)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,7 +748,10 @@ mod tests {
             order_type: OrderType::Limit,
             qty: 1.0,
             price: Some(100.0),
+            reduce_only: false,
             tif: TimeInForce::Gtc,
+            client_seq: 7,
+            origin_ts_ns: 0,
             client_id: Arc::from("v8-7"),
         }
     }
@@ -913,7 +932,7 @@ mod tests {
         cfg.shm.symbol_table_capacity = 16;
         cfg.order_egress.mode = OrderEgressMode::Zmq;
         cfg.order_egress.zmq = Some(ZmqOrderEgressConfig {
-            endpoint: endpoint,
+            endpoint,
             send_hwm: 8,
             linger_ms: 0,
             reconnect_interval_ms: 10,
@@ -929,17 +948,5 @@ mod tests {
             .await
             .expect("drain exit timeout")
             .unwrap();
-    }
-}
-
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> ExitCode {
-    match run().await {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("[strategy] fatal: {e:#}");
-            error!(error = %format!("{e:#}"), "strategy fatal");
-            ExitCode::from(1)
-        }
     }
 }

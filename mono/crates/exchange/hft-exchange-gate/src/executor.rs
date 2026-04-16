@@ -454,7 +454,10 @@ mod tests {
             order_type: OrderType::Limit,
             qty: 3.0,
             price: Some(60_000.5),
+            reduce_only: false,
             tif: TimeInForce::Gtc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("abc123"),
         };
         let (body, text) = exec.prepare_body(&req).unwrap();
@@ -477,7 +480,10 @@ mod tests {
             order_type: OrderType::Limit,
             qty: 5.0,
             price: Some(100.0),
+            reduce_only: false,
             tif: TimeInForce::Ioc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("sell1"),
         };
         let (body, _) = exec.prepare_body(&req).unwrap();
@@ -496,7 +502,10 @@ mod tests {
             order_type: OrderType::Market,
             qty: 1.0,
             price: None,
+            reduce_only: false,
             tif: TimeInForce::Gtc, // 무시됨
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("m1"),
         };
         let (body, _) = exec.prepare_body(&req).unwrap();
@@ -516,7 +525,10 @@ mod tests {
             order_type: OrderType::Market,
             qty: 0.4,
             price: None,
+            reduce_only: false,
             tif: TimeInForce::Ioc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("q0"),
         };
         let err = exec.prepare_body(&req).unwrap_err();
@@ -536,7 +548,10 @@ mod tests {
             order_type: OrderType::Market,
             qty: 1.0,
             price: None,
+            reduce_only: false,
             tif: TimeInForce::Ioc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("hi world#1"),
         };
         let (_, text) = exec.prepare_body(&req).unwrap();

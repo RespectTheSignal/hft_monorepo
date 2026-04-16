@@ -62,16 +62,10 @@ pub trait OrderEgress: Send + Sync {
 /// borrow 기반 [`OrderEgressMeta`] 의 owned 복사본.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnedOrderEgressMeta {
-    /// 전략 내부 단조 증가 시퀀스.
-    pub client_seq: u64,
     /// 전략 태그.
     pub strategy_tag: String,
     /// 주문 레벨.
     pub level: WireLevel,
-    /// reduce_only 여부.
-    pub reduce_only: bool,
-    /// transport 진입 시각.
-    pub origin_ts_ns: u64,
     /// ZMQ symbol id.
     pub symbol_id: Option<u32>,
     /// SHM symbol idx.
@@ -81,11 +75,8 @@ pub struct OwnedOrderEgressMeta {
 impl From<&OrderEgressMeta<'_>> for OwnedOrderEgressMeta {
     fn from(meta: &OrderEgressMeta<'_>) -> Self {
         Self {
-            client_seq: meta.client_seq,
             strategy_tag: meta.strategy_tag.to_string(),
             level: meta.level,
-            reduce_only: meta.reduce_only,
-            origin_ts_ns: meta.origin_ts_ns,
             symbol_id: meta.symbol_id,
             symbol_idx: meta.symbol_idx,
         }

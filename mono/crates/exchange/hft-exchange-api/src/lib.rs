@@ -213,8 +213,17 @@ pub struct OrderRequest {
     pub qty: f64,
     /// `OrderType::Market` 이면 무시.
     pub price: Option<f64>,
+    /// 포지션 축소 전용 주문 여부.
+    #[serde(default)]
+    pub reduce_only: bool,
     #[serde(default)]
     pub tif: TimeInForce,
+    /// 전략 내부 단조 증가 시퀀스. transport/observability 상관키로 사용한다.
+    #[serde(default)]
+    pub client_seq: u64,
+    /// strategy drain 직전 wall-clock UTC epoch ns.
+    #[serde(default)]
+    pub origin_ts_ns: u64,
     /// 32-64자 이하 ASCII 권장. 멱등성 보장 키.
     pub client_id: Arc<str>,
 }
@@ -499,7 +508,10 @@ mod tests {
             order_type: OrderType::Limit,
             qty: 1.0,
             price: Some(100.0),
+            reduce_only: false,
             tif: TimeInForce::Gtc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("c1"),
         };
         assert!(base.basic_validate().is_ok());
@@ -601,7 +613,10 @@ mod tests {
             order_type: OrderType::Market,
             qty: 1.0,
             price: None,
+            reduce_only: false,
             tif: TimeInForce::Ioc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("abc"),
         };
         let ack = exec.place_order(req.clone()).await.unwrap();

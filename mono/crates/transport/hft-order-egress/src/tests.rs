@@ -37,18 +37,18 @@ fn sample_req(exchange: ExchangeId) -> OrderRequest {
         order_type: OrderType::Limit,
         qty: 1.0,
         price: Some(100.0),
+        reduce_only: false,
         tif: TimeInForce::Gtc,
+        client_seq: 42,
+        origin_ts_ns: 1_765_432_100_000_000_000,
         client_id: Arc::from("v8-42"),
     }
 }
 
 fn sample_meta() -> OrderEgressMeta<'static> {
     OrderEgressMeta {
-        client_seq: 42,
         strategy_tag: "v8",
         level: WireLevel::Open,
-        reduce_only: false,
-        origin_ts_ns: 1_765_432_100_000_000_000,
         symbol_id: Some(77),
         symbol_idx: Some(88),
     }
@@ -366,7 +366,8 @@ fn shm_egress_smoke() {
         .expect("symbol idx");
     assert_eq!(got.exchange_id, hft_shm::exchange_to_u8(ExchangeId::Gate));
     assert_eq!(got.symbol_idx, expected_idx);
-    assert_eq!(got.client_id, meta.client_seq);
+    assert_eq!(got.client_id, req.client_seq);
+    assert_eq!(got.ts_ns, req.origin_ts_ns);
     assert_eq!(got.price, 100);
     assert_eq!(got.size, 1);
     let after = snapshot_map();

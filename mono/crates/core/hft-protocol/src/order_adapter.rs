@@ -28,19 +28,13 @@ pub enum WireLevel {
 
 /// Order egress 변환에 필요한 보조 메타데이터.
 ///
-/// `OrderRequest` 본문에는 transport 전용 필드가 없어 caller 가 함께 제공해야 한다.
+/// `OrderRequest` 본문으로 표현되지 않는 transport 전용 필드만 담는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OrderEgressMeta<'a> {
-    /// 전략 내부 단조 증가 시퀀스.
-    pub client_seq: u64,
     /// strategy 태그. ZMQ wire 에서는 최대 32B ASCII 로 직렬화된다.
     pub strategy_tag: &'a str,
     /// 주문 레벨(open/close).
     pub level: WireLevel,
-    /// reduce_only 비트. 현재 SHM frame 에서는 사용하지 않는다.
-    pub reduce_only: bool,
-    /// transport 진입 시각 (UTC epoch ns).
-    pub origin_ts_ns: u64,
     /// ZMQ wire 용 symbol id.
     pub symbol_id: Option<u32>,
     /// SHM frame 용 symbol idx.
@@ -193,8 +187,8 @@ pub fn order_request_to_order_frame(
         _pad2: [0; 1],
         price,
         size,
-        client_id: meta.client_seq,
-        ts_ns: meta.origin_ts_ns,
+        client_id: req.client_seq,
+        ts_ns: req.origin_ts_ns,
         aux: [0; 5],
         _pad3: [0; 16],
     })
@@ -227,12 +221,12 @@ pub fn order_request_to_order_request_wire(
         _pad1: 0,
         price,
         size,
-        client_seq: meta.client_seq,
-        origin_ts_ns: meta.origin_ts_ns,
+        client_seq: req.client_seq,
+        origin_ts_ns: req.origin_ts_ns,
         text_tag,
         _reserved: [0; 48],
     };
-    if meta.reduce_only {
+    if req.reduce_only {
         wire.flags = FLAG_REDUCE_ONLY;
     }
     Ok(wire)
@@ -252,18 +246,18 @@ mod tests {
             order_type: OrderType::Limit,
             qty: 1.0,
             price: Some(100.0),
+            reduce_only: false,
             tif: TimeInForce::Gtc,
+            client_seq: 42,
+            origin_ts_ns: 1_765_432_100_000_000_000,
             client_id: Arc::from("v8-1"),
         }
     }
 
     fn sample_meta() -> OrderEgressMeta<'static> {
         OrderEgressMeta {
-            client_seq: 42,
             strategy_tag: "v8",
             level: WireLevel::Open,
-            reduce_only: false,
-            origin_ts_ns: 1_765_432_100_000_000_000,
             symbol_id: Some(77),
             symbol_idx: Some(88),
         }
@@ -284,8 +278,8 @@ mod tests {
         assert_eq!(frame.ord_type, 0);
         assert_eq!(frame.price, 100);
         assert_eq!(frame.size, 1);
-        assert_eq!(frame.client_id, 42);
-        assert_eq!(frame.ts_ns, meta.origin_ts_ns);
+        assert_eq!(frame.client_id, req.client_seq);
+        assert_eq!(frame.ts_ns, req.origin_ts_ns);
         assert_eq!(frame.aux, [0; 5]);
     }
 
@@ -361,8 +355,8 @@ mod tests {
         assert_eq!(wire.flags, 0);
         assert_eq!(wire.price, 100.0);
         assert_eq!(wire.size, 1);
-        assert_eq!(wire.client_seq, 42);
-        assert_eq!(wire.origin_ts_ns, meta.origin_ts_ns);
+        assert_eq!(wire.client_seq, req.client_seq);
+        assert_eq!(wire.origin_ts_ns, req.origin_ts_ns);
         assert_eq!(&wire.text_tag[..2], b"v8");
 
         let mut buf = [0u8; crate::order_wire::ORDER_REQUEST_WIRE_SIZE];
@@ -426,11 +420,10 @@ mod tests {
 
     #[test]
     fn zmq_adapter_reduce_only_flag() {
-        let mut meta = sample_meta();
-        meta.reduce_only = true;
-
-        let wire = order_request_to_order_request_wire(&sample_req(ExchangeId::Gate), &meta)
-            .expect("wire");
+        let mut req = sample_req(ExchangeId::Gate);
+        req.reduce_only = true;
+        let meta = sample_meta();
+        let wire = order_request_to_order_request_wire(&req, &meta).expect("wire");
         assert_eq!(wire.flags, FLAG_REDUCE_ONLY);
     }
 

@@ -386,7 +386,10 @@ mod tests {
             order_type: OrderType::Market,
             qty: 0.1,
             price: None,
+            reduce_only: false,
             tif: TimeInForce::Ioc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("link1"),
         };
         let body = exec.build_place_body(&req).unwrap();
@@ -412,7 +415,10 @@ mod tests {
             order_type: OrderType::Limit,
             qty: 1.25,
             price: Some(3_500.0),
+            reduce_only: false,
             tif: TimeInForce::Fok,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("c2"),
         };
         let body = exec.build_place_body(&req).unwrap();

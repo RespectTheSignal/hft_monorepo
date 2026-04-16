@@ -456,7 +456,10 @@ mod tests {
             order_type: OrderType::Limit,
             qty: 0.1,
             price: Some(100.0),
+            reduce_only: false,
             tif: TimeInForce::Gtc,
+            client_seq: 1,
+            origin_ts_ns: 0,
             client_id: Arc::from("cid-1"),
         };
         let seed = OrderEgressMetaSeed {
@@ -546,7 +549,10 @@ mod tests {
                     order_type: OrderType::Limit,
                     qty: 1.0,
                     price: Some(1.0),
+                    reduce_only: false,
                     tif: TimeInForce::Gtc,
+                    client_seq: self.client_seq,
+                    origin_ts_ns: 0,
                     client_id: id,
                 },
                 OrderEgressMetaSeed {

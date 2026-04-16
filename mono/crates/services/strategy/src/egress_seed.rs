@@ -25,12 +25,10 @@ impl OrderEgressMetaSeed {
         symbol_id: Option<u32>,
         symbol_idx: Option<u32>,
     ) -> OrderEgressMeta<'static> {
+        let _ = origin_ts_ns;
         OrderEgressMeta {
-            client_seq: self.client_seq,
             strategy_tag: self.strategy_tag,
             level: self.level,
-            reduce_only: self.reduce_only,
-            origin_ts_ns,
             symbol_id,
             symbol_idx,
         }
@@ -51,11 +49,8 @@ mod tests {
         };
 
         let meta = seed.promote(123, Some(7), Some(9));
-        assert_eq!(meta.client_seq, 42);
         assert_eq!(meta.level, WireLevel::Close);
-        assert!(meta.reduce_only);
         assert_eq!(meta.strategy_tag, "v8");
-        assert_eq!(meta.origin_ts_ns, 123);
         assert_eq!(meta.symbol_id, Some(7));
         assert_eq!(meta.symbol_idx, Some(9));
     }

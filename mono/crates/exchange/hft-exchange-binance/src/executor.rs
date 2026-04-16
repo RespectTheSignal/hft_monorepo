@@ -408,7 +408,10 @@ mod tests {
             order_type: OrderType::Limit,
             qty: 0.01,
             price: Some(60_000.0),
+            reduce_only: false,
             tif: TimeInForce::Gtc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("abc123"),
         };
         let params = exec.build_place_params(&req, 1_700_000_000_000).unwrap();
@@ -434,7 +437,10 @@ mod tests {
             order_type: OrderType::Market,
             qty: 2.5,
             price: None,
+            reduce_only: false,
             tif: TimeInForce::Ioc,
+            client_seq: 0,
+            origin_ts_ns: 0,
             client_id: Arc::from("m2"),
         };
         let params = exec.build_place_params(&req, 1).unwrap();
