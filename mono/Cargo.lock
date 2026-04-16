@@ -2826,6 +2826,7 @@ dependencies = [
  "hft-exchange-gate",
  "hft-exchange-rest",
  "hft-ipc",
+ "hft-order-egress",
  "hft-protocol",
  "hft-shm",
  "hft-strategy-config",
@@ -2835,12 +2836,15 @@ dependencies = [
  "hft-telemetry",
  "hft-time",
  "hft-types",
+ "hft-zmq",
  "mimalloc",
  "parking_lot",
  "subscriber",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
+ "zmq",
 ]
 
 [[package]]
