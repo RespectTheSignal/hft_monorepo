@@ -16,6 +16,7 @@
 #![deny(rust_2018_idioms)]
 
 pub mod frame;
+pub mod order_wire;
 pub mod topics;
 pub mod wire;
 
