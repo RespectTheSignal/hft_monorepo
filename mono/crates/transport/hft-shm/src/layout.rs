@@ -464,6 +464,51 @@ impl Default for OrderFrame {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Symbol table
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Symbol table 헤더 (64B).
+#[repr(C, align(64))]
+pub struct SymbolTableHeader {
+    /// [`SYMTAB_MAGIC`].
+    pub magic: u64,
+    /// version.
+    pub version: u32,
+    /// 최대 symbol 수.
+    pub capacity: u32,
+    /// 현재 등록된 수 (단조 증가, append-only).
+    pub count: AtomicU32,
+    /// pad.
+    pub _pad_a: [u8; 4],
+    /// 생성 ns.
+    pub created_ns: u64,
+    /// 추가 여유.
+    pub _pad_b: [u8; 32],
+}
+
+const _: () = assert!(std::mem::size_of::<SymbolTableHeader>() == 64);
+const _: () = assert!(std::mem::align_of::<SymbolTableHeader>() == 64);
+
+/// 한 symbol entry (64B).
+#[repr(C, align(64))]
+pub struct SymbolEntry {
+    /// exchange id.
+    pub exchange_id: u8,
+    /// pad.
+    pub _pad1: [u8; 3],
+    /// name 바이트 길이 (<= [`SYMBOL_MAX_LEN`]).
+    pub name_len: u32,
+    /// name UTF-8 (null padding 포함).
+    pub name: [u8; SYMBOL_MAX_LEN],
+}
+
+const _: () = assert!(std::mem::size_of::<SymbolEntry>() == 64);
+const _: () = assert!(std::mem::align_of::<SymbolEntry>() == 64);
+
+/// Symbol name 최대 바이트 (SymbolEntry 의 name 배열 크기).
+pub const SYMBOL_MAX_LEN: usize = 56;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -531,48 +576,3 @@ mod tests {
         assert_eq!(unpacked._pad, [0; 6]);
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Symbol table
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Symbol table 헤더 (64B).
-#[repr(C, align(64))]
-pub struct SymbolTableHeader {
-    /// [`SYMTAB_MAGIC`].
-    pub magic: u64,
-    /// version.
-    pub version: u32,
-    /// 최대 symbol 수.
-    pub capacity: u32,
-    /// 현재 등록된 수 (단조 증가, append-only).
-    pub count: AtomicU32,
-    /// pad.
-    pub _pad_a: [u8; 4],
-    /// 생성 ns.
-    pub created_ns: u64,
-    /// 추가 여유.
-    pub _pad_b: [u8; 32],
-}
-
-const _: () = assert!(std::mem::size_of::<SymbolTableHeader>() == 64);
-const _: () = assert!(std::mem::align_of::<SymbolTableHeader>() == 64);
-
-/// 한 symbol entry (64B).
-#[repr(C, align(64))]
-pub struct SymbolEntry {
-    /// exchange id.
-    pub exchange_id: u8,
-    /// pad.
-    pub _pad1: [u8; 3],
-    /// name 바이트 길이 (<= [`SYMBOL_MAX_LEN`]).
-    pub name_len: u32,
-    /// name UTF-8 (null padding 포함).
-    pub name: [u8; SYMBOL_MAX_LEN],
-}
-
-const _: () = assert!(std::mem::size_of::<SymbolEntry>() == 64);
-const _: () = assert!(std::mem::align_of::<SymbolEntry>() == 64);
-
-/// Symbol name 최대 바이트 (SymbolEntry 의 name 배열 크기).
-pub const SYMBOL_MAX_LEN: usize = 56;

@@ -861,9 +861,11 @@ mod tests {
 
     #[test]
     fn order_builder_into_frame_packs_place_meta_when_requested() {
-        let mut b = PyOrderBuilder::default();
-        b.exchange = "gate".into();
-        b.symbol = "BTC_USDT".into();
+        let mut b = PyOrderBuilder {
+            exchange: "gate".into(),
+            symbol: "BTC_USDT".into(),
+            ..PyOrderBuilder::default()
+        };
         b.level(PLACE_LEVEL_CLOSE);
         b.reduce_only(true);
         b.text_tag("v6");
@@ -877,8 +879,10 @@ mod tests {
 
     #[test]
     fn order_builder_without_meta_preserves_manual_aux() {
-        let mut b = PyOrderBuilder::default();
-        b.aux = [1, 2, 3, 4, 5];
+        let b = PyOrderBuilder {
+            aux: [1, 2, 3, 4, 5],
+            ..PyOrderBuilder::default()
+        };
 
         let f = b.to_frame(exchange_to_u8(ExchangeId::Gate));
         assert_eq!(f.aux, [1, 2, 3, 4, 5]);
