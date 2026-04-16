@@ -1057,6 +1057,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-order-egress"
+version = "0.1.0"
+dependencies = [
+ "hft-config",
+ "hft-exchange-api",
+ "hft-protocol",
+ "hft-shm",
+ "hft-strategy-shm",
+ "hft-telemetry",
+ "hft-types",
+ "hft-zmq",
+ "tempfile",
+ "thiserror 1.0.69",
+ "zmq",
+]
+
+[[package]]
 name = "hft-protocol"
 version = "0.1.0"
 dependencies = [
