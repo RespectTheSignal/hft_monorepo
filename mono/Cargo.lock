@@ -1062,6 +1062,8 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "bytes",
+ "hft-exchange-api",
+ "hft-shm",
  "hft-types",
  "rand 0.8.5",
  "serde",
@@ -1074,7 +1076,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
- "hft-protocol",
  "hft-telemetry",
  "hft-time",
  "hft-types",
