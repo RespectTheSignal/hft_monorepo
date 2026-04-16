@@ -17,6 +17,8 @@ ORDER_KIND_PLACE: int
 ORDER_KIND_CANCEL: int
 ORDER_FRAME_SIZE: int
 ORDER_FRAME_ALIGN: int
+PLACE_LEVEL_OPEN: int
+PLACE_LEVEL_CLOSE: int
 ORDER_KIND_PLACE_I: int
 ORDER_KIND_CANCEL_I: int
 
@@ -39,6 +41,9 @@ class PyOrderBuilder:
 
     def __init__(self) -> None: ...
     def clear(self) -> None: ...
+    def level(self, level: int) -> None: ...
+    def reduce_only(self, reduce_only: bool) -> None: ...
+    def text_tag(self, text_tag: str) -> None: ...
 
 
 class PyQuoteSnapshot:
@@ -129,6 +134,14 @@ class PyStrategyClient:
     def read_quote(self, symbol_idx: int) -> Optional[PyQuoteSnapshot]: ...
     def try_consume_trade(self) -> Optional[PyTradeFrame]: ...
     def publish_order(self, builder: PyOrderBuilder) -> bool: ...
+    def publish_order_with_meta(
+        self,
+        builder: PyOrderBuilder,
+        *,
+        level: int,
+        reduce_only: bool,
+        text_tag: str,
+    ) -> bool: ...
 
     def publish_simple(
         self,

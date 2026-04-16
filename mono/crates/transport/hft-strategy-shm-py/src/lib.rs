@@ -71,8 +71,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyType;
 
 use hft_shm::{
-    exchange_from_u8, exchange_to_u8, Backing, LayoutSpec, OrderFrame, OrderKind, QuoteSnapshot,
-    TradeFrame,
+    exchange_from_u8, exchange_to_u8, Backing, LayoutSpec, OrderFrame, OrderKind, PlaceAuxMeta,
+    QuoteSnapshot, TradeFrame, PLACE_LEVEL_CLOSE, PLACE_LEVEL_OPEN,
 };
 use hft_strategy_shm::StrategyShmClient;
 use hft_types::ExchangeId;
@@ -106,6 +106,10 @@ pub const ORD_TYPE_MARKET: u8 = 1;
 pub const ORDER_KIND_PLACE: u8 = 0;
 /// Cancel existing order kind.
 pub const ORDER_KIND_CANCEL: u8 = 1;
+/// Place 메타 level: Open.
+pub const PLACE_LEVEL_OPEN_I: u8 = PLACE_LEVEL_OPEN;
+/// Place 메타 level: Close.
+pub const PLACE_LEVEL_CLOSE_I: u8 = PLACE_LEVEL_CLOSE;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 유틸 — exchange 문자열 ↔ u8
@@ -175,6 +179,14 @@ pub struct PyOrderBuilder {
     /// aux payload (5 x u64) — cancel 의 exchange_order_id 등.
     #[pyo3(get, set)]
     pub aux: [u64; 5],
+    /// Place 주문용 level override. `kind=Place` + `meta_enabled=true` 일 때만 사용.
+    meta_level: u8,
+    /// Place 주문용 reduce_only override.
+    meta_reduce_only: bool,
+    /// Place 주문용 text_tag override.
+    meta_text_tag: String,
+    /// builder-level place meta 자동 packing 활성 여부.
+    meta_enabled: bool,
 }
 
 #[pymethods]
@@ -190,11 +202,30 @@ impl PyOrderBuilder {
         *self = Self::default();
     }
 
+    /// Place 주문 level override 설정.
+    fn level(&mut self, level: u8) {
+        self.meta_level = level;
+        self.meta_enabled = true;
+    }
+
+    /// Place 주문 reduce_only override 설정.
+    fn reduce_only(&mut self, reduce_only: bool) {
+        self.meta_reduce_only = reduce_only;
+        self.meta_enabled = true;
+    }
+
+    /// Place 주문 text_tag override 설정.
+    fn text_tag(&mut self, text_tag: &str) {
+        self.meta_text_tag.clear();
+        self.meta_text_tag.push_str(text_tag);
+        self.meta_enabled = true;
+    }
+
     fn __repr__(&self) -> String {
         format!(
-            "PyOrderBuilder(exchange={:?}, symbol={:?}, kind={}, side={}, tif={}, ord_type={}, price_raw={}, size_raw={}, client_id={}, ts_ns={})",
+            "PyOrderBuilder(exchange={:?}, symbol={:?}, kind={}, side={}, tif={}, ord_type={}, price_raw={}, size_raw={}, client_id={}, ts_ns={}, meta_enabled={})",
             self.exchange, self.symbol, self.kind, self.side, self.tif, self.ord_type,
-            self.price_raw, self.size_raw, self.client_id, self.ts_ns,
+            self.price_raw, self.size_raw, self.client_id, self.ts_ns, self.meta_enabled,
         )
     }
 }
@@ -213,13 +244,43 @@ impl Default for PyOrderBuilder {
             client_id: 0,
             ts_ns: 0,
             aux: [0; 5],
+            meta_level: PLACE_LEVEL_OPEN,
+            meta_reduce_only: false,
+            meta_text_tag: String::new(),
+            meta_enabled: false,
         }
     }
 }
 
 impl PyOrderBuilder {
+    fn place_aux(&self, override_meta: Option<(u8, bool, &str)>) -> [u64; 5] {
+        if self.kind != ORDER_KIND_PLACE {
+            return self.aux;
+        }
+        if let Some((level, reduce_only, text_tag)) = override_meta {
+            return PlaceAuxMeta::from_parts(level, reduce_only, text_tag).pack();
+        }
+        if self.meta_enabled {
+            return PlaceAuxMeta::from_parts(
+                self.meta_level,
+                self.meta_reduce_only,
+                &self.meta_text_tag,
+            )
+            .pack();
+        }
+        self.aux
+    }
+
     /// 내부 OrderFrame composite — exchange 는 u8 로 미리 변환.
     fn to_frame(&self, exchange_u8: u8) -> OrderFrame {
+        self.to_frame_with_place_meta(exchange_u8, None)
+    }
+
+    fn to_frame_with_place_meta(
+        &self,
+        exchange_u8: u8,
+        override_meta: Option<(u8, bool, &str)>,
+    ) -> OrderFrame {
         OrderFrame {
             seq: 0,
             kind: self.kind,
@@ -235,7 +296,7 @@ impl PyOrderBuilder {
             size: self.size_raw,
             client_id: self.client_id,
             ts_ns: self.ts_ns,
-            aux: self.aux,
+            aux: self.place_aux(override_meta),
             _pad3: [0; 16],
         }
     }
@@ -587,6 +648,27 @@ impl PyStrategyClient {
         Ok(self.inner.publish_order(ex, &builder.symbol, frame))
     }
 
+    /// `PyOrderBuilder` + place 메타를 한 번에 받아 publish.
+    ///
+    /// 기존 `publish_order(builder)` 는 유지하고, 이 메서드는 Place 분기에서만
+    /// `aux` 를 `PlaceAuxMeta` 로 자동 packing 해 준다.
+    #[pyo3(signature = (builder, *, level, reduce_only, text_tag))]
+    #[allow(clippy::useless_conversion)]
+    fn publish_order_with_meta(
+        &self,
+        builder: &PyOrderBuilder,
+        level: u8,
+        reduce_only: bool,
+        text_tag: &str,
+    ) -> PyResult<bool> {
+        if builder.symbol.is_empty() {
+            return Err(PyValueError::new_err("symbol is empty"));
+        }
+        let (ex, ex_u8) = parse_exchange(&builder.exchange)?;
+        let frame = builder.to_frame_with_place_meta(ex_u8, Some((level, reduce_only, text_tag)));
+        Ok(self.inner.publish_order(ex, &builder.symbol, frame))
+    }
+
     /// 단순 필드 기반 fast-path publish — builder 객체를 안 만들고 싶을 때.
     ///
     /// 대부분의 전략 루프는 `PyOrderBuilder` 재사용이 깔끔. 이 메서드는 초기
@@ -697,6 +779,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ORD_TYPE_MARKET", ORD_TYPE_MARKET)?;
     m.add("ORDER_KIND_PLACE", ORDER_KIND_PLACE)?;
     m.add("ORDER_KIND_CANCEL", ORDER_KIND_CANCEL)?;
+    m.add("PLACE_LEVEL_OPEN", PLACE_LEVEL_OPEN_I)?;
+    m.add("PLACE_LEVEL_CLOSE", PLACE_LEVEL_CLOSE_I)?;
 
     // OrderFrame wire 크기/정렬 — Python 측 ctypes 검증용.
     m.add("ORDER_FRAME_SIZE", std::mem::size_of::<OrderFrame>())?;
@@ -754,6 +838,10 @@ mod tests {
             client_id: 42,
             ts_ns: 1_234_567_890,
             aux: [1, 2, 3, 4, 5],
+            meta_level: PLACE_LEVEL_OPEN,
+            meta_reduce_only: false,
+            meta_text_tag: String::new(),
+            meta_enabled: false,
         };
 
         let f = b.to_frame(exchange_to_u8(ExchangeId::Gate));
@@ -769,6 +857,31 @@ mod tests {
         assert_eq!(f.exchange_id, exchange_to_u8(ExchangeId::Gate));
         // symbol_idx 는 publish_order 안에서 채워짐.
         assert_eq!(f.symbol_idx, 0);
+    }
+
+    #[test]
+    fn order_builder_into_frame_packs_place_meta_when_requested() {
+        let mut b = PyOrderBuilder::default();
+        b.exchange = "gate".into();
+        b.symbol = "BTC_USDT".into();
+        b.level(PLACE_LEVEL_CLOSE);
+        b.reduce_only(true);
+        b.text_tag("v6");
+
+        let f = b.to_frame(exchange_to_u8(ExchangeId::Gate));
+        let meta = PlaceAuxMeta::unpack(&f.aux);
+        assert_eq!(meta.wire_level_code(), PLACE_LEVEL_CLOSE);
+        assert!(meta.reduce_only());
+        assert_eq!(meta.text_tag_str(), "v6");
+    }
+
+    #[test]
+    fn order_builder_without_meta_preserves_manual_aux() {
+        let mut b = PyOrderBuilder::default();
+        b.aux = [1, 2, 3, 4, 5];
+
+        let f = b.to_frame(exchange_to_u8(ExchangeId::Gate));
+        assert_eq!(f.aux, [1, 2, 3, 4, 5]);
     }
 
     #[test]

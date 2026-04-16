@@ -60,6 +60,9 @@ from ._core import (  # noqa: F401
     # 상수 — OrderKind
     ORDER_KIND_PLACE,
     ORDER_KIND_CANCEL,
+    # 상수 — Place meta level
+    PLACE_LEVEL_OPEN,
+    PLACE_LEVEL_CLOSE,
     # 정합성 assert 용
     ORDER_FRAME_SIZE,
     ORDER_FRAME_ALIGN,
@@ -93,6 +96,8 @@ __all__ = [
     "ORD_TYPE_MARKET",
     "ORDER_KIND_PLACE",
     "ORDER_KIND_CANCEL",
+    "PLACE_LEVEL_OPEN",
+    "PLACE_LEVEL_CLOSE",
     "ORDER_FRAME_SIZE",
     "ORDER_FRAME_ALIGN",
     "__version__",

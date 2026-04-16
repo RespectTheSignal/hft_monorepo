@@ -63,6 +63,16 @@ def test_order_builder_clear():
     assert b.kind == shm.ORDER_KIND_PLACE
 
 
+def test_order_builder_place_meta_setters_exist():
+    b = shm.PyOrderBuilder()
+    b.level(shm.PLACE_LEVEL_CLOSE)
+    b.reduce_only(True)
+    b.text_tag("v6")
+    # Python 단에선 packed aux 를 직접 열어보지 않는다.
+    # Rust unit test 가 OrderFrame.aux packing 을 검증한다.
+    assert b.kind == shm.ORDER_KIND_PLACE
+
+
 def test_wall_clock_ns_is_monotonic_ish():
     t1 = shm.wall_clock_ns()
     t2 = shm.wall_clock_ns()
