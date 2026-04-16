@@ -576,11 +576,14 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(80)).await;
 
         let mut got = 0usize;
+        let mut seqs = Vec::new();
         while let Ok((_, seed)) = orders_rx.try_recv() {
             got += 1;
             assert_eq!(seed.strategy_tag, "echo");
+            seqs.push(seed.client_seq);
         }
         assert_eq!(got, 5, "expected 5 echo orders, got {got}");
+        assert_eq!(seqs, vec![1, 2, 3, 4, 5]);
 
         handle.shutdown();
         handle.join().await;

@@ -26,6 +26,7 @@ hft-exchange-api = { workspace = true }
 # Phase 2 D: main.rs 에서 Gate REST account poller 를 직접 spawn.
 hft-exchange-gate = { workspace = true }
 hft-exchange-rest = { workspace = true }
+hft-order-egress = { workspace = true }
 hft-strategy-shm = { workspace = true }
 hft-strategy-config = { workspace = true }
 hft-strategy-core = { workspace = true }
@@ -41,3 +42,8 @@ clap = { workspace = true }
 tracing = { workspace = true }
 mimalloc = { workspace = true }
 ctrlc = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+hft-zmq = { workspace = true }
+zmq = { workspace = true }

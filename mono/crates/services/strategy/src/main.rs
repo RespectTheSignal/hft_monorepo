@@ -30,23 +30,26 @@
 //! - `HFT_RATE_DECAY_MS`         : rate tracker decay 호출 주기 ms (default 1_000).
 //!
 //! # Order gateway 연결
-//! Phase 2 D 단계에선 order-gateway 가 별도 프로세스로 분리돼 있으나, 실주문 파이프라인
-//! 구현은 Phase 2 E 에서. 여기서는 `OrderSender::bounded(1024)` 의 수신단을 동일
-//! 프로세스 내 "drain-to-tracing" 태스크가 소비해 발행 흔적을 구조화 로그로 남긴다.
-//! ZMQ PUSH 로 교체하는 것은 Phase 2 E 에서.
+//! Phase 2 E Step 4c 부터 `OrderSender` 의 수신단은 실제 egress drain 이 소비한다.
+//! strategy hot path 는 `(OrderRequest, OrderEgressMetaSeed)` 를 crossbeam 채널에 넣고,
+//! drain 태스크가 mode 별 `PolicyOrderEgress` 로 SHM/ZMQ 전송을 수행한다.
 
 #![deny(rust_2018_idioms)]
 
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::Receiver;
 use hft_exchange_api::{CancellationToken, OrderRequest};
 use hft_exchange_gate::{AccountPoller, BalanceSlot, GateAccountClient, PollerHandle};
+use hft_order_egress::{
+    PolicyOrderEgress, ShmOrderEgress, SubmitError, SubmitOutcome, ZmqOrderEgress,
+};
 use hft_exchange_rest::{Credentials, RestClient};
+use hft_shm::{Backing, LayoutSpec, Role, SharedRegion, SubKind, SymbolTable};
 use hft_strategy_config::StrategyConfig;
 use hft_strategy_core::risk::RiskConfig;
 use hft_strategy_runtime::{
@@ -58,10 +61,10 @@ use subscriber::InprocQueue;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
-use hft_config::{AppConfig, ExchangeConfig};
+use hft_config::{order_egress::OrderEgressMode, AppConfig, ExchangeConfig, ShmBackendKind};
 use strategy::{
-    start, v6::V6Strategy, v7::V7Strategy, v8::V8Strategy, NoopStrategy, OrderSender,
-    StrategyControl, StrategyHandle,
+    start, v6::V6Strategy, v7::V7Strategy, v8::V8Strategy, NoopStrategy, OrderEgressMetaSeed,
+    OrderEnvelope, OrderSender, StrategyControl, StrategyHandle,
 };
 
 #[global_allocator]
@@ -334,28 +337,182 @@ fn chrono_now_ms() -> i64 {
 // Order drain (Phase 2 D — Phase 2 E 에서 ZMQ PUSH 로 교체)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// `OrderSender::bounded` 의 수신단을 소비하며 tracing 으로 기록.
-///
-/// Phase 2 E 에서 이 함수는 ZMQ PUSH 로 실 order-gateway 에 전달하는 구현으로 교체된다.
-/// 현재는 crate 경계를 정리하기 위한 **흡수 태스크**.
-fn spawn_order_drain(rx: Receiver<OrderRequest>, cancel: CancellationToken) -> JoinHandle<()> {
+/// strategy drain 이 보유하는 mode-specific egress 핸들.
+enum DrainEgress {
+    /// SHM 정상 경로.
+    Shm(PolicyOrderEgress<ShmOrderEgress>),
+    /// ZMQ fallback 경로 + symbol intern 용 symtab.
+    Zmq {
+        inner: PolicyOrderEgress<ZmqOrderEgress>,
+        symtab: Arc<SymbolTable>,
+    },
+}
+
+impl DrainEgress {
+    fn try_submit(
+        &self,
+        req: &OrderRequest,
+        seed: &OrderEgressMetaSeed,
+        origin_ts_ns: u64,
+    ) -> Result<SubmitOutcome, SubmitError> {
+        match self {
+            Self::Shm(inner) => inner.submit(req, &seed.promote(origin_ts_ns, None, None)),
+            Self::Zmq { inner, symtab } => {
+                let symbol_id = symtab
+                    .get_or_intern(req.exchange, req.symbol.as_str())
+                    .map_err(|e| SubmitError::Transport(format!("symtab intern failed: {e}")))?;
+                inner.submit(req, &seed.promote(origin_ts_ns, Some(symbol_id), None))
+            }
+        }
+    }
+}
+
+/// `strategy_ring_id == 0` 이면 `shm.vm_id` 를 그대로 쓴다.
+fn effective_ring_id(cfg: &AppConfig) -> u32 {
+    if cfg.order_egress.shm.strategy_ring_id == 0 {
+        cfg.shm.vm_id
+    } else {
+        cfg.order_egress.shm.strategy_ring_id
+    }
+}
+
+fn build_v2_backing(cfg: &AppConfig) -> Result<Backing> {
+    match cfg.shm.backend {
+        ShmBackendKind::DevShm => Ok(Backing::DevShm {
+            path: cfg.shm.shared_path.clone(),
+        }),
+        ShmBackendKind::Hugetlbfs => Ok(Backing::Hugetlbfs {
+            path: cfg.shm.shared_path.clone(),
+        }),
+        ShmBackendKind::PciBar => Ok(Backing::PciBar {
+            path: cfg.shm.shared_path.clone(),
+        }),
+        ShmBackendKind::LegacyMultiFile => {
+            anyhow::bail!("legacy_multi_file backend does not use shared-region backing")
+        }
+    }
+}
+
+fn build_shared_layout_spec(cfg: &AppConfig) -> Result<LayoutSpec> {
+    if cfg.order_egress.shm.ring_capacity as u64 != cfg.shm.order_ring_capacity {
+        anyhow::bail!(
+            "order_egress.shm.ring_capacity ({}) must match shm.order_ring_capacity ({}) until publisher/order-gateway also migrate",
+            cfg.order_egress.shm.ring_capacity,
+            cfg.shm.order_ring_capacity
+        );
+    }
+    Ok(LayoutSpec {
+        quote_slot_count: cfg.shm.quote_slot_count,
+        trade_ring_capacity: cfg.shm.trade_ring_capacity,
+        symtab_capacity: cfg.shm.symbol_table_capacity,
+        order_ring_capacity: cfg.shm.order_ring_capacity,
+        n_max: cfg.shm.n_max,
+    })
+}
+
+fn open_drain_symtab(cfg: &AppConfig, ring_id: u32) -> Result<Arc<SymbolTable>> {
+    match cfg.shm.backend {
+        ShmBackendKind::LegacyMultiFile => {
+            let symtab = SymbolTable::open_or_create(&cfg.shm.symtab_path, cfg.shm.symbol_table_capacity)
+                .with_context(|| format!("SymbolTable::open_or_create({})", cfg.shm.symtab_path.display()))?;
+            Ok(Arc::new(symtab))
+        }
+        ShmBackendKind::DevShm | ShmBackendKind::Hugetlbfs | ShmBackendKind::PciBar => {
+            let backing = build_v2_backing(cfg)?;
+            let spec = build_shared_layout_spec(cfg)?;
+            let shared = SharedRegion::open_view(backing, spec, Role::Strategy { vm_id: ring_id })
+                .context("SharedRegion::open_view(strategy symtab)")?;
+            let sub = shared
+                .sub_region(SubKind::Symtab)
+                .context("sub_region(Symtab)")?;
+            let symtab = SymbolTable::open_from_region(sub)
+                .map_err(|e| anyhow!("SymbolTable::open_from_region: {e}"))?;
+            Ok(Arc::new(symtab))
+        }
+    }
+}
+
+fn build_drain_egress(cfg: &AppConfig) -> Result<DrainEgress> {
+    let ring_id = effective_ring_id(cfg);
+    let policy = cfg.order_egress.backpressure.clone();
+    match cfg.order_egress.mode {
+        OrderEgressMode::Shm => {
+            if matches!(cfg.shm.backend, ShmBackendKind::LegacyMultiFile) {
+                anyhow::bail!(
+                    "strategy SHM order egress requires shared-region backend; legacy_multi_file is not supported in Step 4c"
+                );
+            }
+            let backing = build_v2_backing(cfg)?;
+            let spec = build_shared_layout_spec(cfg)?;
+            let client = Arc::new(
+                hft_strategy_shm::StrategyShmClient::attach(backing, spec, ring_id)
+                    .context("StrategyShmClient::attach(order drain)")?,
+            );
+            Ok(DrainEgress::Shm(PolicyOrderEgress::new(
+                ShmOrderEgress::new(client),
+                policy,
+            )))
+        }
+        OrderEgressMode::Zmq => {
+            let zmq_cfg = cfg
+                .order_egress
+                .zmq
+                .as_ref()
+                .context("order_egress.zmq missing for mode=zmq")?;
+            let inner = ZmqOrderEgress::connect(zmq_cfg).context("ZmqOrderEgress::connect")?;
+            let symtab = open_drain_symtab(cfg, ring_id)?;
+            Ok(DrainEgress::Zmq {
+                inner: PolicyOrderEgress::new(inner, policy),
+                symtab,
+            })
+        }
+    }
+}
+
+fn wall_clock_epoch_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
+fn spawn_order_drain(rx: Receiver<OrderEnvelope>, egress: DrainEgress, cancel: CancellationToken) -> JoinHandle<()> {
+    spawn_order_drain_with_now(rx, egress, cancel, wall_clock_epoch_ns)
+}
+
+fn spawn_order_drain_with_now<F>(
+    rx: Receiver<OrderEnvelope>,
+    egress: DrainEgress,
+    cancel: CancellationToken,
+    now_ns: F,
+) -> JoinHandle<()>
+where
+    F: Fn() -> u64 + Send + 'static,
+{
     tokio::spawn(async move {
         loop {
             if cancel.is_cancelled() {
                 break;
             }
             match rx.recv_timeout(Duration::from_millis(50)) {
-                Ok(req) => {
-                    info!(
-                        target: "strategy::orders",
-                        exchange = ?req.exchange,
-                        symbol = %req.symbol.as_str(),
-                        side = ?req.side,
-                        qty = req.qty,
-                        price = ?req.price,
-                        client_id = %req.client_id,
-                        "order emitted (drain)"
-                    );
+                Ok((req, seed)) => {
+                    let origin_ts_ns = now_ns();
+                    match egress.try_submit(&req, &seed, origin_ts_ns) {
+                        Ok(SubmitOutcome::Sent | SubmitOutcome::WouldBlock) => {}
+                        Err(e) => {
+                            error!(
+                                target: "strategy::orders",
+                                exchange = ?req.exchange,
+                                symbol = %req.symbol.as_str(),
+                                side = ?req.side,
+                                qty = req.qty,
+                                price = ?req.price,
+                                client_id = %req.client_id,
+                                error = %e,
+                                "order drain submit failed"
+                            );
+                        }
+                    }
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     tokio::task::yield_now().await;
@@ -438,6 +595,7 @@ async fn bring_up_full(
     // ── channels.
     let (queue, ev_rx) = InprocQueue::bounded(cfg.zmq.hwm.max(1024) as usize);
     let (orders_tx, orders_rx) = OrderSender::bounded(1024);
+    let drain_egress = build_drain_egress(&cfg).context("build drain egress")?;
 
     // ── strategy spawn (variant-specific `with_runtime` 분기).
     let risk = RiskConfig::default();
@@ -479,7 +637,7 @@ async fn bring_up_full(
     let rate_window_ms: i64 = 3_600_000; // 1h 상한 — rate tracker 는 시간창 밖만 버린다.
     let rate_decay = spawn_rate_decay(rate, aux_cancel.clone(), decay_period, rate_window_ms);
 
-    let order_drain = spawn_order_drain(orders_rx, aux_cancel.clone());
+    let order_drain = spawn_order_drain(orders_rx, drain_egress, aux_cancel.clone());
 
     Ok(StackedHandles {
         strategy: strategy_handle,
@@ -549,6 +707,229 @@ async fn run() -> Result<()> {
 
     info!(target: "strategy::main", "strategy exited cleanly");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use hft_config::order_egress::{BackpressurePolicy, ZmqOrderEgressConfig};
+    use hft_exchange_api::{OrderSide, OrderType, TimeInForce};
+    use hft_protocol::{order_wire::{OrderRequestWire, ORDER_REQUEST_WIRE_SIZE}, WireLevel};
+    use hft_shm::{OrderKind, OrderRingReader, OrderRingWriter, QuoteSlotWriter, TradeRingWriter};
+    use hft_types::Symbol;
+    use tempfile::tempdir;
+    use zmq::Socket;
+
+    fn sample_req() -> OrderRequest {
+        OrderRequest {
+            exchange: ExchangeId::Gate,
+            symbol: Symbol::new("BTC_USDT"),
+            side: OrderSide::Buy,
+            order_type: OrderType::Limit,
+            qty: 1.0,
+            price: Some(100.0),
+            tif: TimeInForce::Gtc,
+            client_id: Arc::from("v8-7"),
+        }
+    }
+
+    fn sample_seed() -> OrderEgressMetaSeed {
+        OrderEgressMetaSeed {
+            client_seq: 7,
+            level: WireLevel::Open,
+            reduce_only: false,
+            strategy_tag: "v8",
+        }
+    }
+
+    fn sample_spec() -> LayoutSpec {
+        LayoutSpec {
+            quote_slot_count: 16,
+            trade_ring_capacity: 32,
+            symtab_capacity: 16,
+            order_ring_capacity: 16,
+            n_max: 1,
+        }
+    }
+
+    fn boot_publisher(path: &Path, spec: LayoutSpec) -> SharedRegion {
+        let shared = SharedRegion::create_or_attach(
+            Backing::DevShm {
+                path: path.to_path_buf(),
+            },
+            spec,
+            Role::Publisher,
+        )
+        .expect("publisher shared region");
+        let _ = QuoteSlotWriter::from_region(shared.sub_region(SubKind::Quote).unwrap(), spec.quote_slot_count)
+            .expect("quote writer");
+        let _ = TradeRingWriter::from_region(shared.sub_region(SubKind::Trade).unwrap(), spec.trade_ring_capacity)
+            .expect("trade writer");
+        let _ = SymbolTable::from_region(shared.sub_region(SubKind::Symtab).unwrap(), spec.symtab_capacity)
+            .expect("symtab");
+        let _ = OrderRingWriter::from_region(
+            shared.sub_region(SubKind::OrderRing { vm_id: 0 }).unwrap(),
+            spec.order_ring_capacity,
+        )
+        .expect("order writer");
+        shared
+    }
+
+    fn base_cfg() -> AppConfig {
+        let mut cfg = AppConfig::default();
+        cfg.order_egress.backpressure = BackpressurePolicy::Drop;
+        cfg
+    }
+
+    fn bind_pull(ctx: &hft_zmq::Context, endpoint: &str) -> Socket {
+        let pull = ctx.raw().socket(zmq::PULL).expect("pull socket");
+        pull.set_rcvtimeo(1_000).expect("set rcvtimeo");
+        pull.bind(endpoint).expect("bind pull");
+        pull
+    }
+
+    fn free_tcp_endpoint() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("tcp listener");
+        let port = listener.local_addr().expect("local addr").port();
+        drop(listener);
+        format!("tcp://127.0.0.1:{port}")
+    }
+
+    #[test]
+    fn effective_ring_id_uses_vm_id_on_zero_sentinel() {
+        let mut cfg = base_cfg();
+        cfg.shm.vm_id = 3;
+        cfg.order_egress.shm.strategy_ring_id = 0;
+        assert_eq!(effective_ring_id(&cfg), 3);
+        cfg.order_egress.shm.strategy_ring_id = 7;
+        assert_eq!(effective_ring_id(&cfg), 7);
+    }
+
+    #[tokio::test]
+    async fn shm_mode_drain_publishes_frame() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("strategy-drain-shm.bin");
+        let spec = sample_spec();
+        let shared = boot_publisher(&path, spec);
+        let mut reader =
+            OrderRingReader::from_region(shared.sub_region(SubKind::OrderRing { vm_id: 0 }).unwrap())
+                .unwrap();
+
+        let mut cfg = base_cfg();
+        cfg.shm.backend = ShmBackendKind::DevShm;
+        cfg.shm.shared_path = path;
+        cfg.shm.vm_id = 0;
+        cfg.shm.n_max = spec.n_max;
+        cfg.shm.quote_slot_count = spec.quote_slot_count;
+        cfg.shm.trade_ring_capacity = spec.trade_ring_capacity;
+        cfg.shm.symbol_table_capacity = spec.symtab_capacity;
+        cfg.shm.order_ring_capacity = spec.order_ring_capacity;
+        cfg.order_egress.mode = OrderEgressMode::Shm;
+        cfg.order_egress.shm.ring_capacity = spec.order_ring_capacity as usize;
+
+        let egress = build_drain_egress(&cfg).expect("build shm drain egress");
+        let cancel = CancellationToken::new();
+        let (tx, rx) = crossbeam_channel::bounded(4);
+        let handle = spawn_order_drain_with_now(rx, egress, cancel.clone(), || 123);
+
+        tx.send((sample_req(), sample_seed())).unwrap();
+        drop(tx);
+        handle.await.unwrap();
+
+        let frame = reader.try_consume().expect("shm frame");
+        assert_eq!(frame.kind, OrderKind::Place as u8);
+        assert_eq!(frame.client_id, 7);
+        assert_eq!(frame.ts_ns, 123);
+        assert_eq!(frame.exchange_id, hft_shm::exchange_to_u8(ExchangeId::Gate));
+        let symtab = SymbolTable::open_from_region(shared.sub_region(SubKind::Symtab).unwrap()).unwrap();
+        let symbol_idx = symtab.lookup(ExchangeId::Gate, "BTC_USDT").expect("symbol idx");
+        assert_eq!(frame.symbol_idx, symbol_idx);
+        assert_eq!(frame.price, 100);
+        assert_eq!(frame.size, 1);
+    }
+
+    #[tokio::test]
+    async fn zmq_mode_drain_sends_wire_with_symbol_id() {
+        let dir = tempdir().unwrap();
+        let symtab_path = dir.path().join("symtab.bin");
+        let endpoint = free_tcp_endpoint();
+        let ctx = hft_zmq::Context::new();
+        let pull = bind_pull(&ctx, &endpoint);
+
+        let mut cfg = base_cfg();
+        cfg.shm.backend = ShmBackendKind::LegacyMultiFile;
+        cfg.shm.symtab_path = symtab_path;
+        cfg.shm.symbol_table_capacity = 16;
+        cfg.order_egress.mode = OrderEgressMode::Zmq;
+        cfg.order_egress.backpressure = BackpressurePolicy::RetryWithTimeout {
+            max_retries: 64,
+            backoff_ns: 1_000_000,
+            total_timeout_ns: 500_000_000,
+        };
+        cfg.order_egress.zmq = Some(ZmqOrderEgressConfig {
+            endpoint: endpoint.clone(),
+            send_hwm: 8,
+            linger_ms: 0,
+            reconnect_interval_ms: 10,
+            reconnect_interval_max_ms: 10,
+        });
+
+        let egress = build_drain_egress(&cfg).expect("build zmq drain egress");
+        let cancel = CancellationToken::new();
+        let (tx, rx) = crossbeam_channel::bounded(4);
+        let handle = spawn_order_drain_with_now(rx, egress, cancel.clone(), || 456);
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        tx.send((sample_req(), sample_seed())).unwrap();
+        drop(tx);
+        handle.await.unwrap();
+        let bytes = pull.recv_bytes(0).expect("recv zmq bytes");
+
+        let buf: [u8; ORDER_REQUEST_WIRE_SIZE] = bytes.try_into().expect("128B wire");
+        let wire = OrderRequestWire::decode(&buf).expect("decode order wire");
+        assert_eq!(wire.client_seq, 7);
+        assert_eq!(wire.origin_ts_ns, 456);
+        assert_eq!(&wire.text_tag[..2], b"v8");
+        let symtab = SymbolTable::open(&cfg.shm.symtab_path).unwrap();
+        let symbol_id = symtab.lookup(ExchangeId::Gate, "BTC_USDT").expect("symbol id");
+        assert_eq!(wire.symbol_id, symbol_id);
+    }
+
+    #[tokio::test]
+    async fn drain_loop_exits_on_closed_channel() {
+        let dir = tempdir().unwrap();
+        let symtab_path = dir.path().join("symtab-close.bin");
+        let endpoint = free_tcp_endpoint();
+        let ctx = hft_zmq::Context::new();
+        let _pull = bind_pull(&ctx, &endpoint);
+
+        let mut cfg = base_cfg();
+        cfg.shm.backend = ShmBackendKind::LegacyMultiFile;
+        cfg.shm.symtab_path = symtab_path;
+        cfg.shm.symbol_table_capacity = 16;
+        cfg.order_egress.mode = OrderEgressMode::Zmq;
+        cfg.order_egress.zmq = Some(ZmqOrderEgressConfig {
+            endpoint: endpoint,
+            send_hwm: 8,
+            linger_ms: 0,
+            reconnect_interval_ms: 10,
+            reconnect_interval_max_ms: 10,
+        });
+
+        let egress = build_drain_egress(&cfg).expect("build zmq drain egress");
+        let cancel = CancellationToken::new();
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        drop(tx);
+        let handle = spawn_order_drain_with_now(rx, egress, cancel, || 999);
+        tokio::time::timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("drain exit timeout")
+            .unwrap();
+    }
 }
 
 #[tokio::main(flavor = "multi_thread")]
