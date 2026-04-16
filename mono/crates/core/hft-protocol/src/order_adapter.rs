@@ -9,7 +9,9 @@
 //! 이 모듈은 두 변환에서 공통으로 필요한 메타데이터, 에러 타입, 변환 함수를 제공한다.
 
 use hft_exchange_api::{OrderRequest, OrderSide, OrderType, TimeInForce};
-use hft_shm::{exchange_to_u8, OrderFrame, OrderKind};
+use hft_shm::{
+    exchange_to_u8, OrderFrame, OrderKind, PlaceAuxMeta, PLACE_LEVEL_CLOSE, PLACE_LEVEL_OPEN,
+};
 use thiserror::Error;
 
 use crate::order_wire::{
@@ -156,6 +158,14 @@ fn level_code(level: WireLevel) -> u8 {
     }
 }
 
+#[inline]
+fn place_level_code(level: WireLevel) -> u8 {
+    match level {
+        WireLevel::Open => PLACE_LEVEL_OPEN,
+        WireLevel::Close => PLACE_LEVEL_CLOSE,
+    }
+}
+
 /// 도메인 주문을 SHM `OrderFrame` 으로 변환한다.
 ///
 /// 현재 SHM 경로는 `price: i64` 표현을 사용하므로 limit 주문은 정수 가격만 허용한다.
@@ -189,7 +199,8 @@ pub fn order_request_to_order_frame(
         size,
         client_id: req.client_seq,
         ts_ns: req.origin_ts_ns,
-        aux: [0; 5],
+        aux: PlaceAuxMeta::from_parts(place_level_code(meta.level), req.reduce_only, meta.strategy_tag)
+            .pack(),
         _pad3: [0; 16],
     })
 }
@@ -268,6 +279,7 @@ mod tests {
         let req = sample_req(ExchangeId::Gate);
         let meta = sample_meta();
         let frame = order_request_to_order_frame(&req, &meta).expect("frame");
+        let place_meta = PlaceAuxMeta::unpack(&frame.aux);
 
         assert_eq!(frame.seq, 0);
         assert_eq!(frame.kind, OrderKind::Place as u8);
@@ -280,7 +292,9 @@ mod tests {
         assert_eq!(frame.size, 1);
         assert_eq!(frame.client_id, req.client_seq);
         assert_eq!(frame.ts_ns, req.origin_ts_ns);
-        assert_eq!(frame.aux, [0; 5]);
+        assert_eq!(place_meta.wire_level_code(), PLACE_LEVEL_OPEN);
+        assert!(!place_meta.reduce_only());
+        assert_eq!(place_meta.text_tag_str(), "v8");
     }
 
     #[test]
@@ -294,6 +308,21 @@ mod tests {
         assert_eq!(frame.ord_type, 1);
         assert_eq!(frame.price, 0);
         assert_eq!(frame.tif, TIF_IOC);
+    }
+
+    #[test]
+    fn shm_adapter_packs_place_meta_into_aux() {
+        let mut req = sample_req(ExchangeId::Gate);
+        req.reduce_only = true;
+        let mut meta = sample_meta();
+        meta.level = WireLevel::Close;
+        meta.strategy_tag = "v7";
+
+        let frame = order_request_to_order_frame(&req, &meta).expect("frame");
+        let place_meta = PlaceAuxMeta::unpack(&frame.aux);
+        assert_eq!(place_meta.wire_level_code(), PLACE_LEVEL_CLOSE);
+        assert!(place_meta.reduce_only());
+        assert_eq!(place_meta.text_tag_str(), "v7");
     }
 
     #[test]
