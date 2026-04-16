@@ -110,8 +110,9 @@ pub(crate) fn now_realtime_ns() -> u64 {
 
 pub use error::{ShmError, ShmResult};
 pub use layout::{
-    OrderFrame, OrderKind, QuoteSlot, QuoteSnapshot, QuoteUpdate, TradeFrame, CACHE_LINE,
-    FRAME_SIZE,
+    OrderFrame, OrderKind, PlaceAuxMeta, QuoteSlot, QuoteSnapshot, QuoteUpdate, TradeFrame,
+    CACHE_LINE, FRAME_SIZE, ORDER_AUX_BYTES, PLACE_AUX_META_SIZE, PLACE_AUX_TEXT_TAG_LEN,
+    PLACE_FLAG_REDUCE_ONLY, PLACE_LEVEL_CLOSE, PLACE_LEVEL_OPEN,
 };
 pub use quote_slot::{QuoteSlotReader, QuoteSlotWriter};
 pub use spmc_ring::{TradeRingReader, TradeRingWriter};

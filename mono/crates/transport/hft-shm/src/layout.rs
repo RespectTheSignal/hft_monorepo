@@ -16,6 +16,18 @@ pub const CACHE_LINE: usize = 64;
 
 /// 모든 SHM frame 의 공통 크기 (128B). cache line 2개에 맞춰 잡은 상한.
 pub const FRAME_SIZE: usize = 128;
+/// `OrderFrame.aux` 전체 바이트 크기.
+pub const ORDER_AUX_BYTES: usize = 40;
+/// Place 메타 text_tag 바이트 길이.
+pub const PLACE_AUX_TEXT_TAG_LEN: usize = 32;
+/// `PlaceAuxMeta` 총 바이트 크기.
+pub const PLACE_AUX_META_SIZE: usize = ORDER_AUX_BYTES;
+/// Place 메타 level code: Open.
+pub const PLACE_LEVEL_OPEN: u8 = 0;
+/// Place 메타 level code: Close.
+pub const PLACE_LEVEL_CLOSE: u8 = 1;
+/// Place 메타 flags bit: reduce_only.
+pub const PLACE_FLAG_REDUCE_ONLY: u8 = 0b0000_0001;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Magic constants (big-endian ASCII + version byte)
@@ -268,6 +280,129 @@ pub enum OrderKind {
     Cancel = 1,
 }
 
+/// `OrderFrame.aux` 의 Place 분기 메타데이터.
+///
+/// `OrderFrame.kind` 가 [`OrderKind::Place`] 인 경우에만 이 레이아웃으로 해석한다.
+/// Cancel 분기에서는 기존처럼 `exchange_order_id` ASCII payload 로 해석한다.
+///
+/// 바이트 레이아웃 (총 40B):
+///
+/// ```text
+/// 0      1      2..34               34..40
+/// +------+------+-------------------+---------+
+/// | level| flags| text_tag[32]      | pad[6]  |
+/// +------+------+-------------------+---------+
+/// ```
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaceAuxMeta {
+    /// 0 = Open, 1 = Close.
+    pub level: u8,
+    /// bit0 = reduce_only, bit1..7 reserved.
+    pub flags: u8,
+    /// UTF-8 태그 32B. NUL padding.
+    pub text_tag: [u8; PLACE_AUX_TEXT_TAG_LEN],
+    /// trailing reserved/padding.
+    pub _pad: [u8; 6],
+}
+
+const _: () = assert!(std::mem::size_of::<PlaceAuxMeta>() == PLACE_AUX_META_SIZE);
+
+impl Default for PlaceAuxMeta {
+    fn default() -> Self {
+        Self {
+            level: PLACE_LEVEL_OPEN,
+            flags: 0,
+            text_tag: [0; PLACE_AUX_TEXT_TAG_LEN],
+            _pad: [0; 6],
+        }
+    }
+}
+
+impl PlaceAuxMeta {
+    /// Open/Close level code + reduce_only + text_tag 로 Place aux 메타를 만든다.
+    ///
+    /// `text_tag` 는 32B 이내 UTF-8 prefix 만 보존하고, 남는 바이트는 0 으로 채운다.
+    pub fn from_parts(level: u8, reduce_only: bool, text_tag: &str) -> Self {
+        let mut out = Self {
+            level,
+            flags: if reduce_only { PLACE_FLAG_REDUCE_ONLY } else { 0 },
+            ..Self::default()
+        };
+
+        let mut written = 0usize;
+        for ch in text_tag.chars() {
+            let mut buf = [0u8; 4];
+            let bytes = ch.encode_utf8(&mut buf).as_bytes();
+            if written + bytes.len() > PLACE_AUX_TEXT_TAG_LEN {
+                break;
+            }
+            out.text_tag[written..written + bytes.len()].copy_from_slice(bytes);
+            written += bytes.len();
+        }
+
+        out
+    }
+
+    /// 현재 meta 를 little-endian `[u64; 5]` 로 packing 한다.
+    pub fn pack(&self) -> [u64; 5] {
+        let mut bytes = [0u8; ORDER_AUX_BYTES];
+        bytes[0] = self.level;
+        bytes[1] = self.flags & PLACE_FLAG_REDUCE_ONLY;
+        bytes[2..34].copy_from_slice(&self.text_tag);
+
+        let mut out = [0u64; 5];
+        for (i, chunk) in bytes.chunks_exact(8).enumerate() {
+            out[i] = u64::from_le_bytes(chunk.try_into().expect("8-byte chunk"));
+        }
+        out
+    }
+
+    /// little-endian `[u64; 5]` 를 Place 메타로 풀어낸다.
+    pub fn unpack(aux: &[u64; 5]) -> Self {
+        let mut bytes = [0u8; ORDER_AUX_BYTES];
+        for (i, word) in aux.iter().enumerate() {
+            bytes[i * 8..i * 8 + 8].copy_from_slice(&word.to_le_bytes());
+        }
+
+        let mut text_tag = [0u8; PLACE_AUX_TEXT_TAG_LEN];
+        text_tag.copy_from_slice(&bytes[2..34]);
+        let mut pad = [0u8; 6];
+        pad.copy_from_slice(&bytes[34..40]);
+
+        Self {
+            level: bytes[0],
+            flags: bytes[1],
+            text_tag,
+            _pad: pad,
+        }
+    }
+
+    /// level code 를 그대로 돌려준다.
+    #[inline]
+    pub const fn wire_level_code(&self) -> u8 {
+        self.level
+    }
+
+    /// reduce_only 비트를 해석한다.
+    #[inline]
+    pub const fn reduce_only(&self) -> bool {
+        (self.flags & PLACE_FLAG_REDUCE_ONLY) != 0
+    }
+
+    /// NUL-trimmed UTF-8 태그 문자열.
+    ///
+    /// invalid UTF-8 인 경우 빈 문자열을 반환한다.
+    pub fn text_tag_str(&self) -> &str {
+        let len = self
+            .text_tag
+            .iter()
+            .position(|b| *b == 0)
+            .unwrap_or(PLACE_AUX_TEXT_TAG_LEN);
+        std::str::from_utf8(&self.text_tag[..len]).unwrap_or("")
+    }
+}
+
 /// Order frame (128B). Python ctypes 도 이 레이아웃 공유.
 #[repr(C, align(64))]
 #[derive(Debug, Clone, Copy)]
@@ -326,6 +461,74 @@ impl Default for OrderFrame {
             aux: [0; 5],
             _pad3: [0; 16],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DESIGN_PLACE_AUX_CLOSE_REDUCE_V6: [u8; ORDER_AUX_BYTES] = [
+        0x01, 0x01, 0x76, 0x36, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    fn aux_as_bytes(aux: &[u64; 5]) -> [u8; ORDER_AUX_BYTES] {
+        let mut out = [0u8; ORDER_AUX_BYTES];
+        for (i, word) in aux.iter().enumerate() {
+            out[i * 8..i * 8 + 8].copy_from_slice(&word.to_le_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn place_aux_pack_unpack_roundtrip() {
+        let cases = [
+            PlaceAuxMeta::from_parts(PLACE_LEVEL_OPEN, false, ""),
+            PlaceAuxMeta::from_parts(PLACE_LEVEL_OPEN, true, "v6"),
+            PlaceAuxMeta::from_parts(PLACE_LEVEL_CLOSE, false, "v7_ma_cross"),
+            PlaceAuxMeta::from_parts(PLACE_LEVEL_CLOSE, true, "OKX-close-long-tag"),
+        ];
+
+        for case in cases {
+            let unpacked = PlaceAuxMeta::unpack(&case.pack());
+            assert_eq!(unpacked.level, case.level);
+            assert_eq!(unpacked.reduce_only(), case.reduce_only());
+            assert_eq!(unpacked.text_tag_str(), case.text_tag_str());
+            assert_eq!(unpacked._pad, [0; 6]);
+            assert_eq!(unpacked.flags & !PLACE_FLAG_REDUCE_ONLY, 0);
+        }
+    }
+
+    #[test]
+    fn place_aux_design_invariance_close_reduce_v6() {
+        let meta = PlaceAuxMeta::from_parts(PLACE_LEVEL_CLOSE, true, "v6");
+        assert_eq!(aux_as_bytes(&meta.pack()), DESIGN_PLACE_AUX_CLOSE_REDUCE_V6);
+        let unpacked = PlaceAuxMeta::unpack(&meta.pack());
+        assert_eq!(unpacked.level, PLACE_LEVEL_CLOSE);
+        assert!(unpacked.reduce_only());
+        assert_eq!(unpacked.text_tag_str(), "v6");
+    }
+
+    #[test]
+    fn place_aux_truncates_text_tag_at_char_boundary() {
+        let long = "abcdefghijklmnopqrstuvwxyz0123456789";
+        let meta = PlaceAuxMeta::from_parts(PLACE_LEVEL_OPEN, false, long);
+        assert_eq!(meta.text_tag_str(), "abcdefghijklmnopqrstuvwxyz012345");
+        assert_eq!(meta.text_tag[31], b'5');
+    }
+
+    #[test]
+    fn place_aux_pack_zeroes_reserved_bits_and_pad() {
+        let mut meta = PlaceAuxMeta::from_parts(PLACE_LEVEL_CLOSE, true, "v8");
+        meta.flags = 0xff;
+        meta._pad = [9; 6];
+        let unpacked = PlaceAuxMeta::unpack(&meta.pack());
+        assert_eq!(unpacked.flags & !PLACE_FLAG_REDUCE_ONLY, 0);
+        assert_eq!(unpacked._pad, [0; 6]);
     }
 }
 
