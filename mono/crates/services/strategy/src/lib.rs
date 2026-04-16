@@ -28,6 +28,7 @@ pub mod v6;
 pub mod v7;
 /// V8 전략 스캐폴드 (Phase 2 A 트랙).
 pub mod v8;
+mod egress_seed;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,6 +41,8 @@ use hft_time::{Clock, LatencyStamps, Stage, SystemClock};
 use hft_types::MarketEvent;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
+
+pub use egress_seed::OrderEgressMetaSeed;
 
 /// `Strategy::eval` 반환값의 별칭.
 pub type Orders = Vec<OrderRequest>;
