@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["collector"]
+members = ["collector", "flipster-client"]
 
 [workspace.package]
 edition = "2021"
@@ -27,3 +27,4 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 http = "1"
+zmq = "0.10"
