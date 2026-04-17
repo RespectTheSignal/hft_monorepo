@@ -252,6 +252,9 @@ fn default_ping_s() -> u64 {
 pub struct QuestDbConfig {
     /// ILP endpoint (host:port). 빈 문자열이면 writer 비활성.
     pub ilp_addr: String,
+    /// QuestDB PG wire endpoint (host:port). 빈 문자열이면 startup DDL init skip.
+    #[serde(default)]
+    pub pg_addr: String,
     /// 한 번에 flush 하는 최대 row 수.
     pub batch_rows: usize,
     /// flush interval 상한 (ms). batch_rows 에 미달해도 이 시간 지나면 flush.
@@ -264,6 +267,7 @@ impl Default for QuestDbConfig {
     fn default() -> Self {
         Self {
             ilp_addr: String::new(),
+            pg_addr: String::new(),
             batch_rows: 1000,
             batch_ms: 500,
             spool_dir: PathBuf::from("./spool"),

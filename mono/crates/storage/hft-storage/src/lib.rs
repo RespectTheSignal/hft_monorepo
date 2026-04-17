@@ -173,6 +173,7 @@ fn stage_name(stage: Stage) -> &'static str {
         Stage::Published => "published",
         Stage::Subscribed => "subscribed",
         Stage::Consumed => "consumed",
+        Stage::EndToEnd => "e2e",
     }
 }
 
@@ -716,6 +717,11 @@ mod tests {
     }
 
     #[test]
+    fn stage_name_e2e() {
+        assert_eq!(stage_name(Stage::EndToEnd), "e2e");
+    }
+
+    #[test]
     fn escape_tag_with_special_chars() {
         let mut buf = Vec::new();
         escape_key_or_tag(&mut buf, "a b,c=d\\e");
@@ -735,6 +741,7 @@ mod tests {
     fn sink_buffers_then_flush_required() {
         let cfg = QuestDbConfig {
             ilp_addr: String::new(),
+            pg_addr: String::new(),
             batch_rows: 2,
             batch_ms: 50,
             spool_dir: PathBuf::new(),
@@ -794,6 +801,7 @@ mod tests {
     fn maybe_flush_empty_is_noop() {
         let cfg = QuestDbConfig {
             ilp_addr: String::new(),
+            pg_addr: String::new(),
             batch_rows: 10,
             batch_ms: 50,
             spool_dir: PathBuf::new(),
@@ -807,6 +815,7 @@ mod tests {
     fn force_flush_without_rows_is_ok() {
         let cfg = QuestDbConfig {
             ilp_addr: String::new(),
+            pg_addr: String::new(),
             batch_rows: 10,
             batch_ms: 50,
             spool_dir: PathBuf::new(),
@@ -819,6 +828,7 @@ mod tests {
     fn buffer_accessor_shows_accumulated_ilp() {
         let cfg = QuestDbConfig {
             ilp_addr: String::new(),
+            pg_addr: String::new(),
             batch_rows: 100,
             batch_ms: 1000,
             spool_dir: PathBuf::new(),

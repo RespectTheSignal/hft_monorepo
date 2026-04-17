@@ -214,8 +214,8 @@ const HDR_HIGH_NS: u64 = 60 * 1_000_000_000; // 60s
 const HDR_SIGFIG: u8 = 3;
 
 struct StageHistograms {
-    // Stage::ExchangeServer .. Stage::Consumed 7개.
-    slots: [Mutex<Histogram<u64>>; 7],
+    // Stage::ExchangeServer .. Stage::EndToEnd 8개.
+    slots: [Mutex<Histogram<u64>>; 8],
 }
 
 impl StageHistograms {
@@ -227,7 +227,7 @@ impl StageHistograms {
             )
         };
         Self {
-            slots: [mk(), mk(), mk(), mk(), mk(), mk(), mk()],
+            slots: [mk(), mk(), mk(), mk(), mk(), mk(), mk(), mk()],
         }
     }
 
@@ -240,6 +240,7 @@ impl StageHistograms {
             Stage::Published => 4,
             Stage::Subscribed => 5,
             Stage::Consumed => 6,
+            Stage::EndToEnd => 7,
         }
     }
 }
@@ -302,8 +303,8 @@ impl HdrSnapshot {
 }
 
 /// stage 별 HDR snapshot 을 반환 (모든 stage).
-pub fn dump_hdr() -> [(Stage, HdrSnapshot); 7] {
-    const STAGES: [Stage; 7] = [
+pub fn dump_hdr() -> [(Stage, HdrSnapshot); 8] {
+    const STAGES: [Stage; 8] = [
         Stage::ExchangeServer,
         Stage::WsReceived,
         Stage::Serialized,
@@ -311,6 +312,7 @@ pub fn dump_hdr() -> [(Stage, HdrSnapshot); 7] {
         Stage::Published,
         Stage::Subscribed,
         Stage::Consumed,
+        Stage::EndToEnd,
     ];
     let hdrs = stage_hdrs();
     std::array::from_fn(|i| {

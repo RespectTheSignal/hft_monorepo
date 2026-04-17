@@ -31,10 +31,11 @@ use crossbeam_channel::{Receiver, RecvTimeoutError};
 use hft_config::AppConfig;
 use hft_exchange_api::CancellationToken;
 use hft_storage::{QuestDbSink, StorageError};
-use hft_time::LatencyStamps;
+use hft_time::{LatencyStamps, Stage};
 use hft_types::MarketEvent;
+use postgres::{Client, NoTls};
 use subscriber::{start as subscriber_start, InprocQueue, INPROC_QUEUE_CAPACITY};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -78,6 +79,84 @@ fn push_event(sink: &mut QuestDbSink, ev: &MarketEvent, stamps: &LatencyStamps) 
         // push 단계의 에러는 format 문제뿐 — IO 는 flush 에서 잡힘.
         warn!(error = %e, "ilp encode failed — skipping row");
     }
+    push_latency_deltas(sink, stamps);
+}
+
+/// 인접 stage delta + e2e delta 를 latency_stages 테이블에 기록한다.
+///
+/// 일부 stage 가 비어 있으면 해당 delta 는 조용히 skip 한다.
+fn push_latency_deltas(sink: &mut QuestDbSink, stamps: &LatencyStamps) {
+    const STAGE_PAIRS: &[(Stage, Stage)] = &[
+        (Stage::ExchangeServer, Stage::WsReceived),
+        (Stage::WsReceived, Stage::Serialized),
+        (Stage::Serialized, Stage::Pushed),
+        (Stage::Pushed, Stage::Published),
+        (Stage::Published, Stage::Subscribed),
+        (Stage::Subscribed, Stage::Consumed),
+    ];
+
+    for &(from, to) in STAGE_PAIRS {
+        if let Some(nanos) = stamps.delta_ns(from, to) {
+            if let Err(e) = sink.push_latency_sample(to, nanos) {
+                warn!(stage = ?to, error = %e, "latency sample encode failed");
+            }
+        }
+    }
+
+    if let Some(e2e_ms) = stamps.end_to_end_ms() {
+        if e2e_ms > 0 {
+            let nanos = (e2e_ms as u64).saturating_mul(1_000_000);
+            if let Err(e) = sink.push_latency_sample(Stage::EndToEnd, nanos) {
+                warn!(error = %e, "e2e latency sample encode failed");
+            }
+        }
+    }
+}
+
+/// QuestDB PG wire 로 필요한 테이블을 startup 시 보장한다.
+///
+/// ILP auto-create fallback 이 있으므로 실패는 warn 처리 후 계속 진행 가능하다.
+fn ensure_questdb_schema(pg_addr: &str) -> Result<()> {
+    let parts: Vec<&str> = pg_addr.splitn(2, ':').collect();
+    let (host, port) = match parts.as_slice() {
+        [host, port] => (*host, *port),
+        _ => return Err(anyhow!("invalid pg_addr format: expected host:port")),
+    };
+
+    let conn_string = format!("host={host} port={port} user=admin dbname=qdb sslmode=disable");
+    let mut client =
+        Client::connect(&conn_string, NoTls).context("questdb PG wire connect failed")?;
+
+    let ddl = [
+        "CREATE TABLE IF NOT EXISTS bookticker (\
+            symbol SYMBOL, exchange SYMBOL, \
+            bid_price DOUBLE, ask_price DOUBLE, \
+            bid_size DOUBLE, ask_size DOUBLE, \
+            event_time_ms LONG, server_time_ms LONG, \
+            ts TIMESTAMP \
+         ) timestamp(ts) PARTITION BY DAY",
+        "CREATE TABLE IF NOT EXISTS trade (\
+            symbol SYMBOL, exchange SYMBOL, \
+            price DOUBLE, size DOUBLE, \
+            trade_id LONG, create_time_ms LONG, server_time_ms LONG, \
+            is_internal BOOLEAN, \
+            ts TIMESTAMP \
+         ) timestamp(ts) PARTITION BY DAY",
+        "CREATE TABLE IF NOT EXISTS latency_stages (\
+            stage SYMBOL, nanos LONG, \
+            ts TIMESTAMP \
+         ) timestamp(ts) PARTITION BY HOUR",
+    ];
+
+    for stmt in &ddl {
+        match client.simple_query(stmt) {
+            Ok(_) => debug!(ddl = %stmt, "questdb DDL executed"),
+            Err(e) => warn!(ddl = %stmt, error = %e, "questdb DDL failed — continuing"),
+        }
+    }
+
+    info!("QuestDB schema init done");
+    Ok(())
 }
 
 /// blocking 영역: recv → encode → maybe_flush. `spawn_blocking` 에서 호출.
@@ -146,6 +225,15 @@ async fn run() -> Result<()> {
         );
     }
 
+    if !cfg.questdb.pg_addr.is_empty() {
+        match ensure_questdb_schema(&cfg.questdb.pg_addr) {
+            Ok(()) => info!("QuestDB schema initialized via PG wire"),
+            Err(e) => warn!(error = %e, "QuestDB DDL init failed — ILP auto-create fallback"),
+        }
+    } else {
+        info!("questdb.pg_addr empty — skipping DDL init, relying on ILP auto-create");
+    }
+
     let sink = QuestDbSink::new(&cfg.questdb).context("QuestDbSink init failed")?;
 
     // SUB → inproc queue → exporter.
@@ -186,5 +274,142 @@ async fn main() -> ExitCode {
             error!(error = %format!("{e:#}"), "questdb-export fatal");
             ExitCode::from(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hft_config::QuestDbConfig;
+    use hft_time::Stamp;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn rand_suffix() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
+    }
+
+    fn test_sink() -> (QuestDbSink, PathBuf) {
+        let spool_dir = std::env::temp_dir().join(format!(
+            "questdb-export-test-{}-{}",
+            std::process::id(),
+            rand_suffix()
+        ));
+        std::fs::create_dir_all(&spool_dir).expect("create spool dir");
+        let sink = QuestDbSink::new(&QuestDbConfig {
+            ilp_addr: String::new(),
+            pg_addr: String::new(),
+            batch_rows: 100,
+            batch_ms: 1000,
+            spool_dir: spool_dir.clone(),
+        })
+        .expect("test sink");
+        (sink, spool_dir)
+    }
+
+    fn shutdown_and_read_lines(sink: QuestDbSink, spool_dir: &PathBuf) -> Vec<String> {
+        let _ = sink.shutdown();
+        let mut lines = Vec::new();
+        let entries = std::fs::read_dir(spool_dir).expect("read spool dir");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("ilp") {
+                continue;
+            }
+            let body = std::fs::read_to_string(&path).expect("read spool file");
+            lines.extend(body.lines().map(ToOwned::to_owned));
+        }
+        lines
+    }
+
+    #[test]
+    fn latency_deltas_all_stages() {
+        let (mut sink, spool_dir) = test_sink();
+        let stamps = LatencyStamps {
+            exchange_server: Stamp {
+                wall_ms: 100,
+                mono_ns: 0,
+            },
+            ws_received: Stamp {
+                wall_ms: 110,
+                mono_ns: 1_000,
+            },
+            serialized: Stamp {
+                wall_ms: 111,
+                mono_ns: 2_000,
+            },
+            pushed: Stamp {
+                wall_ms: 112,
+                mono_ns: 3_000,
+            },
+            published: Stamp {
+                wall_ms: 113,
+                mono_ns: 4_000,
+            },
+            subscribed: Stamp {
+                wall_ms: 114,
+                mono_ns: 5_000,
+            },
+            consumed: Stamp {
+                wall_ms: 120,
+                mono_ns: 6_000,
+            },
+        };
+
+        push_latency_deltas(&mut sink, &stamps);
+
+        let lines = shutdown_and_read_lines(sink, &spool_dir);
+        assert_eq!(lines.len(), 7);
+        assert!(lines.iter().any(|line| line.contains("stage=ws_received")));
+        assert!(lines.iter().any(|line| line.contains("stage=serialized")));
+        assert!(lines.iter().any(|line| line.contains("stage=pushed")));
+        assert!(lines.iter().any(|line| line.contains("stage=published")));
+        assert!(lines.iter().any(|line| line.contains("stage=subscribed")));
+        assert!(lines.iter().any(|line| line.contains("stage=consumed")));
+        assert!(lines.iter().any(|line| line.contains("stage=e2e")));
+    }
+
+    #[test]
+    fn latency_deltas_partial_stamps() {
+        let (mut sink, spool_dir) = test_sink();
+        let stamps = LatencyStamps {
+            ws_received: Stamp {
+                wall_ms: 110,
+                mono_ns: 1_000,
+            },
+            subscribed: Stamp {
+                wall_ms: 114,
+                mono_ns: 5_000,
+            },
+            consumed: Stamp {
+                wall_ms: 120,
+                mono_ns: 6_000,
+            },
+            ..LatencyStamps::new()
+        };
+
+        push_latency_deltas(&mut sink, &stamps);
+
+        let lines = shutdown_and_read_lines(sink, &spool_dir);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("stage=consumed"));
+    }
+
+    #[test]
+    fn latency_deltas_empty_stamps() {
+        let (mut sink, spool_dir) = test_sink();
+        push_latency_deltas(&mut sink, &LatencyStamps::new());
+        let lines = shutdown_and_read_lines(sink, &spool_dir);
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn ensure_schema_invalid_addr() {
+        let err = ensure_questdb_schema("not-a-hostport").expect_err("invalid addr must fail");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("invalid pg_addr format"));
     }
 }

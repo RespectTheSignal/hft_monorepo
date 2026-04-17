@@ -26,3 +26,4 @@ clap = { workspace = true }
 tracing = { workspace = true }
 mimalloc = { workspace = true }
 ctrlc = { workspace = true }
+postgres = "0.19"

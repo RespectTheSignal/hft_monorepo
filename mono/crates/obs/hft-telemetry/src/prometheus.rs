@@ -15,6 +15,7 @@ fn stage_name(stage: Stage) -> &'static str {
         Stage::Published => "published",
         Stage::Subscribed => "subscribed",
         Stage::Consumed => "consumed",
+        Stage::EndToEnd => "e2e",
     }
 }
 

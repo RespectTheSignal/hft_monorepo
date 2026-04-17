@@ -331,9 +331,9 @@ Funding / EMA / misc: ✅
 - [x] SUB subscribe `""` (모든 토픽) → `tools/questdb-export` ✅
 - [x] 100ms batch flush → `hft-storage::QuestDbSink::maybe_flush` ✅
 - [x] SIGTERM graceful: drain + `force_flush` → `QuestDbSink::shutdown` ✅
-- [ ] QuestDB PG wire (8812) schema init on startup **TODO**: 현재는 ILP 만 사용 (테이블 자동생성). 명시적 DDL init 미구현.
+- [x] QuestDB PG wire (8812) schema init on startup → `tools/questdb-export::ensure_questdb_schema` ✅
 - [x] ILP retry + spool file on connect failure (publisher 에 backpressure 없음) → `hft-storage::SpoolWriter` (disabled()/append/flush/replay) + `IlpConnection` 지수 백오프 (100ms→30s) ✅
-- [ ] `latency_stages` 테이블 — LatencyStamps 7 필드 모두 기록 **TODO**: 현재 BookTicker/Trade 만 기록. Stage ILP 인코더는 `hft-storage::IlpEncoder::append_latency` 로 준비됐으나 subscriber 결선 안 됨.
+- [x] `latency_stages` 테이블 — LatencyStamps 6개 인접 stage delta + `e2e` 기록 → `tools/questdb-export::push_latency_deltas` ✅
 
 ### 6.2 Export CLI (bin `questdb-export-cli`?)
 - [x] `--url` / `$QUESTDB_URL` ✅

@@ -287,6 +287,7 @@ impl LatencyStamps {
             Stage::Published => self.published,
             Stage::Subscribed => self.subscribed,
             Stage::Consumed => self.consumed,
+            Stage::EndToEnd => Stamp::default(),
         }
     }
 
@@ -301,6 +302,7 @@ impl LatencyStamps {
             Stage::Published => self.published = s,
             Stage::Subscribed => self.subscribed = s,
             Stage::Consumed => self.consumed = s,
+            Stage::EndToEnd => {}
         }
     }
 }
@@ -322,6 +324,10 @@ pub enum Stage {
     Subscribed,
     /// 7) 소비자 처리 시작.
     Consumed,
+    /// 논리적 end-to-end 샘플 (exchange_server → consumed).
+    ///
+    /// 실제 stamp slot 은 없고, latency export 시 synthetic stage 로만 사용한다.
+    EndToEnd,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
