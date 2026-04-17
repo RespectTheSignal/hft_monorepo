@@ -55,13 +55,13 @@
 - [x] Cleanup: mock Gate REST style strategy↔gateway result roundtrip integration test 추가 (`crates/testing/integration/tests/e2e_strategy_result.rs`)
 - [ ] ADR-0004 draft: SHM result ring / heartbeat / fill-stream 확장 범위 (현재 ZMQ reverse path 만 완료)
 - [x] Heartbeat: Gateway → Strategy liveness (STATUS_HEARTBEAT=255, GatewayLiveness, safe mode order drop)
-- [ ] Naming cleanup: `shared_path` 드리프트 정렬 (TBD, 별도 PR)
+- [~] Naming cleanup: `shared_path` 드리프트 정렬 — 드리프트 없음 확인, `build_v2_backing` 중복은 의도적 서비스 분리
 - [~] `ShmOrderInvalid` → `OrderGatewayInvalidTotal` rename + `OrderGatewayInvalidWire` subset 분리 (ZMQ ingress invalid-wire path 는 `OrderGatewayInvalidWire` 로 이동 완료, SHM total/dashboard rename TBD)
 - [ ] price regime + symbol-meta layer 정리 (`OrderFrame.price: i64`, Python `price_raw`, executor quantize 책임)
-- [ ] `Clock::epoch_ns()` 또는 `decision_ts_ns` 필드 추가 — queue 대기 지연 분리 관측
+- [x] `Clock::epoch_ns()` 추가 + services 의 `wall_clock_epoch_ns` 중복 제거
 - [~] `ZmqDropped` → `StrategyOrderChannelFull` rename (strategy order channel full path 는 이동 완료, dashboard/migration 정리는 별도)
-- [ ] `Strategy::label()` vs `tag()` 역할 정리 (logging/display vs wire text_tag)
-- [ ] `order_egress.shm.ring_capacity` 와 shared-region layout spec 단일화 (현재는 mismatch guard만 존재)
+- [x] `Strategy::label()` vs `tag()` 역할 정리 — `label` 은 로깅용 대문자, `tag` 는 wire 용 소문자 `&'static str`
+- [x] `order_egress.shm.ring_capacity` 와 shared-region layout spec 단일화 — `order_egress.shm.ring_capacity` 제거, `shm.order_ring_capacity` 를 single source of truth 로 사용
 - [ ] ADR-0005: SHM/ZMQ wire format 단일화 (`slot.seq` 탈결합, cancel wire, PyO3 v2 API)
 
 ---

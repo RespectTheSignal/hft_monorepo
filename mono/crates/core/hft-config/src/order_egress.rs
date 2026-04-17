@@ -55,19 +55,6 @@ impl OrderEgressConfig {
             };
         }
 
-        ensure!(
-            self.shm.ring_capacity > 0,
-            "order_egress.shm.ring_capacity must be > 0"
-        );
-        ensure!(
-            self.shm.ring_capacity.is_power_of_two(),
-            "order_egress.shm.ring_capacity must be a power of two"
-        );
-        ensure!(
-            self.shm.ring_capacity <= (1 << 20),
-            "order_egress.shm.ring_capacity must be <= 1<<20"
-        );
-
         if matches!(self.mode, OrderEgressMode::Zmq) {
             ensure!(
                 self.zmq.is_some(),
@@ -167,23 +154,12 @@ pub enum OrderEgressMode {
 /// SHM 기반 주문 egress 튜닝.
 ///
 /// shared path / role / vm_id 는 기존 [`crate::ShmConfig`] 에서 재사용하고,
-/// 여기서는 order ring 선택과 용량만 다룬다.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// 여기서는 order ring 선택만 다룬다.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct ShmOrderEgressConfig {
     /// N 개의 SPSC ring 중 이 전략이 쓰는 ring index.
     pub strategy_ring_id: u32,
-    /// ring capacity. 2의 거듭제곱이어야 한다.
-    pub ring_capacity: usize,
-}
-
-impl Default for ShmOrderEgressConfig {
-    fn default() -> Self {
-        Self {
-            strategy_ring_id: 0,
-            ring_capacity: 1024,
-        }
-    }
 }
 
 /// ZMQ fallback 전용 설정.
@@ -255,7 +231,6 @@ mod tests {
         let cfg = OrderEgressConfig::default();
         assert_eq!(cfg.mode, OrderEgressMode::Shm);
         assert_eq!(cfg.shm.strategy_ring_id, 0);
-        assert_eq!(cfg.shm.ring_capacity, 1024);
         assert!(cfg.zmq.is_none());
         assert!(cfg.result_zmq_connect.is_none());
         assert_eq!(cfg.heartbeat_timeout_ms, 5000);
@@ -274,10 +249,7 @@ mod tests {
     fn order_egress_serde_roundtrip_full() {
         let cfg = OrderEgressConfig {
             mode: OrderEgressMode::Zmq,
-            shm: ShmOrderEgressConfig {
-                strategy_ring_id: 7,
-                ring_capacity: 4096,
-            },
+            shm: ShmOrderEgressConfig { strategy_ring_id: 7 },
             zmq: Some(ZmqOrderEgressConfig {
                 endpoint: "tcp://infra-vm:5560".into(),
                 send_hwm: 2048,
@@ -308,22 +280,6 @@ mod tests {
         )
         .expect_err("unknown field must fail");
         assert!(err.to_string().contains("unknown field"));
-    }
-
-    #[test]
-    fn order_egress_ring_capacity_is_power_of_two_validation() {
-        let mut cfg = OrderEgressConfig::default();
-        cfg.shm.ring_capacity = 0;
-        assert!(cfg.validate().is_err());
-
-        cfg.shm.ring_capacity = 1000;
-        assert!(cfg.validate().is_err());
-
-        cfg.shm.ring_capacity = 1 << 21;
-        assert!(cfg.validate().is_err());
-
-        cfg.shm.ring_capacity = 1 << 10;
-        cfg.validate().expect("power-of-two capacity");
     }
 
     #[test]

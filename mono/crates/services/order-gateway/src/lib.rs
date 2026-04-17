@@ -50,6 +50,7 @@ use crossbeam_channel::{Receiver, Sender, TrySendError};
 use hft_exchange_api::{CancellationToken, ExchangeExecutor, OrderAck, OrderRequest};
 use hft_protocol::order_wire::{OrderResultWire, STATUS_ACCEPTED, STATUS_REJECTED};
 use hft_telemetry::{counter_inc, CounterKey};
+use hft_time::{Clock, SystemClock};
 use hft_types::ExchangeId;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
@@ -487,15 +488,6 @@ async fn place_with_retry(
     Err(last_err.unwrap_or_else(|| anyhow!("place_order failed (no error captured)")))
 }
 
-fn wall_clock_epoch_ns() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
-}
-
 fn encode_zero_padded<const N: usize>(value: &str) -> [u8; N] {
     let mut out = [0u8; N];
     let bytes = value.as_bytes();
@@ -517,7 +509,7 @@ fn emit_result_wire(
 
     let wire = OrderResultWire {
         client_seq: req.client_seq,
-        gateway_ts_ns: wall_clock_epoch_ns(),
+        gateway_ts_ns: SystemClock::default().epoch_ns(),
         filled_size: 0,
         reject_code: 0,
         status,

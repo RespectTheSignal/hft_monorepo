@@ -39,7 +39,7 @@
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{Receiver, Sender};
@@ -60,6 +60,7 @@ use hft_strategy_runtime::{
     AccountMembership, LastOrderStore, OrderRateTracker, PositionCache, PositionOracleImpl,
     SymbolMetaCache,
 };
+use hft_time::{Clock, SystemClock};
 use hft_types::ExchangeId;
 use hft_zmq::Context as ZmqContext;
 use subscriber::InprocQueue;
@@ -341,12 +342,7 @@ fn spawn_rate_decay(
 }
 
 fn chrono_now_ms() -> i64 {
-    // SystemTime epoch ms — 음수 불가능, overflow 실용상 없음.
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    SystemClock::default().now_ms()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -410,13 +406,6 @@ fn build_v2_backing(cfg: &AppConfig) -> Result<Backing> {
 }
 
 fn build_shared_layout_spec(cfg: &AppConfig) -> Result<LayoutSpec> {
-    if cfg.order_egress.shm.ring_capacity as u64 != cfg.shm.order_ring_capacity {
-        anyhow::bail!(
-            "order_egress.shm.ring_capacity ({}) must match shm.order_ring_capacity ({}) until publisher/order-gateway also migrate",
-            cfg.order_egress.shm.ring_capacity,
-            cfg.shm.order_ring_capacity
-        );
-    }
     Ok(LayoutSpec {
         quote_slot_count: cfg.shm.quote_slot_count,
         trade_ring_capacity: cfg.shm.trade_ring_capacity,
@@ -483,13 +472,6 @@ fn build_drain_egress(cfg: &AppConfig) -> Result<DrainEgress> {
             })
         }
     }
-}
-
-fn wall_clock_epoch_ns() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
 }
 
 /// gateway heartbeat 기반 liveness 추적.
@@ -677,7 +659,8 @@ fn spawn_order_drain(
     cancel: CancellationToken,
     liveness: Option<GatewayLiveness>,
 ) -> JoinHandle<()> {
-    spawn_order_drain_with_now(rx, egress, cancel, wall_clock_epoch_ns, liveness)
+    let clock = SystemClock::default();
+    spawn_order_drain_with_now(rx, egress, cancel, move || clock.epoch_ns(), liveness)
 }
 
 fn spawn_order_drain_with_now<F>(
@@ -1106,7 +1089,6 @@ mod tests {
         cfg.shm.symbol_table_capacity = spec.symtab_capacity;
         cfg.shm.order_ring_capacity = spec.order_ring_capacity;
         cfg.order_egress.mode = OrderEgressMode::Shm;
-        cfg.order_egress.shm.ring_capacity = spec.order_ring_capacity as usize;
 
         let egress = build_drain_egress(&cfg).expect("build shm drain egress");
         let cancel = CancellationToken::new();

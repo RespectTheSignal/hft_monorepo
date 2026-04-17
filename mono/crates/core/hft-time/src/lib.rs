@@ -33,6 +33,17 @@ pub trait Clock: Send + Sync {
 
     /// monotonic nanos. stage 간 delta 계산 전용 (벽시계 점프 영향 X).
     fn now_nanos(&self) -> u64;
+
+    /// UTC epoch nanoseconds.
+    ///
+    /// `now_ms()` 는 ms 정밀도, `now_nanos()` 는 monotonic 전용이다.
+    /// 주문 timestamp 처럼 wall-clock epoch ns 가 필요한 곳은 이 메서드를 사용한다.
+    fn epoch_ns(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -126,6 +137,9 @@ impl Clock for MockClock {
     }
     fn now_nanos(&self) -> u64 {
         self.nanos.load(Ordering::SeqCst)
+    }
+    fn epoch_ns(&self) -> u64 {
+        self.now_ms() as u64 * 1_000_000
     }
 }
 
@@ -372,5 +386,21 @@ mod tests {
         }
         let b = c.now_nanos();
         assert!(b >= a);
+    }
+
+    #[test]
+    fn system_clock_epoch_ns_is_reasonable() {
+        let clock = SystemClock::new();
+        let ns = clock.epoch_ns();
+        assert!(ns > 1_767_225_600_000_000_000);
+        let ms_as_ns = clock.now_ms() as u64 * 1_000_000;
+        assert!((ns as i64 - ms_as_ns as i64).unsigned_abs() < 1_000_000_000);
+    }
+
+    #[test]
+    fn mock_clock_epoch_ns_matches_ms() {
+        let mock = MockClock::new(1_700_000_000_000, 0);
+        let ns = mock.epoch_ns();
+        assert_eq!(ns, 1_700_000_000_000 * 1_000_000);
     }
 }

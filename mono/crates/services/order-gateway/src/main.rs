@@ -42,6 +42,7 @@ use anyhow::{anyhow, Context, Result};
 use hft_exchange_api::{CancellationToken, ExchangeExecutor};
 use hft_protocol::order_wire::{OrderResultWire, ORDER_RESULT_WIRE_SIZE};
 use hft_exchange_rest::Credentials;
+use hft_time::{Clock, SystemClock};
 use hft_types::ExchangeId;
 use hft_telemetry::{counter_inc, CounterKey};
 use hft_zmq::{Context as ZmqContext, SendOutcome};
@@ -426,7 +427,7 @@ fn spawn_heartbeat_emitter(
                 biased;
                 _ = cancel.cancelled() => break,
                 _ = ticker.tick() => {
-                    let ts = wall_clock_epoch_ns();
+                    let ts = SystemClock::default().epoch_ns();
                     let wire = hft_protocol::order_wire::build_heartbeat_wire(ts);
                     match result_tx.try_send(wire) {
                         Ok(()) => {
@@ -446,13 +447,6 @@ fn spawn_heartbeat_emitter(
 
         info!(target: "order_gateway::heartbeat", "heartbeat emitter stopped");
     })
-}
-
-fn wall_clock_epoch_ns() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
 }
 
 /// 실제 run 로직. 에러는 main 에서 exitcode 로 변환.

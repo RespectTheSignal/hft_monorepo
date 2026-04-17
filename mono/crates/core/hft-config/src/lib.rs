@@ -900,7 +900,6 @@ mod tests {
         assert_eq!(d.warmup.events, 5_000);
         assert_eq!(d.supabase.refresh_interval_s, 300);
         assert_eq!(d.order_egress.mode, order_egress::OrderEgressMode::Shm);
-        assert_eq!(d.order_egress.shm.ring_capacity, 1024);
     }
 
     #[test]
@@ -1356,7 +1355,6 @@ mod tests {
         clear_hft_env();
         std::env::set_var("HFT_ORDER_EGRESS__MODE", "zmq");
         std::env::set_var("HFT_ORDER_EGRESS__SHM__STRATEGY_RING_ID", "3");
-        std::env::set_var("HFT_ORDER_EGRESS__SHM__RING_CAPACITY", "2048");
         std::env::set_var("HFT_ORDER_EGRESS__ZMQ__ENDPOINT", "tcp://infra-vm:5560");
         std::env::set_var("HFT_ORDER_EGRESS__ZMQ__SEND_HWM", "4096");
         std::env::set_var("HFT_ORDER_EGRESS__BACKPRESSURE__MODE", "retry");
@@ -1378,7 +1376,6 @@ mod tests {
         let cfg = load_from_toml_str(toml).unwrap();
         assert_eq!(cfg.order_egress.mode, order_egress::OrderEgressMode::Zmq);
         assert_eq!(cfg.order_egress.shm.strategy_ring_id, 3);
-        assert_eq!(cfg.order_egress.shm.ring_capacity, 2048);
         let zmq = cfg.order_egress.zmq.as_ref().expect("zmq config");
         assert_eq!(zmq.endpoint, "tcp://infra-vm:5560");
         assert_eq!(zmq.send_hwm, 4096);
