@@ -729,6 +729,7 @@ mod tests {
                 linger_ms: 0,
                 order_ingress_bind: None,
                 result_egress_bind: None,
+                result_heartbeat_interval_ms: 0,
             },
             ..AppConfig::default()
         });

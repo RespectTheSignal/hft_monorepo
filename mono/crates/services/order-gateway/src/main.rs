@@ -43,6 +43,7 @@ use hft_exchange_api::{CancellationToken, ExchangeExecutor};
 use hft_protocol::order_wire::{OrderResultWire, ORDER_RESULT_WIRE_SIZE};
 use hft_exchange_rest::Credentials;
 use hft_types::ExchangeId;
+use hft_telemetry::{counter_inc, CounterKey};
 use hft_zmq::{Context as ZmqContext, SendOutcome};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
@@ -405,6 +406,55 @@ fn build_zmq_result_egress(
     }))
 }
 
+/// gateway → strategy heartbeat emitter.
+///
+/// `result_tx` 에 `STATUS_HEARTBEAT` wire 를 주기적으로 보낸다.
+/// 기존 result egress PUSH 소켓이 이를 strategy 로 전달한다.
+/// heartbeat 은 `result_tx` 가 full 이면 skip — backpressure 전파 불필요.
+fn spawn_heartbeat_emitter(
+    result_tx: crossbeam_channel::Sender<OrderResultWire>,
+    interval_ms: u64,
+    cancel: CancellationToken,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let period = std::time::Duration::from_millis(interval_ms);
+        let mut ticker = tokio::time::interval(period);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => break,
+                _ = ticker.tick() => {
+                    let ts = wall_clock_epoch_ns();
+                    let wire = hft_protocol::order_wire::build_heartbeat_wire(ts);
+                    match result_tx.try_send(wire) {
+                        Ok(()) => {
+                            counter_inc(CounterKey::GatewayHeartbeatEmitted);
+                        }
+                        Err(crossbeam_channel::TrySendError::Full(_)) => {
+                            tracing::debug!(
+                                target: "order_gateway::heartbeat",
+                                "heartbeat skipped: result_tx full"
+                            );
+                        }
+                        Err(crossbeam_channel::TrySendError::Disconnected(_)) => break,
+                    }
+                }
+            }
+        }
+
+        info!(target: "order_gateway::heartbeat", "heartbeat emitter stopped");
+    })
+}
+
+fn wall_clock_epoch_ns() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
 /// 실제 run 로직. 에러는 main 에서 exitcode 로 변환.
 async fn run() -> Result<()> {
     // 1) config
@@ -442,6 +492,7 @@ async fn run() -> Result<()> {
         }
         None => (None, None),
     };
+    let result_tx_for_hb = result_tx.clone();
 
     // 5) router start — ack 소비자는 없으므로 None.
     let handle = start_with_arc(
@@ -463,9 +514,24 @@ async fn run() -> Result<()> {
         handle.cancel.clone(),
     );
     let zmq_handle = build_zmq_ingress(&cfg, req_tx.clone(), handle.cancel.clone());
-    let result_handle = result_rx
-        .map(|rx| build_zmq_result_egress(&cfg, rx, handle.cancel.clone()))
-        .flatten();
+    let result_handle = result_rx.and_then(|rx| build_zmq_result_egress(&cfg, rx, handle.cancel.clone()));
+    let heartbeat_handle = match (&result_tx_for_hb, cfg.zmq.result_heartbeat_interval_ms) {
+        (Some(tx), interval) if interval > 0 => {
+            info!(
+                interval_ms = interval,
+                "heartbeat emitter starting on result channel"
+            );
+            Some(spawn_heartbeat_emitter(
+                tx.clone(),
+                interval,
+                handle.cancel.clone(),
+            ))
+        }
+        _ => {
+            info!("heartbeat emitter disabled (no result_tx or interval=0)");
+            None
+        }
+    };
 
     // 7) signal handler (CancellationToken 만 clone 해서 전달 — handle 은 join 으로 소비).
     install_signal_handler(handle.cancel.clone());
@@ -481,6 +547,9 @@ async fn run() -> Result<()> {
         let _ = h.await;
     }
     if let Some(h) = result_handle {
+        let _ = h.await;
+    }
+    if let Some(h) = heartbeat_handle {
         let _ = h.await;
     }
 

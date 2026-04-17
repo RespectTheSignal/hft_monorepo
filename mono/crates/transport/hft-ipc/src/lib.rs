@@ -302,6 +302,7 @@ mod tests {
             sub_endpoint: String::new(),
             order_ingress_bind: None,
             result_egress_bind: None,
+            result_heartbeat_interval_ms: 0,
         }
     }
 

@@ -37,7 +37,7 @@
 #![deny(rust_2018_idioms)]
 
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -49,7 +49,8 @@ use hft_order_egress::{
     PolicyOrderEgress, ShmOrderEgress, SubmitError, SubmitOutcome, ZmqOrderEgress,
 };
 use hft_protocol::order_wire::{
-    OrderResultWire, WireError, ORDER_RESULT_WIRE_SIZE, STATUS_ACCEPTED, STATUS_REJECTED,
+    is_heartbeat_wire, OrderResultWire, WireError, ORDER_RESULT_WIRE_SIZE, STATUS_ACCEPTED,
+    STATUS_HEARTBEAT, STATUS_REJECTED,
 };
 use hft_exchange_rest::{Credentials, RestClient};
 use hft_shm::{Backing, LayoutSpec, Role, SharedRegion, SubKind, SymbolTable};
@@ -491,18 +492,72 @@ fn wall_clock_epoch_ns() -> u64 {
         .unwrap_or(0)
 }
 
+/// gateway heartbeat 기반 liveness 추적.
+///
+/// `Arc<AtomicU64>` 에 마지막 heartbeat epoch_ns 를 저장한다.
+/// - 값 0 은 "아직 heartbeat 수신 전" — startup grace 로 alive 간주.
+/// - `is_alive(now_ns)` 가 false 면 strategy 가 safe mode 진입.
+#[derive(Clone)]
+struct GatewayLiveness {
+    last_heartbeat_ns: Arc<AtomicU64>,
+    timeout_ns: u64,
+}
+
+impl GatewayLiveness {
+    fn new(timeout_ms: u64) -> Self {
+        Self {
+            last_heartbeat_ns: Arc::new(AtomicU64::new(0)),
+            timeout_ns: timeout_ms.saturating_mul(1_000_000),
+        }
+    }
+
+    /// heartbeat 수신 시 호출.
+    fn touch(&self, ts_ns: u64) {
+        self.last_heartbeat_ns.store(ts_ns, Ordering::Release);
+    }
+
+    /// gateway 가 살아있는지 판별.
+    /// - timeout_ns == 0: 검사 비활성, 항상 true.
+    /// - last == 0: startup grace, 항상 true.
+    /// - otherwise: now - last <= timeout.
+    fn is_alive(&self, now_ns: u64) -> bool {
+        if self.timeout_ns == 0 {
+            return true;
+        }
+        let last = self.last_heartbeat_ns.load(Ordering::Acquire);
+        if last == 0 {
+            return true;
+        }
+        now_ns.saturating_sub(last) <= self.timeout_ns
+    }
+}
+
 fn decode_zero_padded_string(bytes: &[u8]) -> String {
     let len = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
     String::from_utf8_lossy(&bytes[..len]).into_owned()
 }
 
-fn decode_order_result_info(buf: &[u8]) -> Result<OrderResultInfo> {
+enum ResultOrHeartbeat {
+    Result(OrderResultInfo),
+    Heartbeat(u64),
+}
+
+fn decode_order_result_info_or_heartbeat(buf: &[u8]) -> Result<ResultOrHeartbeat> {
     if buf.len() != ORDER_RESULT_WIRE_SIZE {
         anyhow::bail!("unexpected order result wire size: {}", buf.len());
     }
 
     let mut raw = [0u8; ORDER_RESULT_WIRE_SIZE];
     raw.copy_from_slice(buf);
+
+    if is_heartbeat_wire(&raw) {
+        let wire = OrderResultWire::decode(&raw).map_err(|e: WireError| anyhow!(e))?;
+        if wire.status != STATUS_HEARTBEAT {
+            anyhow::bail!("heartbeat fast-path disagrees with decoded status");
+        }
+        return Ok(ResultOrHeartbeat::Heartbeat(wire.gateway_ts_ns));
+    }
+
     let wire = OrderResultWire::decode(&raw).map_err(|e: WireError| anyhow!(e))?;
     let status = match wire.status {
         STATUS_ACCEPTED => ResultStatus::Accepted,
@@ -510,13 +565,13 @@ fn decode_order_result_info(buf: &[u8]) -> Result<OrderResultInfo> {
         other => anyhow::bail!("unsupported result status={other} for strategy listener"),
     };
 
-    Ok(OrderResultInfo {
+    Ok(ResultOrHeartbeat::Result(OrderResultInfo {
         client_seq: wire.client_seq,
         status,
         exchange_order_id: decode_zero_padded_string(&wire.exchange_order_id),
         gateway_ts_ns: wire.gateway_ts_ns,
         text_tag: decode_zero_padded_string(&wire.text_tag),
-    })
+    }))
 }
 
 fn spawn_result_listener(
@@ -524,6 +579,7 @@ fn spawn_result_listener(
     zmq_cfg: &hft_config::ZmqConfig,
     control_tx: Sender<StrategyControl>,
     cancel: CancellationToken,
+    liveness: Option<GatewayLiveness>,
 ) -> Result<JoinHandle<()>> {
     spawn_result_listener_with_context(
         ZmqContext::new(),
@@ -531,6 +587,7 @@ fn spawn_result_listener(
         zmq_cfg.clone(),
         control_tx,
         cancel,
+        liveness,
     )
 }
 
@@ -540,6 +597,7 @@ fn spawn_result_listener_with_context(
     zmq_cfg: hft_config::ZmqConfig,
     control_tx: Sender<StrategyControl>,
     cancel: CancellationToken,
+    liveness: Option<GatewayLiveness>,
 ) -> Result<JoinHandle<()>> {
     let endpoint = endpoint.to_string();
     Ok(tokio::task::spawn_blocking(move || {
@@ -567,8 +625,13 @@ fn spawn_result_listener_with_context(
             }
 
             match pull.recv_bytes_timeout(50) {
-                Ok(Some(buf)) => match decode_order_result_info(&buf) {
-                    Ok(info) => {
+                Ok(Some(buf)) => match decode_order_result_info_or_heartbeat(&buf) {
+                    Ok(ResultOrHeartbeat::Heartbeat(ts_ns)) => {
+                        if let Some(ref lv) = liveness {
+                            lv.touch(ts_ns);
+                        }
+                    }
+                    Ok(ResultOrHeartbeat::Result(info)) => {
                         if let Err(e) = control_tx.try_send(StrategyControl::OrderResult(info)) {
                             match e {
                                 crossbeam_channel::TrySendError::Full(_) => {
@@ -608,8 +671,13 @@ fn spawn_result_listener_with_context(
     }))
 }
 
-fn spawn_order_drain(rx: Receiver<OrderEnvelope>, egress: DrainEgress, cancel: CancellationToken) -> JoinHandle<()> {
-    spawn_order_drain_with_now(rx, egress, cancel, wall_clock_epoch_ns)
+fn spawn_order_drain(
+    rx: Receiver<OrderEnvelope>,
+    egress: DrainEgress,
+    cancel: CancellationToken,
+    liveness: Option<GatewayLiveness>,
+) -> JoinHandle<()> {
+    spawn_order_drain_with_now(rx, egress, cancel, wall_clock_epoch_ns, liveness)
 }
 
 fn spawn_order_drain_with_now<F>(
@@ -617,6 +685,7 @@ fn spawn_order_drain_with_now<F>(
     egress: DrainEgress,
     cancel: CancellationToken,
     now_ns: F,
+    liveness: Option<GatewayLiveness>,
 ) -> JoinHandle<()>
 where
     F: Fn() -> u64 + Send + 'static,
@@ -629,6 +698,19 @@ where
             match rx.recv_timeout(Duration::from_millis(50)) {
                 Ok((req, seed)) => {
                     let origin_ts_ns = now_ns();
+
+                    if let Some(ref lv) = liveness {
+                        if !lv.is_alive(origin_ts_ns) {
+                            counter_inc(CounterKey::StrategyGatewayStale);
+                            warn!(
+                                target: "strategy::orders",
+                                client_seq = seed.client_seq,
+                                "gateway heartbeat stale — dropping order (safe mode)"
+                            );
+                            continue;
+                        }
+                    }
+
                     let mut req = req;
                     req.reduce_only = seed.reduce_only;
                     req.client_seq = seed.client_seq;
@@ -777,7 +859,22 @@ async fn bring_up_full(
     let rate_window_ms: i64 = 3_600_000; // 1h 상한 — rate tracker 는 시간창 밖만 버린다.
     let rate_decay = spawn_rate_decay(rate, aux_cancel.clone(), decay_period, rate_window_ms);
 
-    let order_drain = spawn_order_drain(orders_rx, drain_egress, aux_cancel.clone());
+    let liveness = if cfg.order_egress.heartbeat_timeout_ms > 0
+        && cfg.order_egress.result_zmq_connect.is_some()
+    {
+        Some(GatewayLiveness::new(
+            cfg.order_egress.heartbeat_timeout_ms,
+        ))
+    } else {
+        None
+    };
+
+    let order_drain = spawn_order_drain(
+        orders_rx,
+        drain_egress,
+        aux_cancel.clone(),
+        liveness.clone(),
+    );
     let result_listener = match cfg.order_egress.result_zmq_connect.as_deref() {
         Some(endpoint) => Some(
             spawn_result_listener(
@@ -785,6 +882,7 @@ async fn bring_up_full(
                 &cfg.zmq,
                 strategy_handle.control_tx.clone(),
                 aux_cancel.clone(),
+                liveness.clone(),
             )
             .context("spawn result listener")?,
         ),
@@ -1013,7 +1111,7 @@ mod tests {
         let egress = build_drain_egress(&cfg).expect("build shm drain egress");
         let cancel = CancellationToken::new();
         let (tx, rx) = crossbeam_channel::bounded(4);
-        let handle = spawn_order_drain_with_now(rx, egress, cancel.clone(), || 123);
+        let handle = spawn_order_drain_with_now(rx, egress, cancel.clone(), || 123, None);
 
         tx.send((sample_req(), sample_seed())).unwrap();
         drop(tx);
@@ -1060,7 +1158,7 @@ mod tests {
         let egress = build_drain_egress(&cfg).expect("build zmq drain egress");
         let cancel = CancellationToken::new();
         let (tx, rx) = crossbeam_channel::bounded(4);
-        let handle = spawn_order_drain_with_now(rx, egress, cancel.clone(), || 456);
+        let handle = spawn_order_drain_with_now(rx, egress, cancel.clone(), || 456, None);
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         tx.send((sample_req(), sample_seed())).unwrap();
@@ -1103,11 +1201,72 @@ mod tests {
         let cancel = CancellationToken::new();
         let (tx, rx) = crossbeam_channel::bounded(1);
         drop(tx);
-        let handle = spawn_order_drain_with_now(rx, egress, cancel, || 999);
+        let handle = spawn_order_drain_with_now(rx, egress, cancel, || 999, None);
         tokio::time::timeout(Duration::from_secs(1), handle)
             .await
             .expect("drain exit timeout")
             .unwrap();
+    }
+
+    #[test]
+    fn gateway_liveness_startup_grace() {
+        let lv = GatewayLiveness::new(5000);
+        assert!(lv.is_alive(1_000_000_000));
+    }
+
+    #[test]
+    fn gateway_liveness_alive_within_timeout() {
+        let lv = GatewayLiveness::new(5000);
+        lv.touch(100_000_000_000);
+        assert!(lv.is_alive(104_000_000_000));
+    }
+
+    #[test]
+    fn gateway_liveness_stale_after_timeout() {
+        let lv = GatewayLiveness::new(5000);
+        lv.touch(100_000_000_000);
+        assert!(!lv.is_alive(106_000_000_000));
+    }
+
+    #[test]
+    fn gateway_liveness_disabled_when_zero() {
+        let lv = GatewayLiveness::new(0);
+        assert!(lv.is_alive(999_000_000_000));
+    }
+
+    #[tokio::test]
+    async fn result_listener_heartbeat_updates_liveness() {
+        let ctx = hft_zmq::Context::new();
+        let endpoint = free_tcp_endpoint();
+        let push = bind_push(&ctx, &endpoint);
+        let (control_tx, control_rx) = crossbeam_channel::bounded(8);
+        let cancel = CancellationToken::new();
+        let lv = GatewayLiveness::new(5000);
+
+        let handle = spawn_result_listener_with_context(
+            ctx.clone(),
+            &endpoint,
+            ZmqConfig::default(),
+            control_tx,
+            cancel.clone(),
+            Some(lv.clone()),
+        )
+        .expect("spawn result listener");
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let wire = hft_protocol::order_wire::build_heartbeat_wire(42_000_000_000);
+        let mut buf = [0u8; ORDER_RESULT_WIRE_SIZE];
+        wire.encode(&mut buf);
+        push.send(&buf[..], 0).expect("push heartbeat");
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        assert_eq!(lv.last_heartbeat_ns.load(Ordering::Acquire), 42_000_000_000);
+        assert!(control_rx.try_recv().is_err());
+
+        cancel.cancel();
+        let _ = handle.await;
     }
 
     #[tokio::test]
@@ -1123,6 +1282,7 @@ mod tests {
             ZmqConfig::default(),
             control_tx,
             cancel.clone(),
+            None,
         )
         .expect("spawn result listener");
 
@@ -1175,6 +1335,7 @@ mod tests {
             ZmqConfig::default(),
             control_tx,
             cancel.clone(),
+            None,
         )
         .expect("spawn result listener");
 
@@ -1255,6 +1416,7 @@ mod tests {
             &ZmqConfig::default(),
             control_tx,
             gateway.cancel.clone(),
+            None,
         )
         .unwrap();
 
@@ -1279,7 +1441,7 @@ mod tests {
 
         let egress = build_drain_egress(&cfg).expect("build zmq drain egress");
         let (tx, rx) = crossbeam_channel::bounded(4);
-        let drain = spawn_order_drain_with_now(rx, egress, gateway.cancel.clone(), || 456);
+        let drain = spawn_order_drain_with_now(rx, egress, gateway.cancel.clone(), || 456, None);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         tx.send((sample_req(), sample_seed())).unwrap();
@@ -1364,6 +1526,7 @@ mod tests {
             &ZmqConfig::default(),
             control_tx,
             gateway.cancel.clone(),
+            None,
         )
         .unwrap();
 
@@ -1388,7 +1551,7 @@ mod tests {
 
         let egress = build_drain_egress(&cfg).expect("build zmq drain egress");
         let (tx, rx) = crossbeam_channel::bounded(4);
-        let drain = spawn_order_drain_with_now(rx, egress, gateway.cancel.clone(), || 789);
+        let drain = spawn_order_drain_with_now(rx, egress, gateway.cancel.clone(), || 789, None);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         let mut req = sample_req();

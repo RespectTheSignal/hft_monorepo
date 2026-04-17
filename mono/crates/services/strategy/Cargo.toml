@@ -28,6 +28,7 @@ hft-exchange-gate = { workspace = true }
 hft-exchange-rest = { workspace = true }
 hft-order-egress = { workspace = true }
 hft-strategy-shm = { workspace = true }
+hft-zmq = { workspace = true }
 hft-strategy-config = { workspace = true }
 hft-strategy-core = { workspace = true }
 hft-strategy-runtime = { workspace = true }
@@ -45,6 +46,5 @@ ctrlc = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
-hft-zmq = { workspace = true }
 zmq = { workspace = true }
 order-gateway = { workspace = true }

@@ -54,7 +54,7 @@
 - [x] Cleanup: `StrategyAccountPollErr` / `StrategyControlDropped` CounterKey 정식 등재 + call site 전환
 - [x] Cleanup: mock Gate REST style strategy↔gateway result roundtrip integration test 추가 (`crates/testing/integration/tests/e2e_strategy_result.rs`)
 - [ ] ADR-0004 draft: SHM result ring / heartbeat / fill-stream 확장 범위 (현재 ZMQ reverse path 만 완료)
-- [ ] Heartbeat: Strategy ↔ Gateway liveness (TBD)
+- [x] Heartbeat: Gateway → Strategy liveness (STATUS_HEARTBEAT=255, GatewayLiveness, safe mode order drop)
 - [ ] Naming cleanup: `shared_path` 드리프트 정렬 (TBD, 별도 PR)
 - [~] `ShmOrderInvalid` → `OrderGatewayInvalidTotal` rename + `OrderGatewayInvalidWire` subset 분리 (ZMQ ingress invalid-wire path 는 `OrderGatewayInvalidWire` 로 이동 완료, SHM total/dashboard rename TBD)
 - [ ] price regime + symbol-meta layer 정리 (`OrderFrame.price: i64`, Python `price_raw`, executor quantize 책임)

@@ -164,6 +164,10 @@ pub struct ZmqConfig {
     /// gateway → strategy order result reverse path bind endpoint. `None` 이면 비활성.
     #[serde(default)]
     pub result_egress_bind: Option<String>,
+    /// gateway → strategy heartbeat 주기 (ms). 기본 1000ms (1초).
+    /// result_egress_bind 가 켜져 있을 때만 유효하다.
+    #[serde(default = "default_result_heartbeat_interval_ms")]
+    pub result_heartbeat_interval_ms: u64,
 }
 
 impl Default for ZmqConfig {
@@ -177,8 +181,13 @@ impl Default for ZmqConfig {
             sub_endpoint: "tcp://127.0.0.1:5555".into(),
             order_ingress_bind: None,
             result_egress_bind: None,
+            result_heartbeat_interval_ms: default_result_heartbeat_interval_ms(),
         }
     }
+}
+
+fn default_result_heartbeat_interval_ms() -> u64 {
+    1000
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -944,6 +953,12 @@ mod tests {
     }
 
     #[test]
+    fn zmq_result_heartbeat_interval_default_is_sensible() {
+        let cfg = minimal_valid_cfg();
+        assert_eq!(cfg.zmq.result_heartbeat_interval_ms, 1000);
+    }
+
+    #[test]
     fn validate_rejects_empty_symbol_list() {
         let mut cfg = minimal_valid_cfg();
         cfg.exchanges[0].symbols.clear();
@@ -981,6 +996,7 @@ mod tests {
             sub_endpoint = "tcp://127.0.0.1:5555"
             order_ingress_bind = "tcp://127.0.0.1:7010"
             result_egress_bind = "tcp://127.0.0.1:7060"
+            result_heartbeat_interval_ms = 1500
 
             [[exchanges]]
             id = "gate"
@@ -1000,6 +1016,7 @@ mod tests {
             cfg.zmq.result_egress_bind.as_deref(),
             Some("tcp://127.0.0.1:7060")
         );
+        assert_eq!(cfg.zmq.result_heartbeat_interval_ms, 1500);
         assert_eq!(cfg.exchanges.len(), 1);
         assert_eq!(cfg.exchanges[0].id, ExchangeId::Gate);
         assert_eq!(cfg.exchanges[0].symbols.len(), 2);

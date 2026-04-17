@@ -375,6 +375,8 @@ struct Counters {
     strategy_control_dropped: AtomicU64,
     strategy_order_channel_full: AtomicU64,
     order_gateway_invalid_wire: AtomicU64,
+    gateway_heartbeat_emitted: AtomicU64,
+    strategy_gateway_stale: AtomicU64,
     // 기타 ad-hoc 용 — rare.
     extras: Mutex<ahash::AHashMap<&'static str, Arc<AtomicU64>>>,
 }
@@ -419,6 +421,8 @@ fn counters() -> &'static Counters {
         strategy_control_dropped: AtomicU64::new(0),
         strategy_order_channel_full: AtomicU64::new(0),
         order_gateway_invalid_wire: AtomicU64::new(0),
+        gateway_heartbeat_emitted: AtomicU64::new(0),
+        strategy_gateway_stale: AtomicU64::new(0),
         extras: Mutex::new(ahash::AHashMap::default()),
     })
 }
@@ -508,6 +512,10 @@ pub enum CounterKey {
     StrategyOrderChannelFull,
     /// gateway wire decode/recv 실패 (transport 종류와 무관한 총합).
     OrderGatewayInvalidWire,
+    /// gateway 가 heartbeat wire 를 result channel 로 emit 한 횟수.
+    GatewayHeartbeatEmitted,
+    /// strategy 가 gateway heartbeat timeout 을 감지해 safe mode 진입한 횟수.
+    StrategyGatewayStale,
 }
 
 /// 알려진 counter 를 1 증가. hot path — atomic fetch_add 만.
@@ -561,6 +569,8 @@ pub fn counter_add(k: CounterKey, n: u64) {
         CounterKey::StrategyControlDropped => &c.strategy_control_dropped,
         CounterKey::StrategyOrderChannelFull => &c.strategy_order_channel_full,
         CounterKey::OrderGatewayInvalidWire => &c.order_gateway_invalid_wire,
+        CounterKey::GatewayHeartbeatEmitted => &c.gateway_heartbeat_emitted,
+        CounterKey::StrategyGatewayStale => &c.strategy_gateway_stale,
     };
     target.fetch_add(n, Ordering::Relaxed);
 }
@@ -719,6 +729,14 @@ pub fn counters_snapshot() -> Vec<(String, u64)> {
             "order_gateway_invalid_wire".into(),
             c.order_gateway_invalid_wire.load(Ordering::Relaxed),
         ),
+        (
+            "gateway_heartbeat_emitted".into(),
+            c.gateway_heartbeat_emitted.load(Ordering::Relaxed),
+        ),
+        (
+            "strategy_gateway_stale".into(),
+            c.strategy_gateway_stale.load(Ordering::Relaxed),
+        ),
     ];
     for (k, v) in c.extras.lock().iter() {
         out.push(((*k).to_string(), v.load(Ordering::Relaxed)));
@@ -817,7 +835,7 @@ mod tests {
     // cargo test 는 기본 병렬 → `--test-threads=1` 권장하지만, 여기서는 sub-lock.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
-    fn new_variants() -> [(CounterKey, &'static str, &'static str); 18] {
+    fn new_variants() -> [(CounterKey, &'static str, &'static str); 20] {
         [
             (
                 CounterKey::OrderEgressZmqOk,
@@ -908,6 +926,16 @@ mod tests {
                 CounterKey::OrderGatewayInvalidWire,
                 "OrderGatewayInvalidWire",
                 "order_gateway_invalid_wire",
+            ),
+            (
+                CounterKey::GatewayHeartbeatEmitted,
+                "GatewayHeartbeatEmitted",
+                "gateway_heartbeat_emitted",
+            ),
+            (
+                CounterKey::StrategyGatewayStale,
+                "StrategyGatewayStale",
+                "strategy_gateway_stale",
             ),
         ]
     }

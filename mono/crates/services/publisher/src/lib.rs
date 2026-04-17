@@ -1400,6 +1400,7 @@ mod tests {
             sub_endpoint: pub_.into(),
             order_ingress_bind: None,
             result_egress_bind: None,
+            result_heartbeat_interval_ms: 0,
         }
     }
 

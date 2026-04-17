@@ -11,7 +11,7 @@ use crate::{ConfigError, ConfigResult};
 ///
 /// `ShmConfig` 가 shared region 경로/role/vm_id 를 담당하고, 이 구조체는
 /// "어느 경로를 쓸지" 와 "주문 경로 자체의 튜닝" 만 담당한다.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct OrderEgressConfig {
     /// 정상 경로(SHM) 또는 fallback(ZMQ) 선택.
@@ -23,8 +23,25 @@ pub struct OrderEgressConfig {
     /// gateway PUSH bind 에 strategy 가 PULL connect 할 result endpoint.
     #[serde(default)]
     pub result_zmq_connect: Option<String>,
+    /// gateway heartbeat timeout (ms). 기본 5000ms (5초).
+    /// 0 이면 heartbeat 검사 비활성화 (dev/test 용).
+    #[serde(default = "default_heartbeat_timeout_ms")]
+    pub heartbeat_timeout_ms: u64,
     /// 링 full / downstream 정체 시 처리 정책.
     pub backpressure: BackpressurePolicy,
+}
+
+impl Default for OrderEgressConfig {
+    fn default() -> Self {
+        Self {
+            mode: OrderEgressMode::default(),
+            shm: ShmOrderEgressConfig::default(),
+            zmq: None,
+            result_zmq_connect: None,
+            heartbeat_timeout_ms: default_heartbeat_timeout_ms(),
+            backpressure: BackpressurePolicy::default(),
+        }
+    }
 }
 
 impl OrderEgressConfig {
@@ -90,6 +107,13 @@ impl OrderEgressConfig {
                 endpoint.starts_with("tcp://") || endpoint.starts_with("inproc://"),
                 "order_egress.result_zmq_connect must start with tcp:// or inproc://"
             );
+        }
+
+        if self.heartbeat_timeout_ms > 0 && self.heartbeat_timeout_ms < 1000 {
+            return Err(ConfigError::Invalid(
+                "order_egress.heartbeat_timeout_ms must be 0 (disabled) or >= 1000"
+                    .to_string(),
+            ));
         }
 
         match self.backpressure {
@@ -190,6 +214,10 @@ impl Default for ZmqOrderEgressConfig {
     }
 }
 
+fn default_heartbeat_timeout_ms() -> u64 {
+    5000
+}
+
 /// backpressure 처리 정책.
 ///
 /// 기본값은 `Drop`.
@@ -230,6 +258,7 @@ mod tests {
         assert_eq!(cfg.shm.ring_capacity, 1024);
         assert!(cfg.zmq.is_none());
         assert!(cfg.result_zmq_connect.is_none());
+        assert_eq!(cfg.heartbeat_timeout_ms, 5000);
         assert_eq!(cfg.backpressure, BackpressurePolicy::Drop);
     }
 
@@ -257,6 +286,7 @@ mod tests {
                 reconnect_interval_max_ms: 500,
             }),
             result_zmq_connect: Some("tcp://127.0.0.1:7060".into()),
+            heartbeat_timeout_ms: 5_000,
             backpressure: BackpressurePolicy::RetryWithTimeout {
                 max_retries: 4,
                 backoff_ns: 1_000,
@@ -298,8 +328,10 @@ mod tests {
 
     #[test]
     fn order_egress_result_zmq_connect_validate() {
-        let mut cfg = OrderEgressConfig::default();
-        cfg.result_zmq_connect = Some("".into());
+        let mut cfg = OrderEgressConfig {
+            result_zmq_connect: Some("".into()),
+            ..OrderEgressConfig::default()
+        };
         assert!(cfg.validate().is_err());
 
         cfg.result_zmq_connect = Some("ipc://bad".into());
@@ -307,6 +339,21 @@ mod tests {
 
         cfg.result_zmq_connect = Some("inproc://strategy-result".into());
         cfg.validate().expect("valid result connect endpoint");
+    }
+
+    #[test]
+    fn order_egress_heartbeat_timeout_validate() {
+        let mut cfg = OrderEgressConfig {
+            heartbeat_timeout_ms: 999,
+            ..OrderEgressConfig::default()
+        };
+        assert!(cfg.validate().is_err());
+
+        cfg.heartbeat_timeout_ms = 0;
+        cfg.validate().expect("zero disables heartbeat");
+
+        cfg.heartbeat_timeout_ms = 5_000;
+        cfg.validate().expect("valid heartbeat timeout");
     }
 
     #[test]

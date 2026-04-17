@@ -67,6 +67,8 @@ pub const STATUS_CANCELLED: u8 = 4;
 pub const STATUS_REJECTED: u8 = 5;
 /// status code: Expired.
 pub const STATUS_EXPIRED: u8 = 6;
+/// status code: Heartbeat (gateway liveness signal, not a real order result).
+pub const STATUS_HEARTBEAT: u8 = 255;
 
 /// request.exchange offset.
 pub const OFFSET_EXCHANGE: usize = 0;
@@ -484,7 +486,31 @@ fn is_valid_status(v: u8) -> bool {
             | STATUS_CANCELLED
             | STATUS_REJECTED
             | STATUS_EXPIRED
+            | STATUS_HEARTBEAT
     )
+}
+
+/// heartbeat 용 result wire 생성 helper.
+/// `gateway_ts_ns` 만 유의미하고 나머지는 0 / default.
+pub fn build_heartbeat_wire(gateway_ts_ns: u64) -> OrderResultWire {
+    OrderResultWire {
+        client_seq: 0,
+        gateway_ts_ns,
+        filled_size: 0,
+        reject_code: 0,
+        status: STATUS_HEARTBEAT,
+        _pad0: [0; 3],
+        exchange_order_id: [0; 48],
+        text_tag: [0; 32],
+        _reserved: [0; 16],
+    }
+}
+
+/// 128B result wire buffer 의 status 가 heartbeat 인지 빠르게 판별.
+/// decode 하지 않고 offset 만 본다.
+#[inline]
+pub fn is_heartbeat_wire(buf: &[u8; ORDER_RESULT_WIRE_SIZE]) -> bool {
+    buf[RESULT_OFFSET_STATUS] == STATUS_HEARTBEAT
 }
 
 fn ensure_zero(bytes: &[u8], field: &'static str, offset: usize) -> Result<(), WireError> {
@@ -797,5 +823,25 @@ mod tests {
         let decoded = OrderResultWire::decode(&DESIGN_RESULT_WIRE_BYTES)
             .expect("design result decode");
         assert_eq!(decoded, wire);
+    }
+
+    #[test]
+    fn heartbeat_wire_roundtrip() {
+        let wire = build_heartbeat_wire(999_000_000);
+        let mut buf = [0u8; ORDER_RESULT_WIRE_SIZE];
+        wire.encode(&mut buf);
+        assert!(is_heartbeat_wire(&buf));
+        let decoded = OrderResultWire::decode(&buf).expect("heartbeat decode");
+        assert_eq!(decoded.status, STATUS_HEARTBEAT);
+        assert_eq!(decoded.gateway_ts_ns, 999_000_000);
+        assert_eq!(decoded.client_seq, 0);
+    }
+
+    #[test]
+    fn non_heartbeat_wire_is_not_heartbeat() {
+        let wire = design_result_wire();
+        let mut buf = [0u8; ORDER_RESULT_WIRE_SIZE];
+        wire.encode(&mut buf);
+        assert!(!is_heartbeat_wire(&buf));
     }
 }
