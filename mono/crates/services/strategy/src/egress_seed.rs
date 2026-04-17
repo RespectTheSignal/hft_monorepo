@@ -31,6 +31,7 @@ impl OrderEgressMetaSeed {
             level: self.level,
             symbol_id,
             symbol_idx,
+            quantize: None,
         }
     }
 }

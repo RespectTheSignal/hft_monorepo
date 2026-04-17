@@ -1023,7 +1023,7 @@ mod tests {
         let symtab = SymbolTable::open_from_region(shared.sub_region(SubKind::Symtab).unwrap()).unwrap();
         let symbol_idx = symtab.lookup(ExchangeId::Gate, "BTC_USDT").expect("symbol idx");
         assert_eq!(frame.symbol_idx, symbol_idx);
-        assert_eq!(frame.price, 100);
+        assert_eq!(frame.price, 10_000_000_000);
         assert_eq!(frame.size, 1);
     }
 

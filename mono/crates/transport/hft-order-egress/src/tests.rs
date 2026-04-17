@@ -51,6 +51,7 @@ fn sample_meta() -> OrderEgressMeta<'static> {
         level: WireLevel::Open,
         symbol_id: Some(77),
         symbol_idx: Some(88),
+        quantize: None,
     }
 }
 
@@ -368,7 +369,7 @@ fn shm_egress_smoke() {
     assert_eq!(got.symbol_idx, expected_idx);
     assert_eq!(got.client_id, req.client_seq);
     assert_eq!(got.ts_ns, req.origin_ts_ns);
-    assert_eq!(got.price, 100);
+    assert_eq!(got.price, 10_000_000_000);
     assert_eq!(got.size, 1);
     let place_meta = PlaceAuxMeta::unpack(&got.aux);
     assert_eq!(place_meta.wire_level_code(), PLACE_LEVEL_OPEN);

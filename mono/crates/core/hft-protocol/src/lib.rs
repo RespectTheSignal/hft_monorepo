@@ -25,8 +25,8 @@ pub mod wire;
 
 pub use frame::{create_message, parse_frame, write_frame_into, FrameError, FrameView};
 pub use order_adapter::{
-    order_request_to_order_frame, order_request_to_order_request_wire, OrderAdaptError,
-    OrderEgressMeta, WireLevel,
+    order_request_to_order_frame, order_request_to_order_request_wire, round_to_tick,
+    OrderAdaptError, OrderEgressMeta, QuantizeHint, WireLevel, PRICE_SCALE, PRICE_SCALE_INV,
 };
 pub use topics::{
     parse_topic, ParsedTopic, TopicBuilder, MSG_BOOKTICKER, MSG_TRADE, MSG_WEBBOOKTICKER,

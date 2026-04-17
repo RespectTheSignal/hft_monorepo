@@ -19,6 +19,11 @@ use crate::order_wire::{
     ORDER_TYPE_MARKET, SIDE_BUY, SIDE_SELL, TIF_FOK, TIF_GTC, TIF_IOC,
 };
 
+/// Price scale factor. SHM wire price = f64_price × PRICE_SCALE.
+pub const PRICE_SCALE: f64 = 1e8;
+/// Inverse. f64_price = wire_price / PRICE_SCALE_INV.
+pub const PRICE_SCALE_INV: f64 = 1e8;
+
 /// ZMQ wire 에 실리는 open/close 레벨.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WireLevel {
@@ -28,10 +33,24 @@ pub enum WireLevel {
     Close,
 }
 
+/// tick-size 양자화에 필요한 최소 정보.
+///
+/// strategy/runtime 의 풍부한 contract 메타 전체를 끌고 오지 않고, adapter 가
+/// 실제로 쓰는 필드만 잘라서 전달한다.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct QuantizeHint {
+    /// 가격 tick 크기.
+    pub price_tick: f64,
+    /// 수량 tick 크기.
+    pub size_tick: f64,
+    /// 최소 허용 수량 (contract count).
+    pub min_size: i64,
+}
+
 /// Order egress 변환에 필요한 보조 메타데이터.
 ///
 /// `OrderRequest` 본문으로 표현되지 않는 transport 전용 필드만 담는다.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OrderEgressMeta<'a> {
     /// strategy 태그. ZMQ wire 에서는 최대 32B ASCII 로 직렬화된다.
     pub strategy_tag: &'a str,
@@ -41,6 +60,8 @@ pub struct OrderEgressMeta<'a> {
     pub symbol_id: Option<u32>,
     /// SHM frame 용 symbol idx.
     pub symbol_idx: Option<u32>,
+    /// adapter tick-size 양자화 힌트.
+    pub quantize: Option<QuantizeHint>,
 }
 
 /// 주문 도메인 타입 → transport wire 변환 오류.
@@ -50,8 +71,8 @@ pub enum OrderAdaptError {
     #[error("qty must be a non-negative integer, got {qty}")]
     NonIntegerQty { qty: f64 },
 
-    /// SHM 경로는 현재 정수 limit price 만 허용한다.
-    #[error("limit price must be an integer in SHM path, got {price}")]
+    /// 가격 scaled integer 변환에 실패했다.
+    #[error("limit price could not be converted to scaled wire price, got {price}")]
     NonIntegerPrice { price: f64 },
 
     /// Limit 주문인데 가격이 없음.
@@ -82,6 +103,14 @@ pub enum OrderAdaptError {
     #[error("symbol_idx missing for SHM frame")]
     SymbolIdxMissing,
 
+    /// 주문 수량이 최소 수량보다 작다.
+    #[error("size {size} below min_order_size {min}")]
+    BelowMinSize { size: f64, min: i64 },
+
+    /// cancel 대상 exchange_order_id 가 40B 를 넘는다.
+    #[error("exchange_order_id too long: {len} bytes (max 40)")]
+    ExchangeOrderIdTooLong { len: usize },
+
     /// 하위 wire encode/decode 오류.
     #[error("wire encode failed: {0}")]
     Wire(#[from] WireError),
@@ -96,11 +125,55 @@ fn integer_qty(qty: f64) -> Result<i64, OrderAdaptError> {
 }
 
 #[inline]
-fn integer_price(price: f64) -> Result<i64, OrderAdaptError> {
-    if !price.is_finite() || price < 0.0 || price.fract() != 0.0 || price > i64::MAX as f64 {
+fn scaled_price(price: f64) -> Result<i64, OrderAdaptError> {
+    if !price.is_finite() || price < 0.0 {
         return Err(OrderAdaptError::NonIntegerPrice { price });
     }
-    Ok(price as i64)
+    let scaled = (price * PRICE_SCALE).round();
+    if scaled > i64::MAX as f64 || scaled < i64::MIN as f64 {
+        return Err(OrderAdaptError::NonIntegerPrice { price });
+    }
+    Ok(scaled as i64)
+}
+
+/// 값을 tick 단위로 반올림한다.
+/// tick <= 0 또는 non-finite 이면 원값 그대로 반환한다.
+#[inline]
+pub fn round_to_tick(value: f64, tick: f64) -> f64 {
+    if tick <= 0.0 || !tick.is_finite() {
+        return value;
+    }
+    (value / tick).round() * tick
+}
+
+#[inline]
+fn quantized_qty(qty: f64, quantize: Option<QuantizeHint>) -> Result<i64, OrderAdaptError> {
+    if let Some(q) = quantize {
+        if qty > 0.0 && qty < q.min_size as f64 {
+            return Err(OrderAdaptError::BelowMinSize {
+                size: qty,
+                min: q.min_size,
+            });
+        }
+    }
+    let rounded = if let Some(q) = quantize {
+        round_to_tick(qty, q.size_tick)
+    } else {
+        qty
+    };
+    integer_qty(rounded)
+}
+
+#[inline]
+fn quantized_limit_price(
+    price: f64,
+    quantize: Option<QuantizeHint>,
+) -> Result<f64, OrderAdaptError> {
+    Ok(if let Some(q) = quantize {
+        round_to_tick(price, q.price_tick)
+    } else {
+        price
+    })
 }
 
 #[inline]
@@ -168,20 +241,21 @@ fn place_level_code(level: WireLevel) -> u8 {
 
 /// 도메인 주문을 SHM `OrderFrame` 으로 변환한다.
 ///
-/// 현재 SHM 경로는 `price: i64` 표현을 사용하므로 limit 주문은 정수 가격만 허용한다.
+/// SHM 경로는 `price: i64` 를 `f64 × 1e8` scaled integer 로 사용한다.
 pub fn order_request_to_order_frame(
     req: &OrderRequest,
     meta: &OrderEgressMeta<'_>,
 ) -> Result<OrderFrame, OrderAdaptError> {
     let symbol_idx = meta.symbol_idx.ok_or(OrderAdaptError::SymbolIdxMissing)?;
-    let size = integer_qty(req.qty)?;
+    let size = quantized_qty(req.qty, meta.quantize)?;
     let ord_type = frame_order_type_code(req.order_type);
     let tif = tif_code(req.tif);
     let price = match req.order_type {
         OrderType::Market => 0,
         OrderType::Limit => {
             let p = req.price.ok_or(OrderAdaptError::LimitPriceMissing)?;
-            integer_price(p)?
+            let p = quantized_limit_price(p, meta.quantize)?;
+            scaled_price(p)?
         }
     };
 
@@ -211,13 +285,20 @@ pub fn order_request_to_order_request_wire(
     meta: &OrderEgressMeta<'_>,
 ) -> Result<OrderRequestWire, OrderAdaptError> {
     let symbol_id = meta.symbol_id.ok_or(OrderAdaptError::SymbolIdMissing)?;
-    let size = integer_qty(req.qty)?;
     let text_tag = encode_ascii_tag(meta.strategy_tag)?;
     let order_type = wire_order_type_code(req.order_type);
     let tif = tif_code(req.tif);
-    let price = match req.order_type {
-        OrderType::Market => 0.0,
-        OrderType::Limit => req.price.ok_or(OrderAdaptError::LimitPriceMissing)?,
+    let (size, price) = match req.order_type {
+        OrderType::Limit => {
+            let p = req.price.ok_or(OrderAdaptError::LimitPriceMissing)?;
+            (
+                quantized_qty(req.qty, meta.quantize)?,
+                quantized_limit_price(p, meta.quantize)?,
+            )
+        }
+        OrderType::Market => {
+            (quantized_qty(req.qty, meta.quantize)?, 0.0)
+        }
     };
 
     let mut wire = OrderRequestWire {
@@ -271,6 +352,7 @@ mod tests {
             level: WireLevel::Open,
             symbol_id: Some(77),
             symbol_idx: Some(88),
+            quantize: None,
         }
     }
 
@@ -288,7 +370,7 @@ mod tests {
         assert_eq!(frame.side, SIDE_BUY);
         assert_eq!(frame.tif, TIF_GTC);
         assert_eq!(frame.ord_type, 0);
-        assert_eq!(frame.price, 100);
+        assert_eq!(frame.price, 10_000_000_000);
         assert_eq!(frame.size, 1);
         assert_eq!(frame.client_id, req.client_seq);
         assert_eq!(frame.ts_ns, req.origin_ts_ns);
@@ -337,14 +419,12 @@ mod tests {
     }
 
     #[test]
-    fn shm_adapter_rejects_non_integer_limit_price() {
+    fn shm_adapter_fractional_price_scales_correctly() {
         let mut req = sample_req(ExchangeId::Gate);
         req.price = Some(100.5);
 
-        assert!(matches!(
-            order_request_to_order_frame(&req, &sample_meta()),
-            Err(OrderAdaptError::NonIntegerPrice { price }) if price == 100.5
-        ));
+        let frame = order_request_to_order_frame(&req, &sample_meta()).expect("frame");
+        assert_eq!(frame.price, 10_050_000_000);
     }
 
     #[test]
@@ -505,5 +585,61 @@ mod tests {
 
             assert_eq!(u16::from(frame.exchange_id), wire.exchange);
         }
+    }
+
+    #[test]
+    fn shm_adapter_quantize_rounds_to_tick() {
+        let mut req = sample_req(ExchangeId::Gate);
+        req.price = Some(100.123);
+        let mut meta = sample_meta();
+        meta.quantize = Some(QuantizeHint {
+            price_tick: 0.1,
+            size_tick: 1.0,
+            min_size: 1,
+        });
+
+        let frame = order_request_to_order_frame(&req, &meta).expect("frame");
+        assert_eq!(frame.price, 10_010_000_000);
+    }
+
+    #[test]
+    fn shm_adapter_below_min_size_rejected() {
+        let mut req = sample_req(ExchangeId::Gate);
+        req.qty = 0.5;
+        let mut meta = sample_meta();
+        meta.quantize = Some(QuantizeHint {
+            price_tick: 0.1,
+            size_tick: 1.0,
+            min_size: 1,
+        });
+
+        assert!(matches!(
+            order_request_to_order_frame(&req, &meta),
+            Err(OrderAdaptError::BelowMinSize { size, min }) if size == 0.5 && min == 1
+        ));
+    }
+
+    #[test]
+    fn round_to_tick_edge_cases() {
+        assert!((round_to_tick(100.123, 0.0) - 100.123).abs() < 1e-12);
+        assert!((round_to_tick(100.123, -0.1) - 100.123).abs() < 1e-12);
+        assert!((round_to_tick(100.1234, 0.01) - 100.12).abs() < 1e-12);
+    }
+
+    #[test]
+    fn zmq_adapter_quantize_same_as_shm() {
+        let mut req = sample_req(ExchangeId::Gate);
+        req.price = Some(100.123);
+        let mut meta = sample_meta();
+        meta.quantize = Some(QuantizeHint {
+            price_tick: 0.1,
+            size_tick: 1.0,
+            min_size: 1,
+        });
+
+        let frame = order_request_to_order_frame(&req, &meta).expect("frame");
+        let wire = order_request_to_order_request_wire(&req, &meta).expect("wire");
+        assert_eq!(frame.price, 10_010_000_000);
+        assert!((wire.price - 100.1).abs() < 1e-12);
     }
 }

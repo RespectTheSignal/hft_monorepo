@@ -497,8 +497,8 @@ impl Worker {
             x => return Err(HandleFrameError::Invalid(anyhow!("unknown ord_type={}", x))),
         };
 
-        // SHM 는 i64-scaled 표현이지만 legacy publisher 와 동일하게 `as i64 / as f64`
-        // 직접 cast 규약을 따른다. (Phase 2 이후 고정밀 Decimal 도입 가능.)
+        // SHM price 는 `f64 × 1e8` scaled integer 로 저장된다.
+        // gateway 는 여기서 다시 f64 로 역변환한다.
         let qty = frame.size as f64;
         if !qty.is_finite() || qty <= 0.0 {
             return Err(HandleFrameError::Invalid(anyhow!(
@@ -508,7 +508,7 @@ impl Worker {
         }
         let price = match order_type {
             OrderType::Limit => {
-                let p = frame.price as f64;
+                let p = frame.price as f64 / hft_protocol::PRICE_SCALE_INV;
                 if !p.is_finite() || p <= 0.0 {
                     return Err(HandleFrameError::Invalid(anyhow!(
                         "non-positive limit price={}",
@@ -765,7 +765,7 @@ mod tests {
             tif: 0,  // GTC
             ord_type: 0, // Limit
             _pad2: [0; 1],
-            price: 50_000,
+            price: 5_000_000_000_000,
             size: 1,
             client_id,
             ts_ns: 12345,

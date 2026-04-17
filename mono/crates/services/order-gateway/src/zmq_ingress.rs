@@ -336,6 +336,7 @@ mod tests {
             level: WireLevel::Close,
             symbol_id: Some(0),
             symbol_idx: None,
+            quantize: None,
         }
     }
 
