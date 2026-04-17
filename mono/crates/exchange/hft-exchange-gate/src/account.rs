@@ -231,6 +231,13 @@ impl GateAccountClient {
         Ok(snap)
     }
 
+    /// 계정의 모든 active 포지션을 raw contract 수량 기준으로 조회한다.
+    pub async fn fetch_open_positions(&self) -> Result<Vec<GateOpenPosition>, ApiError> {
+        let path = format!("{}/positions", self.cfg.futures_prefix());
+        let rows: Vec<GatePositionRow> = self.get_private(&path, "").await?;
+        Ok(positions_to_open_positions(rows))
+    }
+
     // ── accounts (wallet) ─────────────────────────────────────────────────
 
     /// 계정 잔고 (total USDT 환산 + unrealized PnL) 조회.
@@ -250,6 +257,19 @@ pub struct AccountBalance {
     pub unrealized_pnl_usdt: f64,
     /// available margin (참고용).
     pub available_usdt: f64,
+}
+
+/// 운영/ops CLI 에서 쓰는 열린 포지션 상세 정보.
+///
+/// strategy hot path 는 `PositionSnapshot` 만으로 충분하지만, emergency close CLI 와
+/// status-check 는 contract 수량과 entry/mark/pnl 을 그대로 보여줄 필요가 있다.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GateOpenPosition {
+    pub contract: String,
+    pub size: i64,
+    pub entry_price: f64,
+    pub mark_price: f64,
+    pub unrealised_pnl: f64,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -608,6 +628,8 @@ struct GateContractRow {
     /// Gate 는 `risk_limit_max`, 또는 `risk_limit_base` 를 돌려주기도 함 — 전자 우선.
     #[serde(default, deserialize_with = "de_f64_string_or_num")]
     risk_limit_max: f64,
+    #[serde(default, deserialize_with = "de_f64_string_or_num")]
+    _mark_price: f64,
 }
 
 impl GateContractRow {
@@ -645,6 +667,12 @@ struct GatePositionRow {
     /// USDT notional value (문자열). 양수.
     #[serde(default, deserialize_with = "de_f64_string_or_num")]
     value: f64,
+    #[serde(default, deserialize_with = "de_f64_string_or_num")]
+    entry_price: f64,
+    #[serde(default, deserialize_with = "de_f64_string_or_num")]
+    mark_price: f64,
+    #[serde(default, deserialize_with = "de_f64_string_or_num")]
+    unrealised_pnl: f64,
     /// 업데이트 시각 (초). Gate v4 는 float 로 내려보냄.
     #[serde(default, deserialize_with = "de_f64_string_or_num")]
     update_time: f64,
@@ -723,6 +751,23 @@ fn positions_to_snapshot(rows: Vec<GatePositionRow>) -> PositionSnapshot {
         by_symbol,
         taken_at_ms: now_epoch_ms(),
     }
+}
+
+fn positions_to_open_positions(rows: Vec<GatePositionRow>) -> Vec<GateOpenPosition> {
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        if r.contract.is_empty() || r.size == 0 {
+            continue;
+        }
+        out.push(GateOpenPosition {
+            contract: r.contract,
+            size: r.size,
+            entry_price: r.entry_price,
+            mark_price: r.mark_price,
+            unrealised_pnl: r.unrealised_pnl,
+        });
+    }
+    out
 }
 
 /// `/accounts` 응답 — Gate 는 single object 반환 (array 아님).
@@ -885,6 +930,9 @@ mod tests {
         "contract":"BTC_USDT",
         "size": 5,
         "value":"1234.5",
+        "entry_price":"65234.5",
+        "mark_price":"65300.0",
+        "unrealised_pnl":"19.65",
         "update_time":1713100000.5,
         "mode":"single"
       },
@@ -892,6 +940,9 @@ mod tests {
         "contract":"ETH_USDT",
         "size": -10,
         "value":"980",
+        "entry_price":"3456.7",
+        "mark_price":"3450.0",
+        "unrealised_pnl":"33.5",
         "update_time":1713100010,
         "mode":"single"
       }
@@ -957,6 +1008,18 @@ mod tests {
     }
 
     #[test]
+    fn open_positions_preserve_contract_size_and_prices() {
+        let rows: Vec<GatePositionRow> = serde_json::from_str(POSITIONS_JSON_SINGLE).unwrap();
+        let open = positions_to_open_positions(rows);
+        assert_eq!(open.len(), 2);
+        assert_eq!(open[0].contract, "BTC_USDT");
+        assert_eq!(open[0].size, 5);
+        assert_eq!(open[0].entry_price, 65234.5);
+        assert_eq!(open[0].mark_price, 65300.0);
+        assert_eq!(open[0].unrealised_pnl, 19.65);
+    }
+
+    #[test]
     fn empty_positions_yields_empty_snapshot() {
         let snap = positions_to_snapshot(Vec::new());
         assert!(snap.by_symbol.is_empty());
@@ -971,6 +1034,9 @@ mod tests {
             size: 0,
             value: 0.0,
             update_time: 0.0,
+            entry_price: 0.0,
+            mark_price: 0.0,
+            unrealised_pnl: 0.0,
             mode: "single".into(),
         }];
         let snap = positions_to_snapshot(rows);
@@ -1035,6 +1101,7 @@ mod tests {
                 order_size_round: self.order_size_round,
                 order_size_min: self.order_size_min,
                 risk_limit_max: self.risk_limit_max,
+                _mark_price: self._mark_price,
             }
         }
     }

@@ -50,6 +50,9 @@ members = [
     "crates/tools/latency-probe",
     "crates/tools/questdb-export",
     "crates/tools/futures-collector",
+    "crates/tools/healthcheck",
+    "crates/tools/status-check",
+    "crates/tools/close-positions",
 
     # testing
     "crates/testing/hft-testkit",

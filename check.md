@@ -287,8 +287,8 @@ Funding / EMA / misc: ✅
 - [~] Puppeteer fallback: POST `{ORDER_URL}` — **Drop reason**: `go/order-processor` 별도 트랙 유지. Rust 전략은 직접 REST 만.
 
 ### 3.9 Health / Supervisor — **TODO** (Phase 2 E)
-- [ ] `DEBUGGING_ORDERS = [{contract:"BTC_USDT", price:"60000"}, {contract:"ETH_USDT", price:"2000"}]` — healthcheck 테스트 주문 → `services/strategy::healthcheck`
-- [ ] `strategy_status` supabase table upsert → `services/strategy::status`
+- [x] `DEBUGGING_ORDERS = [{contract:"BTC_USDT", price:"60000"}, {contract:"ETH_USDT", price:"2000"}]` — `tools/healthcheck` 테스트 주문(place+cancel) ✅
+- [~] `strategy_status` supabase table upsert → `tools/status-check` 로 운영 상태 조회 대체. Supabase upsert 는 별도 트랙.
 - [x] restart loop: every `restart_interval` seconds → `services/strategy::supervisor`
 - [x] metrics HTTP endpoint (`/metrics`) → `hft-common::health_server` + `hft-telemetry::prometheus`
 
@@ -462,12 +462,12 @@ Funding / EMA / misc: ✅
 
 ### 11.1 계정 운영 — 전부 ⏸ Python 유지
 - [~] `check_futures_mode.py` · `close_all_and_send_to_main_account.py` · `convert_subaccounts.py` · `get_subaccount*.py` — **Drop reason**: Python 운영 스크립트. 이식 불필요.
-- [ ] `close_positions.py` (emergency) → 🔶 `tools/close-positions` **TODO** P2 later (현재 전략 레벨 `only_close` 모드로 부분 커버).
+- [x] `close_positions.py` (emergency) → `tools/close-positions` ✅
 - [~] `send_balance_to_main_account.py`, `transfer_to_main_account.py`, `sort_subaccount_trades.py`, `generate_accounts_json.py`, `generate_available_trading_pairs.ipynb`, `generate_backtesting_data.py`, `generate_trading_pairs_batches.py`, `get_common_symbols.ipynb`, `common_symbols.txt`, `find_unused_symbols_and_update_supabase.ipynb`, `trading_pairs_batches.json` — **Drop reason**: Python/notebook 그대로 유지.
 
 ### 11.2 헬스 / 오케스트레이션 — **TODO** Phase 2 E / 3
-- [ ] `gate_hft_healthcheck.py` → 🔶 `tools/healthcheck` **TODO** P2 E.
-- [ ] `gate_hft_status_check.py` → 🔶 `tools/status-check` **TODO** P2 E.
+- [x] `gate_hft_healthcheck.py` → `tools/healthcheck` ✅
+- [x] `gate_hft_status_check.py` → `tools/status-check` ✅
 - [x] `restart_gate_hft.py` → `hft-common::supervisor::run_with_restart` (내재화) ✅
 - [x] `monitoring_v2.py` → `services/monitoring-agent` (5s scrape + silence window + Telegram) ✅
 - [ ] `monitoring_questdb.py` / `ws_questdb_monitoring.py` → 🔷 tools **TODO** Phase 3.

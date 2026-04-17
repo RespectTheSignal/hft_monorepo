@@ -1,0 +1,28 @@
+[package]
+name = "status-check"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "status-check"
+path = "src/main.rs"
+
+[dependencies]
+hft-config = { workspace = true }
+hft-exchange-gate = { workspace = true }
+hft-exchange-rest = { workspace = true }
+hft-telemetry = { workspace = true }
+hft-exchange-api = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+tracing = { workspace = true }
+ctrlc = { workspace = true }
+mimalloc = { workspace = true }
+regex = "1"

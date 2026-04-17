@@ -58,7 +58,7 @@ pub mod executor;
 pub mod user_stream;
 pub use account::{
     AccountBalance, AccountPoller, AccountPollerBuilder, BalanceSlot, GateAccountClient,
-    GateAccountConfig, PollerHandle, PollerStats,
+    GateAccountConfig, GateOpenPosition, PollerHandle, PollerStats,
 };
 pub use executor::{GateExecutor, GateExecutorConfig};
 pub use user_stream::{
