@@ -194,7 +194,7 @@
 - [ ] `bin/close_v1.rs` → `services/strategy/close` **TODO**: Phase 2 E 이후. 현재 V6/V7/V8 의 `only_close` 모드로 기본 커버.
 
 ### 3.2 CLI / env (runner.rs)
-- [ ] `--leverage` / `$LEVERAGE` → `hft-strategy-config` (실 wire-up 은 main.rs 에서 Variant 분기 후 runner config 로 전달 예정)
+- [x] `--leverage` / `$LEVERAGE` → `AppConfig.leverage` → `services/strategy/src/main.rs::build_risk_config` → `RiskConfig.leverage`
 - [ ] `--login_names` / `$LOGIN_NAMES` (csv or `prefix001~prefix010` range) → `services/strategy::cli::expand_logins` **TODO**: multi-account 운영 환경 확정 시 구현.
 - [x] `--interval` (default 10ms) → `StrategyRunner::with_tick_interval` ✅
 - [x] `--binance-latency` / `--base-latency` (default 200ms) → `TradeSettings::binance_last_book_ticker_latency_ms` ✅

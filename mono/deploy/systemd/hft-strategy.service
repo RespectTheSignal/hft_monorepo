@@ -1,0 +1,81 @@
+; hft-strategy.service — strategy VM 내부에서 hft-strategy 기동.
+;
+; ivshmem 기반 v2 multi-VM 토폴로지:
+;   - strategy VM 은 ivshmem slave. publisher 가 초기화한 SharedRegion 에
+;     attach → BookTicker/Trade subscribe + OrderRing write.
+;   - 동일 VM 내에서 publisher/gateway 에 대한 systemd 의존성은 없음
+;     (다른 VM). SHM attach 시 header magic/layout_digest 로 검증.
+;
+; Environment 의 HFT_SHM__* 값은 publisher 와 byte-exact 일치해야 한다.
+; 한 글자라도 다르면 layout_digest mismatch → fail-fast.
+
+[Unit]
+Description=HFT v2 strategy (shm slave + signal engine)
+Documentation=https://internal/docs/architecture/MULTI_VM_TOPOLOGY.md
+After=network-online.target
+Wants=network-online.target
+; strategy VM 에도 ivshmem PCI BAR 가 노출되어야 의미가 있다.
+AssertPathExists=/sys/bus/pci/devices
+StartLimitBurst=3
+StartLimitIntervalSec=120
+
+[Service]
+Type=simple
+User=hft
+Group=hft
+
+ExecStart=/opt/hft/bin/hft-strategy
+
+; ── 설정 ──────────────────────────────────────────────────────────────────
+Environment=HFT_CONFIG_DIR=/etc/hft
+Environment=HFT_LOG=info,hft=info,hft_transport=info
+
+; ── SHM backing — publisher 와 동일해야 함 ────────────────────────────────
+; 현재 runtime 키는 `HFT_SHM__SHARED_PATH`. PciBar backend 도 동일 키를 쓴다.
+Environment=HFT_SHM__BACKING=pci_bar
+Environment=HFT_SHM__SHARED_PATH=/sys/bus/pci/devices/0000:00:04.0/resource2
+Environment=HFT_SHM__ROLE=strategy
+Environment=HFT_SHM__VM_ID=0
+Environment=HFT_SHM__N_MAX=16
+Environment=HFT_SHM__QUOTE_SLOTS=8192
+Environment=HFT_SHM__TRADE_RING_CAPACITY=65536
+Environment=HFT_SHM__ORDER_RING_CAPACITY=4096
+
+; ── strategy 고유 ─────────────────────────────────────────────────────────
+; strategy variant (v6/v7/v8/noop).
+Environment=HFT_STRATEGY_VARIANT=v7
+; leverage override (default: 50.0, RiskConfig.leverage 로 전달).
+Environment=HFT_LEVERAGE=50
+; health + metrics endpoint port override (default: 9100).
+Environment=HFT_TELEMETRY__PROM_PORT=9100
+
+; ── 거래소 인증 (secrets.env 주입) ────────────────────────────────────────
+EnvironmentFile=-/etc/hft/secrets.env
+
+; ── Supabase (전략 설정 remote config) ────────────────────────────────────
+; 아래는 예시. 실제 값은 secrets.env 또는 별도 EnvironmentFile 로 주입.
+; Environment=SUPABASE_URL=https://xxx.supabase.co
+; Environment=SUPABASE_KEY=eyJ...
+
+; ── 보안 ──────────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hft/state
+
+; ── 성능 ──────────────────────────────────────────────────────────────────
+; strategy VM 전용 — publisher/gateway 와 CPU 가 겹치지 않음 (다른 VM).
+; VM 내부에서는 전체 vCPU 를 strategy 가 점유.
+CPUAffinity=0 1 2 3
+LimitMEMLOCK=infinity
+
+; ── 재시작 정책 ────────────────────────────────────────────────────────────
+; soft restart 는 내부 supervisor (hft-common::supervisor::run_with_restart) 가 담당.
+; systemd 는 supervisor 마저 포기한 hard failure 만 처리.
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

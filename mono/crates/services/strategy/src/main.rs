@@ -192,6 +192,18 @@ fn build_strategy_config(cfg: &AppConfig) -> Arc<StrategyConfig> {
     ))
 }
 
+/// AppConfig 에서 전략 risk 설정을 조립한다.
+///
+/// 현재 runtime override 대상은 leverage 하나뿐이다. 값이 없으면
+/// `RiskConfig::default()` 의 기본값(50.0)을 그대로 사용한다.
+fn build_risk_config(cfg: &AppConfig) -> RiskConfig {
+    let mut risk = RiskConfig::default();
+    if let Some(leverage) = cfg.leverage {
+        risk.leverage = leverage;
+    }
+    risk
+}
+
 fn build_account_membership(strategy_cfg: &StrategyConfig) -> AccountMembership {
     AccountMembership::fixed(strategy_cfg.symbols.clone())
 }
@@ -782,7 +794,7 @@ async fn bring_up_full(
     let drain_egress = build_drain_egress(&cfg).context("build drain egress")?;
 
     // ── strategy spawn (variant-specific `with_runtime` 분기).
-    let risk = RiskConfig::default();
+    let risk = build_risk_config(&cfg);
     let strategy_handle: StrategyHandle = match variant {
         Variant::V6 => {
             let s = V6Strategy::new(strategy_cfg.clone(), risk).with_runtime(oracle, rate.clone());
@@ -1089,6 +1101,21 @@ mod tests {
         let mut cfg = AppConfig::default();
         cfg.order_egress.backpressure = BackpressurePolicy::Drop;
         cfg
+    }
+
+    #[test]
+    fn leverage_override_from_config() {
+        let mut cfg = base_cfg();
+        cfg.leverage = Some(20.0);
+        let risk = build_risk_config(&cfg);
+        assert_eq!(risk.leverage, 20.0);
+    }
+
+    #[test]
+    fn leverage_default_when_none() {
+        let cfg = base_cfg();
+        let risk = build_risk_config(&cfg);
+        assert_eq!(risk.leverage, 50.0);
     }
 
     fn bind_pull(ctx: &hft_zmq::Context, endpoint: &str) -> Socket {

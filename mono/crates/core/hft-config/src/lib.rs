@@ -92,6 +92,11 @@ pub struct AppConfig {
     pub hot_workers: usize,
     /// bg 스레드 수 (QuestDB write, supabase refresh 등).
     pub bg_workers: usize,
+    /// 전략 risk manager 레버리지 override. None 이면 RiskConfig 기본값 사용.
+    ///
+    /// 환경변수: `HFT_LEVERAGE`
+    #[serde(default)]
+    pub leverage: Option<f64>,
 
     /// ZMQ 전송 설정.
     #[serde(default)]
@@ -125,6 +130,7 @@ impl Default for AppConfig {
             service_name: "hft-service".into(),
             hot_workers: 1,
             bg_workers: 1,
+            leverage: None,
             zmq: ZmqConfig::default(),
             exchanges: Vec::new(),
             questdb: QuestDbConfig::default(),
@@ -676,6 +682,13 @@ pub fn validate(cfg: &AppConfig) -> ConfigResult<()> {
         !cfg.service_name.is_empty(),
         "service_name must not be empty"
     );
+    if let Some(leverage) = cfg.leverage {
+        ensure!(leverage.is_finite(), "leverage must be finite when set");
+        ensure!(
+            leverage.partial_cmp(&0.0) == Some(std::cmp::Ordering::Greater),
+            "leverage must be > 0 when set"
+        );
+    }
 
     ensure!(cfg.zmq.hwm > 0, "zmq.hwm must be > 0");
     ensure!(cfg.zmq.linger_ms >= 0, "zmq.linger_ms must be >= 0");
@@ -895,6 +908,7 @@ mod tests {
     fn defaults_are_sensible() {
         let d = AppConfig::default();
         assert_eq!(d.hot_workers, 1);
+        assert_eq!(d.leverage, None);
         assert_eq!(d.zmq.hwm, 100_000);
         assert_eq!(d.zmq.drain_batch_cap, 512);
         assert!(d.exchanges.is_empty());
@@ -918,6 +932,17 @@ mod tests {
         cfg.hot_workers = 0;
         let err = validate(&cfg).unwrap_err();
         assert!(err.to_string().contains("hot_workers"));
+    }
+
+    #[test]
+    fn validate_rejects_non_positive_leverage() {
+        let mut cfg = minimal_valid_cfg();
+        cfg.leverage = Some(0.0);
+        assert!(validate(&cfg).is_err());
+        cfg.leverage = Some(-1.0);
+        assert!(validate(&cfg).is_err());
+        cfg.leverage = Some(20.0);
+        validate(&cfg).unwrap();
     }
 
     #[test]
@@ -1080,6 +1105,27 @@ mod tests {
         assert!(cfg.telemetry.stdout_json);
         assert!(!cfg.warmup.enabled);
         assert_eq!(cfg.warmup.events, 42);
+
+        clear_hft_env();
+    }
+
+    #[test]
+    fn env_top_level_leverage_override_works() {
+        let _g = env_lock();
+        clear_hft_env();
+        std::env::set_var("HFT_LEVERAGE", "20.0");
+
+        let toml = r#"
+            service_name = "svc"
+            hot_workers = 1
+            bg_workers = 1
+
+            [[exchanges]]
+            id = "gate"
+            symbols = ["BTC_USDT"]
+        "#;
+        let cfg = load_from_toml_str(toml).unwrap();
+        assert_eq!(cfg.leverage, Some(20.0));
 
         clear_hft_env();
     }
