@@ -30,6 +30,7 @@ pub mod v7;
 pub mod v8;
 mod egress_seed;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -42,7 +43,7 @@ use hft_telemetry::{counter_inc, record_stage_nanos, CounterKey};
 use hft_time::{Clock, LatencyStamps, Stage, SystemClock};
 use hft_types::MarketEvent;
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 pub use egress_seed::OrderEgressMetaSeed;
 
@@ -213,6 +214,116 @@ pub enum OrderSendError {
     Full,
     /// receiver 가 drop 됨.
     Disconnected,
+}
+
+/// gateway heartbeat 기반 liveness 추적.
+///
+/// `last_heartbeat_ns == 0` 이면 아직 첫 heartbeat 전으로 보고 startup grace 를 적용한다.
+#[derive(Clone)]
+pub struct GatewayLiveness {
+    last_heartbeat_ns: Arc<AtomicU64>,
+    timeout_ns: u64,
+}
+
+impl GatewayLiveness {
+    /// timeout(ms) 기반 liveness 생성.
+    pub fn new(timeout_ms: u64) -> Self {
+        Self {
+            last_heartbeat_ns: Arc::new(AtomicU64::new(0)),
+            timeout_ns: timeout_ms.saturating_mul(1_000_000),
+        }
+    }
+
+    /// heartbeat 수신 시 마지막 시각을 갱신한다.
+    pub fn touch(&self, ts_ns: u64) {
+        self.last_heartbeat_ns.store(ts_ns, Ordering::Release);
+    }
+
+    /// 마지막 heartbeat 시각(ns)을 읽는다.
+    pub fn last_heartbeat_ns(&self) -> u64 {
+        self.last_heartbeat_ns.load(Ordering::Acquire)
+    }
+
+    /// gateway 가 살아있는지 판별한다.
+    ///
+    /// - timeout=0 이면 검사 비활성
+    /// - last=0 이면 startup grace
+    pub fn is_alive(&self, now_ns: u64) -> bool {
+        if self.timeout_ns == 0 {
+            return true;
+        }
+        let last = self.last_heartbeat_ns.load(Ordering::Acquire);
+        if last == 0 {
+            return true;
+        }
+        now_ns.saturating_sub(last) <= self.timeout_ns
+    }
+}
+
+/// 공용 drain 루프.
+///
+/// strategy 가 만든 `OrderEnvelope` 를 소비하면서 liveness guard 와 공통 필드
+/// (`reduce_only`, `client_seq`, `origin_ts_ns`) 주입을 담당한다.
+pub fn spawn_order_drain_loop_with_now<F, S, E>(
+    rx: Receiver<OrderEnvelope>,
+    cancel: CancellationToken,
+    now_ns: F,
+    liveness: Option<GatewayLiveness>,
+    mut submit: S,
+) -> JoinHandle<()>
+where
+    F: Fn() -> u64 + Send + 'static,
+    S: FnMut(OrderRequest, OrderEgressMetaSeed, u64) -> Result<(), E> + Send + 'static,
+    E: std::fmt::Display,
+{
+    tokio::spawn(async move {
+        loop {
+            if cancel.is_cancelled() {
+                break;
+            }
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok((req, seed)) => {
+                    let origin_ts_ns = now_ns();
+
+                    if let Some(ref lv) = liveness {
+                        if !lv.is_alive(origin_ts_ns) {
+                            counter_inc(CounterKey::StrategyGatewayStale);
+                            warn!(
+                                target: "strategy::orders",
+                                client_seq = seed.client_seq,
+                                "gateway heartbeat stale — dropping order (safe mode)"
+                            );
+                            continue;
+                        }
+                    }
+
+                    let mut req = req;
+                    req.reduce_only = seed.reduce_only;
+                    req.client_seq = seed.client_seq;
+                    req.origin_ts_ns = origin_ts_ns;
+
+                    if let Err(e) = submit(req.clone(), seed, origin_ts_ns) {
+                        error!(
+                            target: "strategy::orders",
+                            exchange = ?req.exchange,
+                            symbol = %req.symbol.as_str(),
+                            side = ?req.side,
+                            qty = req.qty,
+                            price = ?req.price,
+                            client_id = %req.client_id,
+                            error = %e,
+                            "order drain submit failed"
+                        );
+                    }
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                    tokio::task::yield_now().await;
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        info!(target: "strategy", "order drain task exiting");
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

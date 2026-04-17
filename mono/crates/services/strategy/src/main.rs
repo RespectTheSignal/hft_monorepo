@@ -37,7 +37,7 @@
 #![deny(rust_2018_idioms)]
 
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -70,8 +70,9 @@ use tracing::{error, info, warn};
 use hft_config::{order_egress::OrderEgressMode, AppConfig, ExchangeConfig, ShmBackendKind};
 use hft_telemetry::{counter_inc, CounterKey};
 use strategy::{
-    start, v6::V6Strategy, v7::V7Strategy, v8::V8Strategy, NoopStrategy, OrderEgressMetaSeed,
-    OrderEnvelope, OrderResultInfo, OrderSender, ResultStatus, StrategyControl, StrategyHandle,
+    start, spawn_order_drain_loop_with_now, v6::V6Strategy, v7::V7Strategy, v8::V8Strategy,
+    GatewayLiveness, NoopStrategy, OrderEgressMetaSeed, OrderEnvelope, OrderResultInfo,
+    OrderSender, ResultStatus, StrategyControl, StrategyHandle,
 };
 
 #[global_allocator]
@@ -474,46 +475,6 @@ fn build_drain_egress(cfg: &AppConfig) -> Result<DrainEgress> {
     }
 }
 
-/// gateway heartbeat 기반 liveness 추적.
-///
-/// `Arc<AtomicU64>` 에 마지막 heartbeat epoch_ns 를 저장한다.
-/// - 값 0 은 "아직 heartbeat 수신 전" — startup grace 로 alive 간주.
-/// - `is_alive(now_ns)` 가 false 면 strategy 가 safe mode 진입.
-#[derive(Clone)]
-struct GatewayLiveness {
-    last_heartbeat_ns: Arc<AtomicU64>,
-    timeout_ns: u64,
-}
-
-impl GatewayLiveness {
-    fn new(timeout_ms: u64) -> Self {
-        Self {
-            last_heartbeat_ns: Arc::new(AtomicU64::new(0)),
-            timeout_ns: timeout_ms.saturating_mul(1_000_000),
-        }
-    }
-
-    /// heartbeat 수신 시 호출.
-    fn touch(&self, ts_ns: u64) {
-        self.last_heartbeat_ns.store(ts_ns, Ordering::Release);
-    }
-
-    /// gateway 가 살아있는지 판별.
-    /// - timeout_ns == 0: 검사 비활성, 항상 true.
-    /// - last == 0: startup grace, 항상 true.
-    /// - otherwise: now - last <= timeout.
-    fn is_alive(&self, now_ns: u64) -> bool {
-        if self.timeout_ns == 0 {
-            return true;
-        }
-        let last = self.last_heartbeat_ns.load(Ordering::Acquire);
-        if last == 0 {
-            return true;
-        }
-        now_ns.saturating_sub(last) <= self.timeout_ns
-    }
-}
-
 fn decode_zero_padded_string(bytes: &[u8]) -> String {
     let len = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
     String::from_utf8_lossy(&bytes[..len]).into_owned()
@@ -673,55 +634,10 @@ fn spawn_order_drain_with_now<F>(
 where
     F: Fn() -> u64 + Send + 'static,
 {
-    tokio::spawn(async move {
-        loop {
-            if cancel.is_cancelled() {
-                break;
-            }
-            match rx.recv_timeout(Duration::from_millis(50)) {
-                Ok((req, seed)) => {
-                    let origin_ts_ns = now_ns();
-
-                    if let Some(ref lv) = liveness {
-                        if !lv.is_alive(origin_ts_ns) {
-                            counter_inc(CounterKey::StrategyGatewayStale);
-                            warn!(
-                                target: "strategy::orders",
-                                client_seq = seed.client_seq,
-                                "gateway heartbeat stale — dropping order (safe mode)"
-                            );
-                            continue;
-                        }
-                    }
-
-                    let mut req = req;
-                    req.reduce_only = seed.reduce_only;
-                    req.client_seq = seed.client_seq;
-                    req.origin_ts_ns = origin_ts_ns;
-                    match egress.try_submit(&req, &seed, origin_ts_ns) {
-                        Ok(SubmitOutcome::Sent | SubmitOutcome::WouldBlock) => {}
-                        Err(e) => {
-                            error!(
-                                target: "strategy::orders",
-                                exchange = ?req.exchange,
-                                symbol = %req.symbol.as_str(),
-                                side = ?req.side,
-                                qty = req.qty,
-                                price = ?req.price,
-                                client_id = %req.client_id,
-                                error = %e,
-                                "order drain submit failed"
-                            );
-                        }
-                    }
-                }
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                    tokio::task::yield_now().await;
-                }
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
-            }
+    spawn_order_drain_loop_with_now(rx, cancel, now_ns, liveness, move |req, seed, origin_ts_ns| {
+        match egress.try_submit(&req, &seed, origin_ts_ns)? {
+            SubmitOutcome::Sent | SubmitOutcome::WouldBlock => Ok::<(), SubmitError>(()),
         }
-        info!(target: "strategy::main", "order drain task exiting");
     })
 }
 
@@ -1244,7 +1160,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        assert_eq!(lv.last_heartbeat_ns.load(Ordering::Acquire), 42_000_000_000);
+        assert_eq!(lv.last_heartbeat_ns(), 42_000_000_000);
         assert!(control_rx.try_recv().is_err());
 
         cancel.cancel();
