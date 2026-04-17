@@ -347,7 +347,10 @@ impl Strategy for V7Strategy {
                 unrealized_pnl_usdt,
             } => self.set_account_balance(total_usdt, unrealized_pnl_usdt),
             SetAccountNetPosition { net_usdt } => self.set_account_net_position(net_usdt),
-            OrderResult(_) => {}
+            OrderResult(_)
+            | WsPositionUpdate { .. }
+            | WsBalanceUpdate { .. }
+            | WsOrderUpdate { .. } => {}
         }
     }
 

@@ -283,7 +283,7 @@ Funding / EMA / misc: ✅
 - [x] `POST /orders` with `{account, contract, price(str), reduce_only, order_type, size(str, ±), tif, text, message.timestamp}` → `GateExecutor::place_order` (Buy=+/Sell=- sign, Market→price=0+tif=ioc) ✅
 - [x] `DELETE /orders/{id}` cancel (404 → already-cancelled 취급) ✅
 - [x] `GET /positions`, `GET /orders`, `GET /my_trades`, `GET /accounts` — 폴링 경로는 `GateAccountClient::fetch_contracts / fetch_positions / fetch_accounts` 로 Phase 2 D 에서 구현 ✅
-- [ ] WS user stream: order updates, position updates → `hft-exchange-gate::user_stream` **TODO** Phase 2 E — 현재는 REST 폴링 (200ms 기본) 로 대체.
+- [x] WS user stream: order updates, position updates → `hft-exchange-gate::user_stream` + `services/strategy` realtime cache/control fan-out ✅ (REST 폴링 fallback 유지)
 - [~] Puppeteer fallback: POST `{ORDER_URL}` — **Drop reason**: `go/order-processor` 별도 트랙 유지. Rust 전략은 직접 REST 만.
 
 ### 3.9 Health / Supervisor — **TODO** (Phase 2 E)
@@ -408,7 +408,7 @@ Funding / EMA / misc: ✅
   - [x] `create_order`, `cancel_order` → `GateExecutor::place_order/cancel` ✅
   - [x] order param: all fields matched (size sign, TIF, text) ✅
   - [ ] `list_futures_orders`, `list_futures_trades`, fee calc (`paid_fee_ratio=0.35`, `fee_bp=3`), instant profit bp, order success/profitable rate — **TODO** Phase 2 E 이후 (현재 전략 레벨 `OrderRateTracker` 가 근사 커버).
-  - [ ] WS reconnect for user stream — **TODO** §3.8 참조.
+  - [x] WS reconnect for user stream — `hft-exchange-gate::user_stream` 내부 exponential backoff + 재인증/재구독 ✅
 - [~] `order_manager_v2/v4/v5.py` — **Drop reason**: deprecated (v3 수렴).
 - [ ] `order_manager_v6.py` (slippage) → `services/strategy/close` **TODO** Phase 2 E.
 - [ ] `order_manager_mm.py` → `hft-strategy-mm` **TODO** P2 later.
@@ -418,7 +418,7 @@ Funding / EMA / misc: ✅
 - [x] `base_market_watcher.py` → `hft-exchange-api::ExchangeFeed` trait ✅
 - [x] `binance_market_watcher_v5.py` → `hft-exchange-binance` (zero-alloc typed Deserialize + Backoff + LatencyStamps) ✅
 - [~] `binance_market_watcher{,_v2,_v3,_v4}.py`, `_ws.py` — **Drop reason**: deprecated.
-- [x] `gate_market_watcher_v3.py` → `hft-exchange-gate` ✅ (user stream 은 §3.8 pending)
+- [x] `gate_market_watcher_v3.py` → `hft-exchange-gate` ✅ (user stream 포함 §3.8 완료)
 - [~] `gate_market_watcher{,_v2}.py`, `_zmq.py` — **Drop reason**: deprecated.
 - [x] `bybit_market_watcher.py` → `hft-exchange-bybit` ✅
 - [x] `okx_market_watcher.py` → `hft-exchange-okx` ✅

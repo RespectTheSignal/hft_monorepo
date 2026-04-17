@@ -70,7 +70,10 @@ pub struct CloseUnhealthyStrategy {
 
 impl CloseUnhealthyStrategy {
     pub fn new(cfg: Arc<StrategyConfig>, risk: RiskConfig) -> Self {
-        let close_interval_ms = cfg.trade_settings.same_side_price_time_restriction_ms_min.max(0);
+        let close_interval_ms = cfg
+            .trade_settings
+            .same_side_price_time_restriction_ms_min
+            .max(0);
         let close_stale_minutes = cfg.trade_settings.close_stale_minutes.max(0);
         Self {
             cfg,
@@ -129,8 +132,7 @@ impl CloseUnhealthyStrategy {
         let quote_stale = now_ms.saturating_sub(quote.last_ms) >= self.unhealthy_threshold_ms;
         let position_stale = exposure.position_update_time_sec > 0
             && now_ms / 1000
-                >= exposure.position_update_time_sec
-                    + self.close_stale_minutes.saturating_mul(60);
+                >= exposure.position_update_time_sec + self.close_stale_minutes.saturating_mul(60);
         quote_stale || position_stale
     }
 
@@ -227,10 +229,16 @@ impl CloseUnhealthyStrategy {
             make_order_seed(seq, OrderLevel::LimitClose, self.tag()),
         ));
         self.orders_emitted = self.orders_emitted.saturating_add(1);
-        self.last_close_attempt_ms.insert(symbol.to_string(), now_ms);
+        self.last_close_attempt_ms
+            .insert(symbol.to_string(), now_ms);
         self.rate.push(&symbol_ref, now_ms);
 
-        trace!(symbol, qty = rc.order_size, price, "close_unhealthy order emitted");
+        trace!(
+            symbol,
+            qty = rc.order_size,
+            price,
+            "close_unhealthy order emitted"
+        );
         debug!(
             target: "strategy::close_unhealthy",
             symbol,
@@ -277,7 +285,10 @@ impl Strategy for CloseUnhealthyStrategy {
                 unrealized_pnl_usdt,
             } => self.set_account_balance(total_usdt, unrealized_pnl_usdt),
             SetAccountNetPosition { .. } => {}
-            OrderResult(_) => {}
+            OrderResult(_)
+            | WsPositionUpdate { .. }
+            | WsBalanceUpdate { .. }
+            | WsOrderUpdate { .. } => {}
         }
     }
 

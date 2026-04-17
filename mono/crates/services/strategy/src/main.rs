@@ -46,7 +46,10 @@ use crossbeam_channel::{Receiver, Sender};
 use hft_common::health_server::{start_health_server, HealthServerConfig};
 use hft_common::supervisor::{run_with_restart, RestartConfig, SupervisorExit};
 use hft_exchange_api::{CancellationToken, OrderRequest};
-use hft_exchange_gate::{AccountPoller, BalanceSlot, GateAccountClient, PollerHandle};
+use hft_exchange_gate::{
+    AccountBalance, AccountPoller, BalanceSlot, BalanceUpdatePayload, GateAccountClient,
+    GateUserStream, PollerHandle, PositionUpdatePayload, UserStreamCallback, UserStreamEvent,
+};
 use hft_exchange_rest::{Credentials, RestClient};
 use hft_order_egress::{
     PolicyOrderEgress, ShmOrderEgress, SubmitError, SubmitOutcome, ZmqOrderEgress,
@@ -60,10 +63,10 @@ use hft_strategy_config::StrategyConfig;
 use hft_strategy_core::risk::RiskConfig;
 use hft_strategy_runtime::{
     AccountMembership, LastOrderStore, OrderRateTracker, PositionCache, PositionOracleImpl,
-    SymbolMetaCache,
+    PositionSnapshot, SymbolMetaCache, SymbolPosition,
 };
 use hft_time::{Clock, SystemClock};
-use hft_types::ExchangeId;
+use hft_types::{ExchangeId, Symbol};
 use hft_zmq::Context as ZmqContext;
 use subscriber::InprocQueue;
 use tokio::task::JoinHandle;
@@ -223,27 +226,28 @@ fn build_account_membership(strategy_cfg: &StrategyConfig) -> AccountMembership 
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// `GATE_API_KEY` + `GATE_API_SECRET` 가 있으면 Gate REST poller 를 세팅, 없으면 `None`.
+fn gate_api_credentials() -> Option<(String, String)> {
+    let api_key = std::env::var("GATE_API_KEY")
+        .ok()
+        .filter(|v| !v.is_empty())?;
+    let api_secret = std::env::var("GATE_API_SECRET")
+        .ok()
+        .filter(|v| !v.is_empty())?;
+    Some((api_key, api_secret))
+}
+
+/// `GATE_API_KEY` + `GATE_API_SECRET` 가 있으면 Gate REST poller 를 세팅, 없으면 `None`.
 fn maybe_spawn_gate_poller(
     meta: Arc<SymbolMetaCache>,
     positions: Arc<PositionCache>,
     balance: Arc<BalanceSlot>,
 ) -> Option<PollerHandle> {
-    let key = match std::env::var("GATE_API_KEY") {
-        Ok(v) if !v.is_empty() => v,
-        _ => {
+    let (key, secret) = match gate_api_credentials() {
+        Some(creds) => creds,
+        None => {
             warn!(
                 target: "strategy::main",
-                "GATE_API_KEY not set — skipping Gate account poller (positions & balance stay 0)"
-            );
-            return None;
-        }
-    };
-    let secret = match std::env::var("GATE_API_SECRET") {
-        Ok(v) if !v.is_empty() => v,
-        _ => {
-            warn!(
-                target: "strategy::main",
-                "GATE_API_SECRET not set — skipping Gate account poller"
+                "Gate API credentials missing — skipping Gate account poller (positions & balance stay 0)"
             );
             return None;
         }
@@ -283,6 +287,187 @@ fn maybe_spawn_gate_poller(
             None
         }
     }
+}
+
+fn parse_ws_decimal(field: &str, raw: &str) -> Option<f64> {
+    match raw.parse::<f64>() {
+        Ok(v) => Some(v),
+        Err(e) => {
+            warn!(
+                target: "strategy::user_stream",
+                field,
+                raw,
+                error = %e,
+                "failed to parse Gate WS decimal field"
+            );
+            None
+        }
+    }
+}
+
+fn push_strategy_control(
+    control_tx: &Sender<StrategyControl>,
+    ctrl: StrategyControl,
+    source: &str,
+) {
+    if let Err(e) = control_tx.try_send(ctrl) {
+        match e {
+            crossbeam_channel::TrySendError::Full(_) => {
+                counter_inc(CounterKey::StrategyControlDropped);
+                warn!(
+                    target: "strategy::user_stream",
+                    source,
+                    "user stream control channel full — dropping control message"
+                );
+            }
+            crossbeam_channel::TrySendError::Disconnected(_) => {
+                warn!(
+                    target: "strategy::user_stream",
+                    source,
+                    "user stream control channel disconnected"
+                );
+            }
+        }
+    }
+}
+
+fn recompute_position_totals(snapshot: &mut PositionSnapshot) {
+    let mut total_long = 0.0;
+    let mut total_short = 0.0;
+    for pos in snapshot.by_symbol.values() {
+        if pos.notional_usdt > 0.0 {
+            total_long += pos.notional_usdt;
+        } else {
+            total_short += pos.notional_usdt.abs();
+        }
+    }
+    snapshot.total_long_usdt = total_long;
+    snapshot.total_short_usdt = total_short;
+}
+
+fn apply_ws_balance_update(slot: &BalanceSlot, payload: &BalanceUpdatePayload) {
+    let Some(total_usdt) = parse_ws_decimal("balance", &payload.balance) else {
+        return;
+    };
+    let current = slot.load();
+    slot.store(Arc::new(AccountBalance {
+        total_usdt,
+        unrealized_pnl_usdt: current.unrealized_pnl_usdt,
+        available_usdt: total_usdt,
+    }));
+}
+
+fn apply_ws_position_update(
+    positions: &PositionCache,
+    meta: &SymbolMetaCache,
+    payload: &PositionUpdatePayload,
+) {
+    let symbol = Symbol::new(payload.contract.as_str());
+    let mark_price = parse_ws_decimal("mark_price", &payload.mark_price)
+        .or_else(|| parse_ws_decimal("entry_price", &payload.entry_price))
+        .unwrap_or(0.0);
+    let quanto_multiplier = meta
+        .get(&symbol)
+        .map(|m| m.quanto_multiplier)
+        .unwrap_or(1.0);
+    let mut snapshot = (*positions.snapshot()).clone();
+
+    if payload.size == 0 {
+        snapshot.by_symbol.remove(&symbol);
+    } else {
+        let update_time_sec = if payload.update_time > 0 {
+            payload.update_time
+        } else {
+            chrono_now_ms() / 1000
+        };
+        snapshot.by_symbol.insert(
+            symbol,
+            SymbolPosition {
+                notional_usdt: payload.size as f64 * mark_price * quanto_multiplier,
+                update_time_sec,
+            },
+        );
+    }
+
+    snapshot.taken_at_ms = chrono_now_ms();
+    recompute_position_totals(&mut snapshot);
+    positions.store(snapshot);
+}
+
+fn spawn_gate_user_stream(
+    meta: Arc<SymbolMetaCache>,
+    positions: Arc<PositionCache>,
+    balance: Arc<BalanceSlot>,
+    control_tx: Sender<StrategyControl>,
+    cancel: CancellationToken,
+) -> Option<JoinHandle<()>> {
+    let (api_key, api_secret) = match gate_api_credentials() {
+        Some(creds) => creds,
+        None => {
+            info!(
+                target: "strategy::main",
+                "Gate API credentials missing — WS user stream disabled, REST polling only"
+            );
+            return None;
+        }
+    };
+
+    Some(tokio::spawn(async move {
+        let user_stream = GateUserStream::new(api_key, api_secret);
+        let callback: UserStreamCallback = Arc::new(move |ev| match ev {
+            UserStreamEvent::PositionUpdate(payload) => {
+                apply_ws_position_update(&positions, &meta, &payload);
+                let entry_price =
+                    parse_ws_decimal("entry_price", &payload.entry_price).unwrap_or(0.0);
+                let unrealised_pnl =
+                    parse_ws_decimal("unrealised_pnl", &payload.unrealised_pnl).unwrap_or(0.0);
+                let mark_price = parse_ws_decimal("mark_price", &payload.mark_price).unwrap_or(0.0);
+                push_strategy_control(
+                    &control_tx,
+                    StrategyControl::WsPositionUpdate {
+                        contract: payload.contract,
+                        size: payload.size,
+                        entry_price,
+                        unrealised_pnl,
+                        mark_price,
+                    },
+                    "position_update",
+                );
+            }
+            UserStreamEvent::BalanceUpdate(payload) => {
+                apply_ws_balance_update(&balance, &payload);
+                let balance_value = parse_ws_decimal("balance", &payload.balance).unwrap_or(0.0);
+                let change = parse_ws_decimal("change", &payload.change).unwrap_or(0.0);
+                push_strategy_control(
+                    &control_tx,
+                    StrategyControl::WsBalanceUpdate {
+                        balance: balance_value,
+                        change,
+                    },
+                    "balance_update",
+                );
+            }
+            UserStreamEvent::OrderUpdate(payload) => {
+                let fill_price = parse_ws_decimal("fill_price", &payload.fill_price).unwrap_or(0.0);
+                push_strategy_control(
+                    &control_tx,
+                    StrategyControl::WsOrderUpdate {
+                        order_id: payload.id,
+                        contract: payload.contract,
+                        status: payload.status,
+                        left: payload.left,
+                        fill_price,
+                    },
+                    "order_update",
+                );
+            }
+            UserStreamEvent::UserTrade(_) => {}
+        });
+
+        if let Err(e) = user_stream.run(callback, cancel).await {
+            warn!(error = %e, "Gate WS user stream stopped");
+        }
+    }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -732,6 +917,7 @@ struct StackedHandles {
     strategy: StrategyHandle,
     subscriber: subscriber::SubscriberHandle,
     poller: Option<PollerHandle>,
+    user_stream: Option<JoinHandle<()>>,
     balance_pump: JoinHandle<()>,
     rate_decay: JoinHandle<()>,
     order_drain: JoinHandle<()>,
@@ -751,6 +937,9 @@ impl StackedHandles {
         self.aux_cancel.cancel();
         if let Some(p) = self.poller {
             p.shutdown().await;
+        }
+        if let Some(h) = self.user_stream {
+            let _ = h.await;
         }
         let _ = self.balance_pump.await;
         let _ = self.rate_decay.await;
@@ -841,13 +1030,21 @@ async fn bring_up_full(
         Variant::Noop => unreachable!("bring_up_full invoked with Noop"),
     };
 
+    // ── aux tasks. main_cancel 에 묶이되, 각자 상위 cancel 도 체인.
+    let aux_cancel = main_cancel.child_token();
+
+    let user_stream = spawn_gate_user_stream(
+        meta.clone(),
+        positions.clone(),
+        balance.clone(),
+        strategy_handle.control_tx.clone(),
+        aux_cancel.clone(),
+    );
+
     // ── subscriber.
     let sub_handle = subscriber::start(cfg.clone(), Arc::new(queue))
         .await
         .context("subscriber start")?;
-
-    // ── aux tasks. main_cancel 에 묶이되, 각자 상위 cancel 도 체인.
-    let aux_cancel = main_cancel.child_token();
 
     let pump_period = env_duration_ms("HFT_BALANCE_PUMP_MS", 500);
     let balance_pump = spawn_balance_pump(
@@ -894,6 +1091,7 @@ async fn bring_up_full(
         strategy: strategy_handle,
         subscriber: sub_handle,
         poller,
+        user_stream,
         balance_pump,
         rate_decay,
         order_drain,
@@ -951,14 +1149,12 @@ async fn run_inner(
 
     match variant {
         Variant::Noop => run_noop_idle(main_cancel).await?,
-        v @ (
-            Variant::V6
-            | Variant::V7
-            | Variant::V8
-            | Variant::CloseV1
-            | Variant::MmClose
-            | Variant::CloseUnhealthy
-        ) => {
+        v @ (Variant::V6
+        | Variant::V7
+        | Variant::V8
+        | Variant::CloseV1
+        | Variant::MmClose
+        | Variant::CloseUnhealthy) => {
             let stacked = bring_up_full(cfg, v, main_cancel.clone()).await?;
             main_cancel.cancelled().await;
             stacked.join_all().await;
@@ -1057,6 +1253,7 @@ mod tests {
         WireLevel,
     };
     use hft_shm::{OrderKind, OrderRingReader, OrderRingWriter, QuoteSlotWriter, TradeRingWriter};
+    use hft_strategy_runtime::ContractMeta;
     use hft_types::Symbol;
     use order_gateway::{
         start_with_arc, zmq_ingress::start_zmq_order_ingress, IngressEnvelope, NoopExecutor,
@@ -1151,6 +1348,62 @@ mod tests {
         let cfg = base_cfg();
         let risk = build_risk_config(&cfg);
         assert_eq!(risk.leverage, 50.0);
+    }
+
+    #[test]
+    fn ws_position_update_updates_cache() {
+        let meta = SymbolMetaCache::seeded([(
+            Symbol::new("BTC_USDT"),
+            ContractMeta {
+                quanto_multiplier: 1.0,
+                ..Default::default()
+            },
+        )]);
+        let positions = PositionCache::new();
+        let payload = PositionUpdatePayload {
+            contract: "BTC_USDT".to_string(),
+            size: 2,
+            entry_price: "65000.0".to_string(),
+            leverage: 20,
+            margin: "100".to_string(),
+            mode: "single".to_string(),
+            realised_pnl: "0".to_string(),
+            unrealised_pnl: "3.5".to_string(),
+            liq_price: "50000".to_string(),
+            mark_price: "65000.5".to_string(),
+            update_id: 7,
+            update_time: 1_710_000_100,
+        };
+
+        apply_ws_position_update(&positions, &meta, &payload);
+        let snapshot = positions.snapshot();
+        let symbol = Symbol::new("BTC_USDT");
+        let pos = snapshot.symbol_position(&symbol).expect("symbol position");
+        assert_eq!(pos.update_time_sec, 1_710_000_100);
+        assert!((pos.notional_usdt - 130_001.0).abs() < 1e-9);
+        assert!((snapshot.total_long_usdt - 130_001.0).abs() < 1e-9);
+        assert_eq!(snapshot.total_short_usdt, 0.0);
+    }
+
+    #[test]
+    fn ws_balance_update_updates_slot() {
+        let slot = BalanceSlot::from_pointee(AccountBalance {
+            total_usdt: 100.0,
+            unrealized_pnl_usdt: 7.5,
+            available_usdt: 90.0,
+        });
+        let payload = BalanceUpdatePayload {
+            balance: "123.5".to_string(),
+            change: "-1.0".to_string(),
+            fund_type: "fee".to_string(),
+            time_ms: 1_710_000_000_123,
+        };
+
+        apply_ws_balance_update(&slot, &payload);
+        let current = slot.load();
+        assert_eq!(current.total_usdt, 123.5);
+        assert_eq!(current.unrealized_pnl_usdt, 7.5);
+        assert_eq!(current.available_usdt, 123.5);
     }
 
     #[test]

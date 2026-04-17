@@ -22,13 +22,13 @@
 
 #![deny(rust_2018_idioms)]
 
-mod egress_seed;
-/// 기본 포지션 정리 전략.
-pub mod close_v1;
-/// MM 잔여 포지션 정리 전략.
-pub mod mm_close;
 /// 비정상 심볼 선별 정리 전략.
 pub mod close_unhealthy;
+/// 기본 포지션 정리 전략.
+pub mod close_v1;
+mod egress_seed;
+/// MM 잔여 포지션 정리 전략.
+pub mod mm_close;
 /// V6 전략 스캐폴드 (Phase 2 A 트랙 #3).
 pub mod v6;
 /// V7 전략 스캐폴드 (Phase 2 A 트랙 #3).
@@ -136,6 +136,24 @@ pub enum StrategyControl {
     },
     /// gateway ACK/REJECT 즉시 피드백.
     OrderResult(OrderResultInfo),
+    /// Gate WS 포지션 업데이트.
+    WsPositionUpdate {
+        contract: String,
+        size: i64,
+        entry_price: f64,
+        unrealised_pnl: f64,
+        mark_price: f64,
+    },
+    /// Gate WS 잔고 업데이트.
+    WsBalanceUpdate { balance: f64, change: f64 },
+    /// Gate WS 주문 상태 업데이트.
+    WsOrderUpdate {
+        order_id: i64,
+        contract: String,
+        status: String,
+        left: i64,
+        fill_price: f64,
+    },
 }
 
 /// gateway → strategy 결과 상태.

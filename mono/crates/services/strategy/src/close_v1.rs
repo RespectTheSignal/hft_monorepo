@@ -66,7 +66,10 @@ pub struct CloseV1Strategy {
 
 impl CloseV1Strategy {
     pub fn new(cfg: Arc<StrategyConfig>, risk: RiskConfig) -> Self {
-        let close_interval_ms = cfg.trade_settings.same_side_price_time_restriction_ms_min.max(0);
+        let close_interval_ms = cfg
+            .trade_settings
+            .same_side_price_time_restriction_ms_min
+            .max(0);
         Self {
             cfg,
             risk,
@@ -211,7 +214,8 @@ impl CloseV1Strategy {
             make_order_seed(seq, OrderLevel::LimitClose, self.tag()),
         ));
         self.orders_emitted = self.orders_emitted.saturating_add(1);
-        self.last_close_attempt_ms.insert(symbol.to_string(), now_ms);
+        self.last_close_attempt_ms
+            .insert(symbol.to_string(), now_ms);
         self.rate.push(&symbol_ref, now_ms);
 
         trace!(symbol, qty = rc.order_size, price, "CloseV1 order emitted");
@@ -259,7 +263,10 @@ impl Strategy for CloseV1Strategy {
                 unrealized_pnl_usdt,
             } => self.set_account_balance(total_usdt, unrealized_pnl_usdt),
             SetAccountNetPosition { .. } => {}
-            OrderResult(_) => {}
+            OrderResult(_)
+            | WsPositionUpdate { .. }
+            | WsBalanceUpdate { .. }
+            | WsOrderUpdate { .. } => {}
         }
     }
 
@@ -300,10 +307,7 @@ pub(crate) fn tif_to_api(raw: &'static str) -> TimeInForce {
 }
 
 pub(crate) fn base_close_size(ts: &TradeSettings) -> i64 {
-    ts.close_order_size
-        .unwrap_or(ts.order_size)
-        .max(1.0)
-        .ceil() as i64
+    ts.close_order_size.unwrap_or(ts.order_size).max(1.0).ceil() as i64
 }
 
 pub(crate) fn wall_clock_epoch_ms() -> i64 {
@@ -408,8 +412,9 @@ mod tests {
         ));
         let oracle = build_oracle(&[(symbol, notional, 0)]);
         let rate = Arc::new(OrderRateTracker::new());
-        let mut strat =
-            CloseV1Strategy::new(cfg, RiskConfig::default()).with_runtime(oracle).with_rate(rate);
+        let mut strat = CloseV1Strategy::new(cfg, RiskConfig::default())
+            .with_runtime(oracle)
+            .with_rate(rate);
         strat.set_account_balance(1_000_000.0, 0.0);
         strat
     }

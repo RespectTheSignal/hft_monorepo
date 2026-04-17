@@ -400,7 +400,10 @@ impl Strategy for V8Strategy {
             } => self.set_account_balance(total_usdt, unrealized_pnl_usdt),
             // v8 에는 net-position 개념이 없어 무시.
             SetAccountNetPosition { .. } => {}
-            OrderResult(_) => {}
+            OrderResult(_)
+            | WsPositionUpdate { .. }
+            | WsBalanceUpdate { .. }
+            | WsOrderUpdate { .. } => {}
         }
     }
 

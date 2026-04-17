@@ -55,11 +55,16 @@
 
 pub mod account;
 pub mod executor;
+pub mod user_stream;
 pub use account::{
     AccountBalance, AccountPoller, AccountPollerBuilder, BalanceSlot, GateAccountClient,
     GateAccountConfig, PollerHandle, PollerStats,
 };
 pub use executor::{GateExecutor, GateExecutorConfig};
+pub use user_stream::{
+    BalanceUpdatePayload, GateUserStream, OrderUpdatePayload, PositionUpdatePayload,
+    UserStreamCallback, UserStreamEvent, UserTradePayload,
+};
 
 use std::collections::HashMap;
 use std::fmt;

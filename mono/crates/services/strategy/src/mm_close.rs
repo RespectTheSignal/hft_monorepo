@@ -68,7 +68,10 @@ pub struct MmCloseStrategy {
 
 impl MmCloseStrategy {
     pub fn new(cfg: Arc<StrategyConfig>, risk: RiskConfig) -> Self {
-        let close_interval_ms = cfg.trade_settings.same_side_price_time_restriction_ms_min.max(0);
+        let close_interval_ms = cfg
+            .trade_settings
+            .same_side_price_time_restriction_ms_min
+            .max(0);
         Self {
             cfg,
             risk,
@@ -221,7 +224,8 @@ impl MmCloseStrategy {
             make_order_seed(seq, OrderLevel::LimitClose, self.tag()),
         ));
         self.orders_emitted = self.orders_emitted.saturating_add(1);
-        self.last_close_attempt_ms.insert(symbol.to_string(), now_ms);
+        self.last_close_attempt_ms
+            .insert(symbol.to_string(), now_ms);
         self.rate.push(&symbol_ref, now_ms);
 
         trace!(symbol, qty = rc.order_size, price, "mm_close order emitted");
@@ -271,7 +275,10 @@ impl Strategy for MmCloseStrategy {
                 unrealized_pnl_usdt,
             } => self.set_account_balance(total_usdt, unrealized_pnl_usdt),
             SetAccountNetPosition { .. } => {}
-            OrderResult(_) => {}
+            OrderResult(_)
+            | WsPositionUpdate { .. }
+            | WsBalanceUpdate { .. }
+            | WsOrderUpdate { .. } => {}
         }
     }
 
@@ -429,7 +436,11 @@ mod tests {
         let out = strat.eval(&btc);
 
         assert_eq!(out.len(), 2);
-        assert!(out.iter().any(|o| o.0.symbol.as_str() == "BTC_USDT" && o.0.side == ApiSide::Sell));
-        assert!(out.iter().any(|o| o.0.symbol.as_str() == "ETH_USDT" && o.0.side == ApiSide::Buy));
+        assert!(out
+            .iter()
+            .any(|o| o.0.symbol.as_str() == "BTC_USDT" && o.0.side == ApiSide::Sell));
+        assert!(out
+            .iter()
+            .any(|o| o.0.symbol.as_str() == "ETH_USDT" && o.0.side == ApiSide::Buy));
     }
 }
