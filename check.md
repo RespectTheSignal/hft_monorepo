@@ -53,7 +53,7 @@
 - [x] Step 8: order result back-channel (gateway ZMQ PUSH → strategy ZMQ PULL → `StrategyControl::OrderResult`)
 - [x] Cleanup: `StrategyAccountPollErr` / `StrategyControlDropped` CounterKey 정식 등재 + call site 전환
 - [x] Cleanup: mock Gate REST style strategy↔gateway result roundtrip integration test 추가 (`crates/testing/integration/tests/e2e_strategy_result.rs`)
-- [ ] ADR-0004 draft: SHM result ring / heartbeat / fill-stream 확장 범위 (현재 ZMQ reverse path 만 완료)
+- [x] ADR-0004 draft: SHM result ring / heartbeat / fill-stream 확장 범위 (현재 ZMQ reverse path 만 완료)
 - [x] Heartbeat: Gateway → Strategy liveness (STATUS_HEARTBEAT=255, GatewayLiveness, safe mode order drop)
 - [~] Naming cleanup: `shared_path` 드리프트 정렬 — 드리프트 없음 확인, `build_v2_backing` 중복은 의도적 서비스 분리
 - [~] `ShmOrderInvalid` → `OrderGatewayInvalidTotal` rename + `OrderGatewayInvalidWire` subset 분리 (ZMQ ingress invalid-wire path 는 `OrderGatewayInvalidWire` 로 이동 완료, SHM total/dashboard rename TBD)
@@ -139,7 +139,7 @@
   - [x] `is_internal:bool` @88, `_padding[7]` @89, `server_time:i64` @96, `publisher_sent_ms:i64` @104
   - [x] `subscriber_received_ms:i64` @112, `subscriber_dump_ms:i64` @120 (publisher 에서는 0)
 - [x] Topic 문자열: `{exchange}_{type}_{symbol}` — e.g. `binance_bookticker_BTC_USDT`, `gate_webbookticker_BTC_USDT` → `hft-protocol::topics::TopicBuilder` + `parse_topic` ✅
-- [ ] encode < 200ns, decode < 300ns bench → `crates/core/hft-protocol/benches/` **TODO**: bench 파일 미작성 (criterion dep 추가 필요).
+- [x] encode < 200ns, decode < 300ns bench → `crates/core/hft-protocol/benches/wire_codec.rs` 추가, criterion compile gate 연결.
 
 ### 1.6 Symbol 로딩
 - [x] `common_symbols.txt` 파일 로드 → `services/publisher::load_symbols` ✅
