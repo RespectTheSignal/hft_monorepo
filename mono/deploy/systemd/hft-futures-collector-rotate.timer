@@ -1,0 +1,11 @@
+; hft-futures-collector-rotate.timer — parquet 보관 기간 정리 스케줄러.
+
+[Unit]
+Description=HFT Collected Data Cleanup (30일 이상 삭제)
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

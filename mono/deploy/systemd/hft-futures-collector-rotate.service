@@ -1,0 +1,11 @@
+; hft-futures-collector-rotate.service — 30일 이상 지난 parquet 정리.
+;
+; collector 본체는 상시 데몬이고, 오래된 데이터 정리만 daily timer 로 분리한다.
+
+[Unit]
+Description=HFT Collected Data Cleanup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/find /data/hft/collected -type f -name *.parquet -mtime +30 -delete
+ExecStartPost=/usr/bin/find /data/hft/collected -type d -empty -delete

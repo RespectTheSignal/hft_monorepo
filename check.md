@@ -301,11 +301,11 @@ Funding / EMA / misc: ✅
 - [x] `--symbol` required arg → `tools/futures-collector::cli` ✅
 - [x] `$GATE_ORDERBOOK_PRECISIONS` env → `hft-exchange-gate` (정적 map) ✅
 - [x] WS: Gate web bookticker, Binance futures ✅
-- [ ] Parquet Hive partition `{out}/{symbol}/year=/month=/day=/hour=/` **TODO**: 현재 tool 스캐폴드만 있음. parquet 의존성 + schema 미구현.
-- [ ] BookTickerRow / TradeRow schema **TODO** (동반 작업).
+- [x] Parquet Hive partition `{out}/type={bookticker|trade}/year=/month=/day=/hour=/data.parquet` → `tools/futures-collector::ParquetRollingWriter` ✅
+- [x] BookTickerRow / TradeRow schema → Arrow/Parquet 스키마 구현 ✅
 - [x] reconnect backoff 30s max → `hft-exchange-api::Backoff` ✅
 - [ ] (Rewrite) 각 거래소 `ExchangeFeed::fetch_symbols()` 재사용 → 모든 거래소 심볼 upsert to supabase `symbols` table **TODO** Phase 3.
-- [ ] cron `*/10 * * * *` or systemd timer 단발 실행 **TODO** (deploy/systemd/ 에 timer unit 추가 필요).
+- [x] systemd service + cleanup timer → `deploy/systemd/hft-futures-collector*.{service,timer}` ✅
 - [ ] 거래소 중 1개 실패해도 다른 거래소 계속 **TODO**.
 
 ---
@@ -486,7 +486,7 @@ Funding / EMA / misc: ✅
 ### 11.5 거래소별 WS 스트림 (Python standalone) — ✅ 대부분 Rust 로 대체
 - [~] `gate_bookticker_ws_stream.py` / `gate_order_book_ws_stream.py` / `gate_trades_ws_stream.py` / `gate_fx_ws_stream.py` / `binance_publisher.py` / `binance_subscriber.py` / `bitget_bookticker_stream.py` / `bitget_collector.py` / `bybit_bookticker_ws_stream.py` — **Drop reason**: `services/publisher` + `hft-exchange-{gate,binance,bitget,bybit}` 로 완전 대체.
 - [ ] `bingx_bookticker_stream.py` + `bingx_collector.py` → 🔷 `hft-exchange-bingx` **TODO** Phase 3 if needed.
-- 📊 Parquet Hive 히스토리 기록은 `tools/futures-collector` 에서 커버 예정 (§4 참조).
+- 📊 Parquet Hive 히스토리 기록은 `tools/futures-collector` 에서 커버됨 (§4 참조).
 
 ### 11.6 Data collectors — **TODO** Phase 3
 - [ ] `my_trades_collector.py` → 🔷 `tools/my-trades-collector` **TODO** Phase 3.
@@ -602,7 +602,7 @@ Phase 1 완료 조건. **모두 통과 (2026-04-15 시점)**.
 - [x] `hft-testkit` — `MockFeed` + `WarmUp` 결정론 + `pipeline_harness!` 매크로 ✅
 - [x] `services/publisher` — worker + aggregator + `patch_stamp` + 100K msg/s p99.9 < 2.1ms (e2e_pipeline_mock 통과) ✅
 - [x] `services/subscriber` — crossbeam-channel 라우팅 + SHM bridge (feature-gated); legacy UDS bridge 는 드랍 ✅
-- [x] `tools/questdb-export` ✅ / `tools/futures-collector` (scaffold, Parquet 출력은 Phase 3) / `tools/latency-probe` ✅
+- [x] `tools/questdb-export` ✅ / `tools/futures-collector` ✅ (Parquet Hive 출력 + systemd units) / `tools/latency-probe` ✅
 - [x] `crates/testing/integration` — e2e 테스트 세트 통과 (`e2e_pipeline_mock.rs` stage p99.9 포함) ✅
 - [x] 전체 `cargo test --workspace` 녹색 (Phase 1 기준; Phase 2 D 이후 재실행 권장 — 아래 § 진행 상황 참조) ✅
 - [x] `make fmt lint` (rustfmt + clippy `-D warnings`) 통과 ✅

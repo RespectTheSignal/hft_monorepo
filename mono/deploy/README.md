@@ -26,7 +26,10 @@ deploy/
 ├── systemd/
 │   ├── hft-publisher.service    ← infra VM 내에서 publisher 기동
 │   ├── hft-order-gateway.service← infra VM 내에서 order-gateway 기동
-│   └── hft-strategy.service     ← strategy VM 내에서 hft-strategy 기동
+│   ├── hft-strategy.service     ← strategy VM 내에서 hft-strategy 기동
+│   ├── hft-futures-collector.service ← Parquet Hive 아카이버
+│   ├── hft-futures-collector-rotate.service ← 30일 초과 parquet 정리
+│   └── hft-futures-collector-rotate.timer   ← cleanup daily timer
 └── tmux/
     └── dev_layout.sh            ← 로컬 dev 환경 — 4분할 터미널로 pub/gw/strat 로그 동시 관찰
 ```
@@ -110,6 +113,27 @@ host:port 로 바꿔야 한다.
 3. SHM Ring Health
 4. Order Egress
 5. Heartbeat & Health
+
+## Futures Collector
+
+`systemd/hft-futures-collector.service` 는 publisher PUB 스트림을 구독해 시장 데이터를
+Parquet Hive 파티션으로 적재한다.
+
+- 경로 형식:
+  - `/data/hft/collected/type=bookticker/year=YYYY/month=MM/day=DD/hour=HH/data.parquet`
+  - `/data/hft/collected/type=trade/year=YYYY/month=MM/day=DD/hour=HH/data.parquet`
+- 기본 압축: `zstd` level 3
+- 용도: Pandas / DuckDB / Spark 등에서 partition pruning 가능한 offline 분석
+
+collector 본체는 상시 데몬으로 두고, 오래된 parquet 삭제는 아래 timer 가 담당한다.
+
+```sh
+systemctl enable --now hft-futures-collector.service
+systemctl enable --now hft-futures-collector-rotate.timer
+```
+
+`hft-futures-collector-rotate.service` 는 `/data/hft/collected` 아래 `*.parquet` 중
+30일이 지난 파일을 daily 로 삭제하고, 비게 된 디렉토리를 함께 정리한다.
 
 ## 주의
 

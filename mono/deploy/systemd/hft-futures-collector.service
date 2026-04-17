@@ -1,0 +1,51 @@
+; hft-futures-collector.service — SUB 스트림을 Parquet Hive 파티션으로 아카이브.
+;
+; 역할:
+;   - publisher PUB → subscriber SUB → futures-collector writer_loop 로 연결.
+;   - 시장 데이터 이벤트를 시간단위 Parquet 파일로 적재.
+;   - 분석 파이프라인(Pandas/DuckDB/Spark)은 Hive 파티션 디렉토리를 직접 읽는다.
+;
+; 운영 메모:
+;   - hot path 성격이 아니므로 CPU affinity 는 느슨하게 둔다.
+;   - collector 자체는 상시 데몬으로 실행하고, 오래된 파일 정리는 별도 timer/service
+;     (`hft-futures-collector-rotate.*`) 가 담당한다.
+
+[Unit]
+Description=HFT Futures Collector (Parquet archiver)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hft
+Group=hft
+WorkingDirectory=/opt/hft
+
+; ── 바이너리 ──────────────────────────────────────────────────────────────
+ExecStart=/opt/hft/bin/futures-collector \
+    --out-dir /data/hft/collected \
+    --compression zstd \
+    --zstd-level 3
+
+; ── 환경 ──────────────────────────────────────────────────────────────────
+EnvironmentFile=-/etc/hft/env
+Environment=HFT_LOG=info
+
+; ── 리소스 제한 ────────────────────────────────────────────────────────────
+CPUAffinity=10 11
+MemoryMax=2G
+LimitNOFILE=65536
+
+; ── 재시작 정책 ────────────────────────────────────────────────────────────
+Restart=on-failure
+RestartSec=10s
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+; ── 보안 hardening ─────────────────────────────────────────────────────────
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/data/hft/collected
+
+[Install]
+WantedBy=multi-user.target

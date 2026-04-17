@@ -13,7 +13,6 @@ path = "src/main.rs"
 [dependencies]
 hft-types = { workspace = true }
 hft-config = { workspace = true }
-hft-storage = { workspace = true }
 hft-time = { workspace = true }
 hft-telemetry = { workspace = true }
 hft-exchange-api = { workspace = true }
@@ -25,8 +24,7 @@ chrono = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-reqwest = { workspace = true }
 mimalloc = { workspace = true }
 ctrlc = { workspace = true }
+arrow = { workspace = true, features = ["prettyprint"] }
+parquet = { workspace = true, features = ["arrow", "snap", "zstd"] }
