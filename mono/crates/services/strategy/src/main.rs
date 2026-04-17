@@ -43,9 +43,11 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{Receiver, Sender};
+use hft_common::health_server::{start_health_server, HealthServerConfig};
 use hft_common::supervisor::{run_with_restart, RestartConfig, SupervisorExit};
 use hft_exchange_api::{CancellationToken, OrderRequest};
 use hft_exchange_gate::{AccountPoller, BalanceSlot, GateAccountClient, PollerHandle};
+use hft_exchange_rest::{Credentials, RestClient};
 use hft_order_egress::{
     PolicyOrderEgress, ShmOrderEgress, SubmitError, SubmitOutcome, ZmqOrderEgress,
 };
@@ -53,7 +55,6 @@ use hft_protocol::order_wire::{
     is_heartbeat_wire, OrderResultWire, WireError, ORDER_RESULT_WIRE_SIZE, STATUS_ACCEPTED,
     STATUS_HEARTBEAT, STATUS_REJECTED,
 };
-use hft_exchange_rest::{Credentials, RestClient};
 use hft_shm::{Backing, LayoutSpec, Role, SharedRegion, SubKind, SymbolTable};
 use hft_strategy_config::StrategyConfig;
 use hft_strategy_core::risk::RiskConfig;
@@ -69,9 +70,9 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
 use hft_config::{order_egress::OrderEgressMode, AppConfig, ExchangeConfig, ShmBackendKind};
-use hft_telemetry::{counter_inc, CounterKey};
+use hft_telemetry::{counter_inc, gauge_set, CounterKey, GaugeKey};
 use strategy::{
-    start, spawn_order_drain_loop_with_now, v6::V6Strategy, v7::V7Strategy, v8::V8Strategy,
+    spawn_order_drain_loop_with_now, start, v6::V6Strategy, v7::V7Strategy, v8::V8Strategy,
     GatewayLiveness, NoopStrategy, OrderEgressMetaSeed, OrderEnvelope, OrderResultInfo,
     OrderSender, ResultStatus, StrategyControl, StrategyHandle,
 };
@@ -140,6 +141,22 @@ fn install_signal_handler(cancel: CancellationToken) {
     if let Err(e) = install_result {
         warn!(error = %e, "failed to install ctrlc handler");
     }
+}
+
+fn spawn_uptime_gauge_updater(cancel: CancellationToken) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let boot_instant = std::time::Instant::now();
+        loop {
+            gauge_set(
+                GaugeKey::UptimeSeconds,
+                boot_instant.elapsed().as_secs() as i64,
+            );
+            tokio::select! {
+                _ = cancel.cancelled() => break,
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            }
+        }
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -347,6 +364,36 @@ fn chrono_now_ms() -> i64 {
     SystemClock::default().now_ms()
 }
 
+fn spawn_strategy_metrics_updater(
+    liveness: Option<GatewayLiveness>,
+    cancel: CancellationToken,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let clock = SystemClock::default();
+        loop {
+            gauge_set(GaugeKey::ActiveStrategies, 1);
+            let heartbeat_age_ms = match liveness.as_ref() {
+                Some(lv) => {
+                    let last = lv.last_heartbeat_ns();
+                    if last == 0 {
+                        0
+                    } else {
+                        clock.epoch_ns().saturating_sub(last) / 1_000_000
+                    }
+                }
+                None => 0,
+            };
+            gauge_set(GaugeKey::LastHeartbeatAgeMs, heartbeat_age_ms as i64);
+            tokio::select! {
+                _ = cancel.cancelled() => break,
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            }
+        }
+        gauge_set(GaugeKey::ActiveStrategies, 0);
+        gauge_set(GaugeKey::LastHeartbeatAgeMs, 0);
+    })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Order drain (Phase 2 D — Phase 2 E 에서 ZMQ PUSH 로 교체)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -420,8 +467,14 @@ fn build_shared_layout_spec(cfg: &AppConfig) -> Result<LayoutSpec> {
 fn open_drain_symtab(cfg: &AppConfig, ring_id: u32) -> Result<Arc<SymbolTable>> {
     match cfg.shm.backend {
         ShmBackendKind::LegacyMultiFile => {
-            let symtab = SymbolTable::open_or_create(&cfg.shm.symtab_path, cfg.shm.symbol_table_capacity)
-                .with_context(|| format!("SymbolTable::open_or_create({})", cfg.shm.symtab_path.display()))?;
+            let symtab =
+                SymbolTable::open_or_create(&cfg.shm.symtab_path, cfg.shm.symbol_table_capacity)
+                    .with_context(|| {
+                        format!(
+                            "SymbolTable::open_or_create({})",
+                            cfg.shm.symtab_path.display()
+                        )
+                    })?;
             Ok(Arc::new(symtab))
         }
         ShmBackendKind::DevShm | ShmBackendKind::Hugetlbfs | ShmBackendKind::PciBar => {
@@ -477,7 +530,10 @@ fn build_drain_egress(cfg: &AppConfig) -> Result<DrainEgress> {
 }
 
 fn decode_zero_padded_string(bytes: &[u8]) -> String {
-    let len = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+    let len = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
     String::from_utf8_lossy(&bytes[..len]).into_owned()
 }
 
@@ -635,11 +691,15 @@ fn spawn_order_drain_with_now<F>(
 where
     F: Fn() -> u64 + Send + 'static,
 {
-    spawn_order_drain_loop_with_now(rx, cancel, now_ns, liveness, move |req, seed, origin_ts_ns| {
-        match egress.try_submit(&req, &seed, origin_ts_ns)? {
+    spawn_order_drain_loop_with_now(
+        rx,
+        cancel,
+        now_ns,
+        liveness,
+        move |req, seed, origin_ts_ns| match egress.try_submit(&req, &seed, origin_ts_ns)? {
             SubmitOutcome::Sent | SubmitOutcome::WouldBlock => Ok::<(), SubmitError>(()),
-        }
-    })
+        },
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -654,6 +714,7 @@ struct StackedHandles {
     rate_decay: JoinHandle<()>,
     order_drain: JoinHandle<()>,
     result_listener: Option<JoinHandle<()>>,
+    strategy_metrics: JoinHandle<()>,
     /// sub-task 들의 shutdown token — 주 cancel 과 분리.
     aux_cancel: CancellationToken,
 }
@@ -675,6 +736,7 @@ impl StackedHandles {
         if let Some(h) = self.result_listener {
             let _ = h.await;
         }
+        let _ = self.strategy_metrics.await;
         self.subscriber.join().await;
         self.strategy.join().await;
     }
@@ -762,9 +824,7 @@ async fn bring_up_full(
     let liveness = if cfg.order_egress.heartbeat_timeout_ms > 0
         && cfg.order_egress.result_zmq_connect.is_some()
     {
-        Some(GatewayLiveness::new(
-            cfg.order_egress.heartbeat_timeout_ms,
-        ))
+        Some(GatewayLiveness::new(cfg.order_egress.heartbeat_timeout_ms))
     } else {
         None
     };
@@ -788,6 +848,7 @@ async fn bring_up_full(
         ),
         None => None,
     };
+    let strategy_metrics = spawn_strategy_metrics_updater(liveness, aux_cancel.clone());
 
     Ok(StackedHandles {
         strategy: strategy_handle,
@@ -797,16 +858,20 @@ async fn bring_up_full(
         rate_decay,
         order_drain,
         result_listener,
+        strategy_metrics,
         aux_cancel,
     })
 }
 
 fn env_duration_ms(key: &str, default_ms: u64) -> Duration {
     match std::env::var(key) {
-        Ok(v) => v.parse::<u64>().map(Duration::from_millis).unwrap_or_else(|_| {
-            warn!(target: "strategy::main", %key, %v, "invalid duration; using default");
-            Duration::from_millis(default_ms)
-        }),
+        Ok(v) => v
+            .parse::<u64>()
+            .map(Duration::from_millis)
+            .unwrap_or_else(|_| {
+                warn!(target: "strategy::main", %key, %v, "invalid duration; using default");
+                Duration::from_millis(default_ms)
+            }),
         Err(_) => Duration::from_millis(default_ms),
     }
 }
@@ -878,20 +943,35 @@ async fn main() -> ExitCode {
     let variant = Variant::from_env();
     let main_cancel = CancellationToken::new();
     install_signal_handler(main_cancel.clone());
-
-    match run_with_restart(
-        "strategy",
-        RestartConfig::default(),
-        main_cancel.clone(),
-        {
-            let cfg = cfg.clone();
-            move || {
-                let cfg = cfg.clone();
-                let cancel = main_cancel.clone();
-                async move { run_inner(cfg, variant, cancel).await }
-            }
+    let _uptime = spawn_uptime_gauge_updater(main_cancel.clone());
+    let health_port = cfg.telemetry.prom_port.unwrap_or(9100);
+    let _health = match start_health_server(
+        HealthServerConfig {
+            port: health_port,
+            service_name: "strategy".into(),
         },
+        main_cancel.clone(),
     )
+    .await
+    {
+        Ok(handle) => {
+            info!(addr = %handle.local_addr, "health server started");
+            handle
+        }
+        Err(e) => {
+            eprintln!("[strategy] health server start failed: {e:#}");
+            return ExitCode::from(1);
+        }
+    };
+
+    match run_with_restart("strategy", RestartConfig::default(), main_cancel.clone(), {
+        let cfg = cfg.clone();
+        move || {
+            let cfg = cfg.clone();
+            let cancel = main_cancel.clone();
+            async move { run_inner(cfg, variant, cancel).await }
+        }
+    })
     .await
     {
         Ok(SupervisorExit::Clean) => ExitCode::SUCCESS,
@@ -917,14 +997,23 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    use hft_config::{order_egress::{BackpressurePolicy, ZmqOrderEgressConfig}, ZmqConfig};
+    use hft_config::{
+        order_egress::{BackpressurePolicy, ZmqOrderEgressConfig},
+        ZmqConfig,
+    };
     use hft_exchange_api::{OrderSide, OrderType, TimeInForce};
-    use hft_protocol::{order_wire::{OrderRequestWire, OrderResultWire, ORDER_REQUEST_WIRE_SIZE, STATUS_ACCEPTED, STATUS_REJECTED}, WireLevel};
+    use hft_protocol::{
+        order_wire::{
+            OrderRequestWire, OrderResultWire, ORDER_REQUEST_WIRE_SIZE, STATUS_ACCEPTED,
+            STATUS_REJECTED,
+        },
+        WireLevel,
+    };
     use hft_shm::{OrderKind, OrderRingReader, OrderRingWriter, QuoteSlotWriter, TradeRingWriter};
     use hft_types::Symbol;
     use order_gateway::{
         start_with_arc, zmq_ingress::start_zmq_order_ingress, IngressEnvelope, NoopExecutor,
-        Route, RoutingTable, DEDUP_CACHE_CAP_DEFAULT, RetryPolicy,
+        RetryPolicy, Route, RoutingTable, DEDUP_CACHE_CAP_DEFAULT,
     };
     use tempfile::tempdir;
     use zmq::Socket;
@@ -973,12 +1062,21 @@ mod tests {
             Role::Publisher,
         )
         .expect("publisher shared region");
-        let _ = QuoteSlotWriter::from_region(shared.sub_region(SubKind::Quote).unwrap(), spec.quote_slot_count)
-            .expect("quote writer");
-        let _ = TradeRingWriter::from_region(shared.sub_region(SubKind::Trade).unwrap(), spec.trade_ring_capacity)
-            .expect("trade writer");
-        let _ = SymbolTable::from_region(shared.sub_region(SubKind::Symtab).unwrap(), spec.symtab_capacity)
-            .expect("symtab");
+        let _ = QuoteSlotWriter::from_region(
+            shared.sub_region(SubKind::Quote).unwrap(),
+            spec.quote_slot_count,
+        )
+        .expect("quote writer");
+        let _ = TradeRingWriter::from_region(
+            shared.sub_region(SubKind::Trade).unwrap(),
+            spec.trade_ring_capacity,
+        )
+        .expect("trade writer");
+        let _ = SymbolTable::from_region(
+            shared.sub_region(SubKind::Symtab).unwrap(),
+            spec.symtab_capacity,
+        )
+        .expect("symtab");
         let _ = OrderRingWriter::from_region(
             shared.sub_region(SubKind::OrderRing { vm_id: 0 }).unwrap(),
             spec.order_ring_capacity,
@@ -1030,9 +1128,10 @@ mod tests {
         let path = dir.path().join("strategy-drain-shm.bin");
         let spec = sample_spec();
         let shared = boot_publisher(&path, spec);
-        let mut reader =
-            OrderRingReader::from_region(shared.sub_region(SubKind::OrderRing { vm_id: 0 }).unwrap())
-                .unwrap();
+        let mut reader = OrderRingReader::from_region(
+            shared.sub_region(SubKind::OrderRing { vm_id: 0 }).unwrap(),
+        )
+        .unwrap();
 
         let mut cfg = base_cfg();
         cfg.shm.backend = ShmBackendKind::DevShm;
@@ -1059,8 +1158,11 @@ mod tests {
         assert_eq!(frame.client_id, 7);
         assert_eq!(frame.ts_ns, 123);
         assert_eq!(frame.exchange_id, hft_shm::exchange_to_u8(ExchangeId::Gate));
-        let symtab = SymbolTable::open_from_region(shared.sub_region(SubKind::Symtab).unwrap()).unwrap();
-        let symbol_idx = symtab.lookup(ExchangeId::Gate, "BTC_USDT").expect("symbol idx");
+        let symtab =
+            SymbolTable::open_from_region(shared.sub_region(SubKind::Symtab).unwrap()).unwrap();
+        let symbol_idx = symtab
+            .lookup(ExchangeId::Gate, "BTC_USDT")
+            .expect("symbol idx");
         assert_eq!(frame.symbol_idx, symbol_idx);
         assert_eq!(frame.price, 10_000_000_000);
         assert_eq!(frame.size, 1);
@@ -1109,7 +1211,9 @@ mod tests {
         assert_eq!(wire.origin_ts_ns, 456);
         assert_eq!(&wire.text_tag[..2], b"v8");
         let symtab = SymbolTable::open(&cfg.shm.symtab_path).unwrap();
-        let symbol_id = symtab.lookup(ExchangeId::Gate, "BTC_USDT").expect("symbol id");
+        let symbol_id = symtab
+            .lookup(ExchangeId::Gate, "BTC_USDT")
+            .expect("symbol id");
         assert_eq!(wire.symbol_id, symbol_id);
     }
 

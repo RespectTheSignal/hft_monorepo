@@ -12,16 +12,19 @@
 //! - [`init`]: tracing + otel subscriber 조립, `TelemetryHandle` 반환 (drop 시 flush).
 //! - [`record_stage_nanos`] / [`dump_hdr`]: HDR histogram.
 //! - [`counter_inc`] / [`counters_snapshot`]: prometheus-친화 atomic counter.
+//! - [`gauge_set`] / [`gauges_snapshot`]: health/metrics endpoint 용 gauge.
 //! - [`pin_current_thread`] / [`next_hot_core`]: 리눅스 CPU affinity.
 //! - [`trace_verbose!`] 매크로: feature-gated `tracing::trace!`.
 
 #![deny(rust_2018_idioms)]
 
+pub mod prometheus;
+
 use anyhow::{anyhow, Result};
 use hdrhistogram::Histogram;
 use hft_time::Stage;
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use tracing_subscriber::prelude::*;
 
@@ -110,9 +113,9 @@ pub fn init(cfg: &TelemetryConfig, service_name: &str) -> Result<TelemetryHandle
             .json()
             .with_target(true)
             .with_thread_ids(true);
-        let otel_layer =
-            otlp.as_ref()
-                .map(|t| tracing_opentelemetry::layer().with_tracer(t.tracer.clone()));
+        let otel_layer = otlp
+            .as_ref()
+            .map(|t| tracing_opentelemetry::layer().with_tracer(t.tracer.clone()));
         tracing_subscriber::registry()
             .with(env_filter)
             .with(fmt_layer)
@@ -122,9 +125,9 @@ pub fn init(cfg: &TelemetryConfig, service_name: &str) -> Result<TelemetryHandle
         let fmt_layer = tracing_subscriber::fmt::layer()
             .with_target(true)
             .with_thread_ids(true);
-        let otel_layer =
-            otlp.as_ref()
-                .map(|t| tracing_opentelemetry::layer().with_tracer(t.tracer.clone()));
+        let otel_layer = otlp
+            .as_ref()
+            .map(|t| tracing_opentelemetry::layer().with_tracer(t.tracer.clone()));
         tracing_subscriber::registry()
             .with(env_filter)
             .with(fmt_layer)
@@ -158,10 +161,7 @@ struct OtlpTracer {
 /// - 내부적으로 `install_batch(runtime::Tokio)` 를 사용하므로 현재 thread 는
 ///   tokio runtime 위에 있어야 한다. 없으면 실패 → warn 후 `None`.
 /// - `TelemetryHandle::Drop` 에서 provider 를 직접 shutdown 하여 flush 를 보장한다.
-fn build_otlp_tracer(
-    endpoint: Option<&str>,
-    service_name: &str,
-) -> Option<OtlpTracer> {
+fn build_otlp_tracer(endpoint: Option<&str>, service_name: &str) -> Option<OtlpTracer> {
     let ep = endpoint?.trim();
     if ep.is_empty() {
         return None;
@@ -174,9 +174,11 @@ fn build_otlp_tracer(
 
     let exporter = opentelemetry_otlp::new_exporter().tonic().with_endpoint(ep);
 
-    let trace_config = sdktrace::Config::default().with_resource(Resource::new(vec![
-        KeyValue::new("service.name", service_name.to_owned()),
-    ]));
+    let trace_config =
+        sdktrace::Config::default().with_resource(Resource::new(vec![KeyValue::new(
+            "service.name",
+            service_name.to_owned(),
+        )]));
 
     // opentelemetry_otlp 0.17+ 에서 `install_batch` 는 `TracerProvider` 를 반환한다.
     // `tracing-opentelemetry::layer().with_tracer(..)` 는 `Tracer` 를 요구하므로
@@ -323,6 +325,81 @@ pub fn reset_hdr_for_test() {
     for slot in &hdrs.slots {
         slot.lock().reset();
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Atomic gauges — health/metrics endpoint 용
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// gauge 키. counter 와 달리 값이 증감할 수 있다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum GaugeKey {
+    /// 서비스 시작 후 경과 시간 (초).
+    UptimeSeconds,
+    /// 마지막 heartbeat 수신 후 경과 시간 (ms).
+    LastHeartbeatAgeMs,
+    /// 현재 활성 strategy 수.
+    ActiveStrategies,
+}
+
+struct Gauges {
+    uptime_seconds: AtomicI64,
+    last_heartbeat_age_ms: AtomicI64,
+    active_strategies: AtomicI64,
+}
+
+fn gauges() -> &'static Gauges {
+    use std::sync::OnceLock;
+    static INSTANCE: OnceLock<Gauges> = OnceLock::new();
+    INSTANCE.get_or_init(|| Gauges {
+        uptime_seconds: AtomicI64::new(0),
+        last_heartbeat_age_ms: AtomicI64::new(0),
+        active_strategies: AtomicI64::new(0),
+    })
+}
+
+/// 알려진 gauge 값을 설정한다.
+#[inline]
+pub fn gauge_set(k: GaugeKey, v: i64) {
+    let g = gauges();
+    let target = match k {
+        GaugeKey::UptimeSeconds => &g.uptime_seconds,
+        GaugeKey::LastHeartbeatAgeMs => &g.last_heartbeat_age_ms,
+        GaugeKey::ActiveStrategies => &g.active_strategies,
+    };
+    target.store(v, Ordering::Relaxed);
+}
+
+/// 알려진 gauge 값을 읽는다.
+#[inline]
+pub fn gauge_get(k: GaugeKey) -> i64 {
+    let g = gauges();
+    let target = match k {
+        GaugeKey::UptimeSeconds => &g.uptime_seconds,
+        GaugeKey::LastHeartbeatAgeMs => &g.last_heartbeat_age_ms,
+        GaugeKey::ActiveStrategies => &g.active_strategies,
+    };
+    target.load(Ordering::Relaxed)
+}
+
+/// 모든 gauge snapshot.
+pub fn gauges_snapshot() -> Vec<(String, i64)> {
+    let g = gauges();
+    vec![
+        (
+            "uptime_seconds".into(),
+            g.uptime_seconds.load(Ordering::Relaxed),
+        ),
+        (
+            "last_heartbeat_age_ms".into(),
+            g.last_heartbeat_age_ms.load(Ordering::Relaxed),
+        ),
+        (
+            "active_strategies".into(),
+            g.active_strategies.load(Ordering::Relaxed),
+        ),
+    ]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -600,9 +677,18 @@ pub fn counters_snapshot() -> Vec<(String, u64)> {
     let c = counters();
     let mut out = vec![
         ("zmq_dropped".into(), c.zmq_dropped.load(Ordering::Relaxed)),
-        ("zmq_hwm_block".into(), c.zmq_hwm_block.load(Ordering::Relaxed)),
-        ("pipeline_event".into(), c.pipeline_event.load(Ordering::Relaxed)),
-        ("serialization_fail".into(), c.serialization_fail.load(Ordering::Relaxed)),
+        (
+            "zmq_hwm_block".into(),
+            c.zmq_hwm_block.load(Ordering::Relaxed),
+        ),
+        (
+            "pipeline_event".into(),
+            c.pipeline_event.load(Ordering::Relaxed),
+        ),
+        (
+            "serialization_fail".into(),
+            c.serialization_fail.load(Ordering::Relaxed),
+        ),
         ("decode_fail".into(), c.decode_fail.load(Ordering::Relaxed)),
         (
             "shm_quote_published".into(),
@@ -662,13 +748,11 @@ pub fn counters_snapshot() -> Vec<(String, u64)> {
         ),
         (
             "order_egress_backpressure_dropped".into(),
-            c.order_egress_backpressure_dropped
-                .load(Ordering::Relaxed),
+            c.order_egress_backpressure_dropped.load(Ordering::Relaxed),
         ),
         (
             "order_egress_backpressure_retried".into(),
-            c.order_egress_backpressure_retried
-                .load(Ordering::Relaxed),
+            c.order_egress_backpressure_retried.load(Ordering::Relaxed),
         ),
         (
             "order_egress_backpressure_retry_exhausted".into(),
@@ -677,8 +761,7 @@ pub fn counters_snapshot() -> Vec<(String, u64)> {
         ),
         (
             "order_egress_backpressure_blocked".into(),
-            c.order_egress_backpressure_blocked
-                .load(Ordering::Relaxed),
+            c.order_egress_backpressure_blocked.load(Ordering::Relaxed),
         ),
         (
             "order_egress_backpressure_block_timeout".into(),
@@ -962,6 +1045,10 @@ mod tests {
         map.get(key).copied().unwrap_or(0)
     }
 
+    fn gauge_snapshot_map() -> HashMap<String, i64> {
+        gauges_snapshot().into_iter().collect()
+    }
+
     #[test]
     fn hdr_record_and_dump() {
         let _g = TEST_LOCK.lock();
@@ -994,7 +1081,12 @@ mod tests {
         record_stage_nanos(Stage::Pushed, 10_000_000_000_000);
 
         let dump = dump_hdr();
-        let snap = dump.iter().find(|(s, _)| *s == Stage::Pushed).unwrap().1.clone();
+        let snap = dump
+            .iter()
+            .find(|(s, _)| *s == Stage::Pushed)
+            .unwrap()
+            .1
+            .clone();
         assert_eq!(snap.count, 2);
     }
 
@@ -1037,6 +1129,25 @@ mod tests {
     }
 
     #[test]
+    fn gauge_set_and_get() {
+        let _g = TEST_LOCK.lock();
+        gauge_set(GaugeKey::UptimeSeconds, 42);
+        assert_eq!(gauge_get(GaugeKey::UptimeSeconds), 42);
+    }
+
+    #[test]
+    fn gauges_snapshot_contains_values() {
+        let _g = TEST_LOCK.lock();
+        gauge_set(GaugeKey::UptimeSeconds, 7);
+        gauge_set(GaugeKey::LastHeartbeatAgeMs, 15);
+        gauge_set(GaugeKey::ActiveStrategies, 2);
+        let snap = gauge_snapshot_map();
+        assert_eq!(snap.get("uptime_seconds").copied(), Some(7));
+        assert_eq!(snap.get("last_heartbeat_age_ms").copied(), Some(15));
+        assert_eq!(snap.get("active_strategies").copied(), Some(2));
+    }
+
+    #[test]
     fn next_hot_core_returns_option() {
         // linux 아닌 환경에서는 None, linux 에서는 Some. 둘 다 OK.
         let _ = next_hot_core();
@@ -1060,10 +1171,7 @@ mod tests {
         let first = init(&cfg, "test-a");
         let second = init(&cfg, "test-b");
         // 둘 중 적어도 하나는 Err ('already initialized') 이어야 함.
-        assert!(
-            first.is_err() || second.is_err(),
-            "second init must fail"
-        );
+        assert!(first.is_err() || second.is_err(), "second init must fail");
         // cleanup: 성공한 handle 은 즉시 drop.
         drop(first);
         drop(second);

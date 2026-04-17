@@ -111,6 +111,7 @@ arc-swap = "1"
 zmq = "0.10"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 url = "2"
+axum = "0.8"
 
 # time
 chrono = { version = "0.4", features = ["serde"] }

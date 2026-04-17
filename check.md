@@ -206,8 +206,8 @@
 - [x] `$GATE_API_KEY`, `$GATE_API_SECRET` → `hft-exchange-gate::executor::GateExecutor::from_env` + `hft-exchange-gate::account::GateAccountConfig::from_env` (Phase 2 B + 2 D) ✅
 - [x] `$LOGIN_NAME` (default `v3_sb_002`), `$UID` → `hft-strategy-config::StrategyConfig` ✅
 - [x] `$SYMBOLS` csv → `hft-strategy-config::StrategyConfig::symbols` ✅
-- [ ] `$METRICS_DIR` (default `./metrics`) → `hft-telemetry::metrics_writer` **TODO**: 파일 기반 metrics writer 미구현, 현재는 stdout + HDR dump 만.
-- [ ] `$HEALTHCHECK_TEST_ORDER_{SYMBOL,SIZE,PRICE=60000.0}` → `services/strategy::healthcheck` **TODO** Phase 2 E.
+- [x] `$METRICS_DIR` (default `./metrics`) → HTTP `/metrics` endpoint 로 대체 (`hft-common::health_server` + `hft-telemetry::prometheus`)
+- [~] `$HEALTHCHECK_TEST_ORDER_{SYMBOL,SIZE,PRICE=60000.0}` → `/health` endpoint 인프라 완료, test order 로직은 후속 batch.
 - [ ] `$LOGIN_STATUS_URL` → `services/strategy::healthcheck` **TODO** Phase 2 E.
 - [~] `$ORDER_URL`, `$ORDER_UID` (puppeteer) → **Drop reason**: Puppeteer fallback 은 `go/order-processor` 분리 트랙으로 유지. Rust 전략은 REST 직결만.
 - [~] `$IPC_SOCKET_PATH=/tmp/gate_hft_ipc.sock` → **Drop reason**: UDS 브릿지 폐기 (§2 참조).
@@ -290,7 +290,7 @@ Funding / EMA / misc: ✅
 - [ ] `DEBUGGING_ORDERS = [{contract:"BTC_USDT", price:"60000"}, {contract:"ETH_USDT", price:"2000"}]` — healthcheck 테스트 주문 → `services/strategy::healthcheck`
 - [ ] `strategy_status` supabase table upsert → `services/strategy::status`
 - [x] restart loop: every `restart_interval` seconds → `services/strategy::supervisor`
-- [ ] metrics files per-strategy in `$METRICS_DIR` → `hft-telemetry::metrics_writer`
+- [x] metrics HTTP endpoint (`/metrics`) → `hft-common::health_server` + `hft-telemetry::prometheus`
 
 ---
 

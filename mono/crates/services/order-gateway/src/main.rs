@@ -37,15 +37,17 @@
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use hft_common::health_server::{start_health_server, HealthServerConfig};
 use hft_common::supervisor::{run_with_restart, RestartConfig, SupervisorExit};
 use hft_exchange_api::{CancellationToken, ExchangeExecutor};
-use hft_protocol::order_wire::{OrderResultWire, ORDER_RESULT_WIRE_SIZE};
 use hft_exchange_rest::Credentials;
+use hft_protocol::order_wire::{OrderResultWire, ORDER_RESULT_WIRE_SIZE};
+use hft_telemetry::{counter_inc, gauge_set, CounterKey, GaugeKey};
 use hft_time::{Clock, SystemClock};
 use hft_types::ExchangeId;
-use hft_telemetry::{counter_inc, CounterKey};
 use hft_zmq::{Context as ZmqContext, SendOutcome};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
@@ -56,7 +58,7 @@ use order_gateway::shm_sub::{
 };
 use order_gateway::zmq_ingress::{open_order_ingress_symtab, start_zmq_order_ingress};
 use order_gateway::{
-    start_with_arc, IngressEnvelope, NoopExecutor, Route, RoutingTable, RetryPolicy,
+    start_with_arc, IngressEnvelope, NoopExecutor, RetryPolicy, Route, RoutingTable,
     DEDUP_CACHE_CAP_DEFAULT,
 };
 
@@ -93,6 +95,22 @@ fn install_signal_handler(cancel: CancellationToken) {
     if let Err(e) = install_result {
         warn!(error = %e, "failed to install ctrlc handler (already installed?)");
     }
+}
+
+fn spawn_uptime_gauge_updater(cancel: CancellationToken) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let boot_instant = std::time::Instant::now();
+        loop {
+            gauge_set(
+                GaugeKey::UptimeSeconds,
+                boot_instant.elapsed().as_secs() as i64,
+            );
+            tokio::select! {
+                _ = cancel.cancelled() => break,
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            }
+        }
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -235,10 +253,7 @@ fn build_shm_subscriber(
                 symtab_path = ?cfg.shm.symtab_path,
                 "SHM subscriber: v1 legacy single-ring mode"
             );
-            ShmSubscriberConfig::legacy(
-                cfg.shm.order_path.clone(),
-                cfg.shm.symtab_path.clone(),
-            )
+            ShmSubscriberConfig::legacy(cfg.shm.order_path.clone(), cfg.shm.symtab_path.clone())
         }
         backend @ (hft_config::ShmBackendKind::DevShm
         | hft_config::ShmBackendKind::Hugetlbfs
@@ -503,7 +518,8 @@ async fn run_inner(cfg: Arc<AppConfig>, main_cancel: CancellationToken) -> Resul
         handle.cancel.clone(),
     );
     let zmq_handle = build_zmq_ingress(&cfg, req_tx.clone(), handle.cancel.clone());
-    let result_handle = result_rx.and_then(|rx| build_zmq_result_egress(&cfg, rx, handle.cancel.clone()));
+    let result_handle =
+        result_rx.and_then(|rx| build_zmq_result_egress(&cfg, rx, handle.cancel.clone()));
     let heartbeat_handle = match (&result_tx_for_hb, cfg.zmq.result_heartbeat_interval_ms) {
         (Some(tx), interval) if interval > 0 => {
             info!(
@@ -577,6 +593,26 @@ async fn main() -> ExitCode {
 
     let main_cancel = CancellationToken::new();
     install_signal_handler(main_cancel.clone());
+    let _uptime = spawn_uptime_gauge_updater(main_cancel.clone());
+    let health_port = cfg.telemetry.prom_port.unwrap_or(9101);
+    let _health = match start_health_server(
+        HealthServerConfig {
+            port: health_port,
+            service_name: "order-gateway".into(),
+        },
+        main_cancel.clone(),
+    )
+    .await
+    {
+        Ok(handle) => {
+            info!(addr = %handle.local_addr, "health server started");
+            handle
+        }
+        Err(e) => {
+            eprintln!("[order-gateway] health server start failed: {e:#}");
+            return ExitCode::from(1);
+        }
+    };
 
     match run_with_restart(
         "order-gateway",

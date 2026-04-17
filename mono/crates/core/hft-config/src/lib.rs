@@ -326,7 +326,8 @@ pub struct TelemetryConfig {
     /// OTLP gRPC endpoint. None / 빈 문자열이면 OTel 비활성.
     #[serde(default)]
     pub otlp_endpoint: Option<String>,
-    /// Prometheus metrics endpoint port. None 이면 비활성.
+    /// health + metrics HTTP endpoint port override.
+    /// None 이면 서비스 기본 포트(예: strategy=9100, order-gateway=9101)를 사용한다.
     #[serde(default)]
     pub prom_port: Option<u16>,
     /// fmt layer 를 JSON 으로 출력. false 면 pretty.
@@ -671,7 +672,10 @@ pub fn validate(cfg: &AppConfig) -> ConfigResult<()> {
 
     ensure!(cfg.hot_workers > 0, "hot_workers must be > 0");
     ensure!(cfg.bg_workers > 0, "bg_workers must be > 0");
-    ensure!(!cfg.service_name.is_empty(), "service_name must not be empty");
+    ensure!(
+        !cfg.service_name.is_empty(),
+        "service_name must not be empty"
+    );
 
     ensure!(cfg.zmq.hwm > 0, "zmq.hwm must be > 0");
     ensure!(cfg.zmq.linger_ms >= 0, "zmq.linger_ms must be >= 0");
@@ -750,13 +754,11 @@ pub fn validate(cfg: &AppConfig) -> ConfigResult<()> {
             "shm.symbol_table_capacity must be >= 1"
         );
         ensure!(
-            cfg.shm.trade_ring_capacity >= 2
-                && cfg.shm.trade_ring_capacity.is_power_of_two(),
+            cfg.shm.trade_ring_capacity >= 2 && cfg.shm.trade_ring_capacity.is_power_of_two(),
             "shm.trade_ring_capacity must be a power of two and >= 2"
         );
         ensure!(
-            cfg.shm.order_ring_capacity >= 2
-                && cfg.shm.order_ring_capacity.is_power_of_two(),
+            cfg.shm.order_ring_capacity >= 2 && cfg.shm.order_ring_capacity.is_power_of_two(),
             "shm.order_ring_capacity must be a power of two and >= 2"
         );
         ensure!(
@@ -1106,10 +1108,7 @@ mod tests {
         clear_hft_env();
 
         // 임시 디렉터리에 default.toml + {service}.toml 두 개 써서 override 확인.
-        let tmp = std::env::temp_dir().join(format!(
-            "hft-config-test-{}",
-            std::process::id()
-        ));
+        let tmp = std::env::temp_dir().join(format!("hft-config-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 
@@ -1360,10 +1359,7 @@ mod tests {
         std::env::set_var("HFT_ORDER_EGRESS__BACKPRESSURE__MODE", "retry");
         std::env::set_var("HFT_ORDER_EGRESS__BACKPRESSURE__MAX_RETRIES", "3");
         std::env::set_var("HFT_ORDER_EGRESS__BACKPRESSURE__BACKOFF_NS", "1000");
-        std::env::set_var(
-            "HFT_ORDER_EGRESS__BACKPRESSURE__TOTAL_TIMEOUT_NS",
-            "3000",
-        );
+        std::env::set_var("HFT_ORDER_EGRESS__BACKPRESSURE__TOTAL_TIMEOUT_NS", "3000");
 
         let toml = r#"
             service_name = "svc"
