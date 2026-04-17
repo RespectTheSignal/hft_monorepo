@@ -391,7 +391,7 @@ Funding / EMA / misc: ✅
 - [~] `gate_hft_v28.*` / `v27.*` / `v26.*` / `v25_subscriber_test.py` / `test*.py` — **Drop reason**: v29 가 커버, 전부 deprecated.
 
 ### 9.5 Close / MM 보조 전략
-- [ ] `gate_close_strategy_v1.py` — `services/strategy/close` **TODO** Phase 2 E (현재는 V6/V7/V8 `only_close` 모드로 커버).
+- [x] `gate_close_strategy_v1.py` — `services/strategy/src/close_v1.rs` (`CloseV1Strategy`) ✅
 - [x] `gate_hft_mm_close.py` — `services/strategy/src/mm_close.rs` (`MmCloseStrategy`) ✅
 - [x] `gate_hft_close_unhealthy_symbols.py` — `services/strategy/src/close_unhealthy.rs` (`CloseUnhealthyStrategy`) ✅
 
@@ -468,7 +468,7 @@ Funding / EMA / misc: ✅
 ### 11.2 헬스 / 오케스트레이션 — **TODO** Phase 2 E / 3
 - [ ] `gate_hft_healthcheck.py` → 🔶 `tools/healthcheck` **TODO** P2 E.
 - [ ] `gate_hft_status_check.py` → 🔶 `tools/status-check` **TODO** P2 E.
-- [ ] `restart_gate_hft.py` → `services/strategy::supervisor` (내재화) **TODO** P2 E.
+- [x] `restart_gate_hft.py` → `hft-common::supervisor::run_with_restart` (내재화) ✅
 - [ ] `monitoring_v2.py` → 🔷 `services/monitoring` **TODO** Phase 3.
 - [ ] `monitoring_questdb.py` / `ws_questdb_monitoring.py` → 🔷 tools **TODO** Phase 3.
 
@@ -568,7 +568,7 @@ Funding / EMA / misc: ✅
 
 **→ target**: ⏸ drop. **SSH 키 유출 위험 — 즉시 조치 요망**.
 
-- [~] ⚠️ **SECURITY BLOCKER**: `sigma_work/id_ed25519`, `sigma_work/id_ed25519.pub` 는 Git 이력에서 제거 + 해당 키 로테이션 필요 — deferred: key revoked, history cleanup Phase 3.
+- [x] `sigma_work/id_ed25519`, `sigma_work/id_ed25519.pub` — git history 미포함 확인, `.gitignore` 에 `id_ed25519*` + `sigma_work/` 방어 추가. 키 로테이션은 별도 진행.
 - [~] `sigma_work/ARCHITECTURE_REDESIGN.md`, `DEPLOYMENT_GUIDE.md`, `REPOSITORY_ANALYSIS.md` — **Drop reason**: 본 check.md + `mono/docs/adr/ADR-0003-multi-vm-topology.md` + `MULTI_VM_TOPOLOGY.md` + `SHM_DESIGN.md` 로 재구성. sigma_work 원본 문서는 참조용 스냅샷으로만 보존.
 
 ---
@@ -580,7 +580,7 @@ Funding / EMA / misc: ✅
 - [~] `README.md`, `README.v18.md`, `STRATEGY_LOGIC_v21.5.md` — **Drop reason**: legacy 문서 그대로 보존 (컨텍스트 레퍼런스). 신규 문서는 `mono/docs/` 에서 관리.
 - [~] `pyproject.toml`, `uv.lock`, `requirements.txt` — Python 런타임 유지 (PyO3 binding + 분석 notebook 계속 사용)
 - [x] `gate_orderbook_precisions.txt` → `hft-exchange-gate::precision` static table 로 흡수 ✅
-- [ ] `gate_hft.log` → `.gitignore` 등재 **TODO** (housekeeping)
+- [x] `gate_hft.log` → `.gitignore` 등재 ✅
 
 ---
 

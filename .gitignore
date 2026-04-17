@@ -31,6 +31,10 @@ Thumbs.db
 Cargo.lock.orig
 *.pem
 *.key
+# SSH keys — 확장자 없는 키 실수 커밋 방지
+id_ed25519*
+id_rsa*
+sigma_work/
 main_account_secrets.json
 subaccount_keys.json
 
@@ -38,6 +42,7 @@ subaccount_keys.json
 *.shm
 *.sock
 *.log
+gate_hft.log
 /logs/
 
 # Go
