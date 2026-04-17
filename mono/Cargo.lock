@@ -2117,6 +2117,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "monitoring-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ctrlc",
+ "hft-common",
+ "hft-config",
+ "hft-exchange-api",
+ "hft-telemetry",
+ "mimalloc",
+ "regex",
+ "reqwest",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"

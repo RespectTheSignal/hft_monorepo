@@ -113,6 +113,9 @@ pub struct AppConfig {
     /// tracing / OTel / prometheus 설정.
     #[serde(default)]
     pub telemetry: TelemetryConfig,
+    /// 외부 monitoring-agent scrape 대상/주기 설정.
+    #[serde(default)]
+    pub monitoring: MonitoringConfig,
     /// WarmUp 설정 (JIT / 캐시 워밍).
     #[serde(default)]
     pub warmup: WarmupConfig,
@@ -136,6 +139,7 @@ impl Default for AppConfig {
             questdb: QuestDbConfig::default(),
             supabase: SupabaseConfig::default(),
             telemetry: TelemetryConfig::default(),
+            monitoring: MonitoringConfig::default(),
             warmup: WarmupConfig::default(),
             shm: ShmConfig::default(),
             order_egress: OrderEgressConfig::default(),
@@ -359,6 +363,56 @@ impl Default for TelemetryConfig {
             prom_port: None,
             stdout_json: false,
             default_level: default_log_level(),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MonitoringConfig
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// monitoring-agent scrape 설정.
+///
+/// 단순한 host:port 문자열 3개를 유지해 운영 중 환경변수 주입을 쉽게 한다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitoringConfig {
+    /// scrape 주기 (초). 0 이면 invalid.
+    #[serde(default = "default_monitoring_scrape_interval_secs")]
+    pub scrape_interval_secs: u64,
+    /// publisher metrics 주소 (`host:port`).
+    #[serde(default = "default_monitoring_publisher_addr")]
+    pub publisher_addr: String,
+    /// order-gateway metrics 주소 (`host:port`).
+    #[serde(default = "default_monitoring_gateway_addr")]
+    pub gateway_addr: String,
+    /// strategy metrics 주소 (`host:port`).
+    #[serde(default = "default_monitoring_strategy_addr")]
+    pub strategy_addr: String,
+}
+
+fn default_monitoring_scrape_interval_secs() -> u64 {
+    5
+}
+
+fn default_monitoring_publisher_addr() -> String {
+    "infra-vm:9100".into()
+}
+
+fn default_monitoring_gateway_addr() -> String {
+    "infra-vm:9101".into()
+}
+
+fn default_monitoring_strategy_addr() -> String {
+    "strategy-vm-0:9102".into()
+}
+
+impl Default for MonitoringConfig {
+    fn default() -> Self {
+        Self {
+            scrape_interval_secs: default_monitoring_scrape_interval_secs(),
+            publisher_addr: default_monitoring_publisher_addr(),
+            gateway_addr: default_monitoring_gateway_addr(),
+            strategy_addr: default_monitoring_strategy_addr(),
         }
     }
 }
@@ -759,6 +813,23 @@ pub fn validate(cfg: &AppConfig) -> ConfigResult<()> {
         ensure!(port > 0, "telemetry.prom_port must be > 0");
     }
 
+    ensure!(
+        cfg.monitoring.scrape_interval_secs > 0,
+        "monitoring.scrape_interval_secs must be > 0"
+    );
+    ensure!(
+        !cfg.monitoring.publisher_addr.trim().is_empty(),
+        "monitoring.publisher_addr must not be empty"
+    );
+    ensure!(
+        !cfg.monitoring.gateway_addr.trim().is_empty(),
+        "monitoring.gateway_addr must not be empty"
+    );
+    ensure!(
+        !cfg.monitoring.strategy_addr.trim().is_empty(),
+        "monitoring.strategy_addr must not be empty"
+    );
+
     // ── SHM ──
     if cfg.shm.enabled {
         // 용량 (공통).
@@ -919,6 +990,10 @@ mod tests {
         assert!(d.warmup.enabled);
         assert_eq!(d.warmup.events, 5_000);
         assert_eq!(d.supabase.refresh_interval_s, 300);
+        assert_eq!(d.monitoring.scrape_interval_secs, 5);
+        assert_eq!(d.monitoring.publisher_addr, "infra-vm:9100");
+        assert_eq!(d.monitoring.gateway_addr, "infra-vm:9101");
+        assert_eq!(d.monitoring.strategy_addr, "strategy-vm-0:9102");
         assert_eq!(d.order_egress.mode, order_egress::OrderEgressMode::Shm);
     }
 
@@ -1095,6 +1170,7 @@ mod tests {
         std::env::set_var("HFT_TELEMETRY__STDOUT_JSON", "true");
         std::env::set_var("HFT_WARMUP__ENABLED", "false");
         std::env::set_var("HFT_WARMUP__EVENTS", "42");
+        std::env::set_var("HFT_MONITORING__SCRAPE_INTERVAL_SECS", "7");
 
         let toml = r#"
             service_name = "svc"
@@ -1109,8 +1185,16 @@ mod tests {
         assert!(cfg.telemetry.stdout_json);
         assert!(!cfg.warmup.enabled);
         assert_eq!(cfg.warmup.events, 42);
+        assert_eq!(cfg.monitoring.scrape_interval_secs, 7);
 
         clear_hft_env();
+    }
+
+    #[test]
+    fn validate_rejects_zero_monitoring_scrape_interval() {
+        let mut cfg = minimal_valid_cfg();
+        cfg.monitoring.scrape_interval_secs = 0;
+        assert!(validate(&cfg).is_err());
     }
 
     #[test]

@@ -44,6 +44,7 @@ members = [
     "crates/services/subscriber",
     "crates/services/strategy",
     "crates/services/order-gateway",
+    "crates/services/monitoring-agent",
 
     # tools (1회성/분석용 CLI)
     "crates/tools/latency-probe",

@@ -446,7 +446,7 @@ Funding / EMA / misc: ✅
 
 ### 10.6 Ingest / Monitoring / Strategy
 - [~] `fusion_ingestor.py` — **Drop reason**: QuestDB sink 로 충분.
-- [ ] `monitoring_agent.py` → `services/monitoring-agent` **TODO** Phase 3.
+- [x] `monitoring_agent.py` → `services/monitoring-agent` (`monitoring-agent` + Telegram alert rules) ✅
 - [x] `strategy_manager.py` → `services/strategy::StrategyRunner` + `StrategyHandle` ✅
 - [ ] `account_manager.py` → `hft-account::AccountManager` **TODO** Phase 3 (multi-subaccount orchestration).
   - 현재 Phase 2 D 의 `GateAccountClient` 는 단일 계정 REST 폴링만 지원.
@@ -469,7 +469,7 @@ Funding / EMA / misc: ✅
 - [ ] `gate_hft_healthcheck.py` → 🔶 `tools/healthcheck` **TODO** P2 E.
 - [ ] `gate_hft_status_check.py` → 🔶 `tools/status-check` **TODO** P2 E.
 - [x] `restart_gate_hft.py` → `hft-common::supervisor::run_with_restart` (내재화) ✅
-- [ ] `monitoring_v2.py` → 🔷 `services/monitoring` **TODO** Phase 3.
+- [x] `monitoring_v2.py` → `services/monitoring-agent` (5s scrape + silence window + Telegram) ✅
 - [ ] `monitoring_questdb.py` / `ws_questdb_monitoring.py` → 🔷 tools **TODO** Phase 3.
 
 ### 11.3 QuestDB / 데이터 ingress

@@ -4,3 +4,5 @@
 pub mod health_server;
 /// 공용 supervisor / runtime helper.
 pub mod supervisor;
+/// 공용 Telegram Bot API 알림 전송기.
+pub mod telegram;

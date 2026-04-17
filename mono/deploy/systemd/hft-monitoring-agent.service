@@ -1,0 +1,51 @@
+; hft-monitoring-agent.service — monitoring host 에서 metrics scrape + Telegram alert.
+;
+; 역할:
+;   - publisher / order-gateway / strategy 의 `/metrics` 를 5초 주기로 scrape.
+;   - rule 위반 시 stderr/log + Telegram Bot API 로 경보 전송.
+;   - Prometheus 와 독립적으로 동작해, Prometheus 장애 시에도 최소 경보 경로를 유지.
+
+[Unit]
+Description=HFT monitoring agent (metrics scrape + Telegram alerts)
+Documentation=https://internal/docs/ops/monitoring
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hft
+Group=hft
+
+ExecStart=/opt/hft/bin/monitoring-agent
+
+; ── 설정 ──────────────────────────────────────────────────────────────────
+Environment=HFT_SERVICE_NAME=monitoring-agent
+Environment=HFT_CONFIG_DIR=/etc/hft
+Environment=HFT_LOG=info,hft=info
+
+; ── scrape target ─────────────────────────────────────────────────────────
+Environment=HFT_MONITORING__SCRAPE_INTERVAL_SECS=5
+Environment=HFT_MONITORING__PUBLISHER_ADDR=infra-vm:9100
+Environment=HFT_MONITORING__GATEWAY_ADDR=infra-vm:9101
+Environment=HFT_MONITORING__STRATEGY_ADDR=strategy-vm-0:9102
+
+; ── Telegram credential ───────────────────────────────────────────────────
+; secrets.env 에 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 를 넣는다.
+EnvironmentFile=-/etc/hft/secrets.env
+
+; ── 보안 ──────────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hft/state
+
+; ── 재시작 정책 ────────────────────────────────────────────────────────────
+Restart=on-failure
+RestartSec=5s
+StartLimitBurst=5
+StartLimitIntervalSec=60
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
