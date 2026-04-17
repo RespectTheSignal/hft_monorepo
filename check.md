@@ -191,7 +191,7 @@
 - [x] `bin/v6.rs` → `services/strategy/src/v6.rs` (V6Strategy, close_stale + size 1x/2x/4x + position_close_side ×2) ✅ (Phase 2 A)
 - [x] `bin/v7.rs` (EMA profit) → `services/strategy/src/v7.rs` (narrative-close only_close 양분기, close_stale 없음) ✅ (Phase 2 A)
 - [x] `bin/v8.rs` (modified spread/gap) → `services/strategy/src/v8.rs` ✅ (Phase 2 A)
-- [ ] `bin/close_v1.rs` → `services/strategy/close` **TODO**: Phase 2 E 이후. 현재 V6/V7/V8 의 `only_close` 모드로 기본 커버.
+- [x] `bin/close_v1.rs` → `services/strategy/src/close_v1.rs` (`CloseV1Strategy`) ✅
 
 ### 3.2 CLI / env (runner.rs)
 - [x] `--leverage` / `$LEVERAGE` → `AppConfig.leverage` → `services/strategy/src/main.rs::build_risk_config` → `RiskConfig.leverage`
@@ -392,8 +392,8 @@ Funding / EMA / misc: ✅
 
 ### 9.5 Close / MM 보조 전략
 - [ ] `gate_close_strategy_v1.py` — `services/strategy/close` **TODO** Phase 2 E (현재는 V6/V7/V8 `only_close` 모드로 커버).
-- [ ] `gate_hft_mm_close.py` — `services/strategy/mm_close` **TODO** P2 later.
-- [ ] `gate_hft_close_unhealthy_symbols.py` — `services/strategy/close_unhealthy` **TODO** P2 later.
+- [x] `gate_hft_mm_close.py` — `services/strategy/src/mm_close.rs` (`MmCloseStrategy`) ✅
+- [x] `gate_hft_close_unhealthy_symbols.py` — `services/strategy/src/close_unhealthy.rs` (`CloseUnhealthyStrategy`) ✅
 
 ---
 
@@ -568,7 +568,7 @@ Funding / EMA / misc: ✅
 
 **→ target**: ⏸ drop. **SSH 키 유출 위험 — 즉시 조치 요망**.
 
-- [ ] ⚠️ **SECURITY BLOCKER**: `sigma_work/id_ed25519`, `sigma_work/id_ed25519.pub` 는 Git 이력에서 제거 + 해당 키 로테이션 필요. `git filter-repo` 또는 BFG 로 커밋 이력에서 완전 삭제 후 force-push 전에 팀 합의 필수.
+- [~] ⚠️ **SECURITY BLOCKER**: `sigma_work/id_ed25519`, `sigma_work/id_ed25519.pub` 는 Git 이력에서 제거 + 해당 키 로테이션 필요 — deferred: key revoked, history cleanup Phase 3.
 - [~] `sigma_work/ARCHITECTURE_REDESIGN.md`, `DEPLOYMENT_GUIDE.md`, `REPOSITORY_ANALYSIS.md` — **Drop reason**: 본 check.md + `mono/docs/adr/ADR-0003-multi-vm-topology.md` + `MULTI_VM_TOPOLOGY.md` + `SHM_DESIGN.md` 로 재구성. sigma_work 원본 문서는 참조용 스냅샷으로만 보존.
 
 ---

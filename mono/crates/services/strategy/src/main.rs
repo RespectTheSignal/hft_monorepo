@@ -72,6 +72,7 @@ use tracing::{error, info, warn};
 use hft_config::{order_egress::OrderEgressMode, AppConfig, ExchangeConfig, ShmBackendKind};
 use hft_telemetry::{counter_inc, gauge_set, CounterKey, GaugeKey};
 use strategy::{
+    close_unhealthy::CloseUnhealthyStrategy, close_v1::CloseV1Strategy, mm_close::MmCloseStrategy,
     spawn_order_drain_loop_with_now, start, v6::V6Strategy, v7::V7Strategy, v8::V8Strategy,
     GatewayLiveness, NoopStrategy, OrderEgressMetaSeed, OrderEnvelope, OrderResultInfo,
     OrderSender, ResultStatus, StrategyControl, StrategyHandle,
@@ -90,19 +91,21 @@ enum Variant {
     V6,
     V7,
     V8,
+    CloseV1,
+    MmClose,
+    CloseUnhealthy,
 }
 
 impl Variant {
-    fn from_env() -> Self {
-        match std::env::var("HFT_STRATEGY_VARIANT")
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str()
-        {
+    fn from_name(raw: &str) -> Self {
+        match raw {
             "" | "noop" => Variant::Noop,
             "v6" => Variant::V6,
             "v7" => Variant::V7,
             "v8" => Variant::V8,
+            "close_v1" | "close" => Variant::CloseV1,
+            "mm_close" => Variant::MmClose,
+            "close_unhealthy" => Variant::CloseUnhealthy,
             other => {
                 warn!(
                     target: "strategy::main",
@@ -112,6 +115,13 @@ impl Variant {
                 Variant::Noop
             }
         }
+    }
+
+    fn from_env() -> Self {
+        let raw = std::env::var("HFT_STRATEGY_VARIANT")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        Self::from_name(raw.as_str())
     }
 }
 
@@ -810,6 +820,24 @@ async fn bring_up_full(
             let s = V8Strategy::new(strategy_cfg.clone(), risk).with_runtime(oracle, rate.clone());
             start(s, ev_rx, orders_tx).context("v8 start")?
         }
+        Variant::CloseV1 => {
+            let s = CloseV1Strategy::new(strategy_cfg.clone(), risk)
+                .with_runtime(oracle)
+                .with_rate(rate.clone());
+            start(s, ev_rx, orders_tx).context("close_v1 start")?
+        }
+        Variant::MmClose => {
+            let s = MmCloseStrategy::new(strategy_cfg.clone(), risk)
+                .with_runtime(oracle)
+                .with_rate(rate.clone());
+            start(s, ev_rx, orders_tx).context("mm_close start")?
+        }
+        Variant::CloseUnhealthy => {
+            let s = CloseUnhealthyStrategy::new(strategy_cfg.clone(), risk)
+                .with_runtime(oracle)
+                .with_rate(rate.clone());
+            start(s, ev_rx, orders_tx).context("close_unhealthy start")?
+        }
         Variant::Noop => unreachable!("bring_up_full invoked with Noop"),
     };
 
@@ -923,7 +951,14 @@ async fn run_inner(
 
     match variant {
         Variant::Noop => run_noop_idle(main_cancel).await?,
-        v @ (Variant::V6 | Variant::V7 | Variant::V8) => {
+        v @ (
+            Variant::V6
+            | Variant::V7
+            | Variant::V8
+            | Variant::CloseV1
+            | Variant::MmClose
+            | Variant::CloseUnhealthy
+        ) => {
             let stacked = bring_up_full(cfg, v, main_cancel.clone()).await?;
             main_cancel.cancelled().await;
             stacked.join_all().await;
@@ -1116,6 +1151,17 @@ mod tests {
         let cfg = base_cfg();
         let risk = build_risk_config(&cfg);
         assert_eq!(risk.leverage, 50.0);
+    }
+
+    #[test]
+    fn variant_from_name_maps_close_variants() {
+        assert_eq!(Variant::from_name("close_v1"), Variant::CloseV1);
+        assert_eq!(Variant::from_name("close"), Variant::CloseV1);
+        assert_eq!(Variant::from_name("mm_close"), Variant::MmClose);
+        assert_eq!(
+            Variant::from_name("close_unhealthy"),
+            Variant::CloseUnhealthy
+        );
     }
 
     fn bind_pull(ctx: &hft_zmq::Context, endpoint: &str) -> Socket {

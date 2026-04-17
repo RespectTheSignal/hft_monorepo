@@ -36,6 +36,7 @@ hft-strategy-runtime = { workspace = true }
 # subscriber embed — InprocQueue / Downstream / start() 호출.
 subscriber = { workspace = true }
 parking_lot = { workspace = true }
+ahash = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 crossbeam-channel = { workspace = true }
