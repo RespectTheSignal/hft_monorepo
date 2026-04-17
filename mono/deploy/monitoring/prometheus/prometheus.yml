@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "hft-publisher"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["infra-vm:9100"]
+        labels:
+          service: publisher
+          vm: infra
+
+  - job_name: "hft-order-gateway"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["infra-vm:9101"]
+        labels:
+          service: order-gateway
+          vm: infra
+
+  - job_name: "hft-strategy"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["strategy-vm-0:9102"]
+        labels:
+          service: strategy
+          vm: strategy-0
+      # 실제 운영에서는 strategy-vm-1:9102, strategy-vm-2:9102 식으로 추가한다.

@@ -1,0 +1,802 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "11.1.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "gauge",
+      "name": "Gauge",
+      "version": ""
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "description": "HFT pipeline metrics overview for publisher / order-gateway / strategy.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "panels": [],
+      "title": "Pipeline Overview",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "max(hft_uptime_seconds{service=~\"$service\"})",
+          "legendFormat": "uptime",
+          "refId": "A"
+        }
+      ],
+      "title": "Uptime",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "max(hft_active_strategies{service=~\"$service\"})",
+          "legendFormat": "active",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Strategies",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "id": 4,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(hft_pipeline_event_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Events/sec",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(hft_supervisor_restart_total{service=~\"$service\"})",
+          "legendFormat": "restarts",
+          "refId": "A"
+        }
+      ],
+      "title": "Supervisor Restarts",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 6,
+      "panels": [],
+      "title": "Latency Pipeline",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ns",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 500000 },
+              { "color": "red", "value": 1000000 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "id": 7,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max by (service) (hft_stage_e2e_p50_ns{service=~\"$service\"})",
+          "legendFormat": "{{service}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (service) (hft_stage_e2e_p99_ns{service=~\"$service\"})",
+          "legendFormat": "{{service}} p99",
+          "refId": "B"
+        },
+        {
+          "expr": "max by (service) (hft_stage_e2e_p999_ns{service=~\"$service\"})",
+          "legendFormat": "{{service}} p999",
+          "refId": "C"
+        }
+      ],
+      "title": "E2E Latency p50/p99/p999",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ns",
+          "custom": {
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "id": 8,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max by (service) (hft_stage_exchange_server_p99_ns{service=~\"$service\"})",
+          "legendFormat": "exchange_server",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (service) (hft_stage_ws_received_p99_ns{service=~\"$service\"})",
+          "legendFormat": "ws_received",
+          "refId": "B"
+        },
+        {
+          "expr": "max by (service) (hft_stage_serialized_p99_ns{service=~\"$service\"})",
+          "legendFormat": "serialized",
+          "refId": "C"
+        },
+        {
+          "expr": "max by (service) (hft_stage_pushed_p99_ns{service=~\"$service\"})",
+          "legendFormat": "pushed",
+          "refId": "D"
+        },
+        {
+          "expr": "max by (service) (hft_stage_published_p99_ns{service=~\"$service\"})",
+          "legendFormat": "published",
+          "refId": "E"
+        },
+        {
+          "expr": "max by (service) (hft_stage_subscribed_p99_ns{service=~\"$service\"})",
+          "legendFormat": "subscribed",
+          "refId": "F"
+        },
+        {
+          "expr": "max by (service) (hft_stage_consumed_p99_ns{service=~\"$service\"})",
+          "legendFormat": "consumed",
+          "refId": "G"
+        }
+      ],
+      "title": "Stage Breakdown p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ns"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 14 },
+      "id": 9,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "expr": "hft_stage_exchange_server_p50_ns{service=~\"$service\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "exchange_server_p50",
+          "refId": "A"
+        },
+        {
+          "expr": "hft_stage_exchange_server_p99_ns{service=~\"$service\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "exchange_server_p99",
+          "refId": "B"
+        },
+        {
+          "expr": "hft_stage_exchange_server_p999_ns{service=~\"$service\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "exchange_server_p999",
+          "refId": "C"
+        },
+        {
+          "expr": "hft_stage_e2e_p50_ns{service=~\"$service\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "e2e_p50",
+          "refId": "D"
+        },
+        {
+          "expr": "hft_stage_e2e_p99_ns{service=~\"$service\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "e2e_p99",
+          "refId": "E"
+        },
+        {
+          "expr": "hft_stage_e2e_p999_ns{service=~\"$service\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "e2e_p999",
+          "refId": "F"
+        }
+      ],
+      "title": "Latency Matrix",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "id": 10,
+      "panels": [],
+      "title": "SHM Ring Health",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 21 },
+      "id": 11,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(hft_shm_quote_published_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}} published",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_shm_quote_dropped_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}} dropped",
+          "refId": "B"
+        }
+      ],
+      "title": "Quote Published vs Dropped",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 21 },
+      "id": 12,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(hft_shm_trade_published_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}} published",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_shm_trade_lap_drop_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}} dropped",
+          "refId": "B"
+        }
+      ],
+      "title": "Trade Published vs Dropped",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 21 },
+      "id": 13,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(hft_shm_order_published_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}} published",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_shm_order_consumed_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}} consumed",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_shm_order_full_drop_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}} full_drop",
+          "refId": "C"
+        }
+      ],
+      "title": "Order Ring",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 21 },
+      "id": 14,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(hft_shm_publisher_stale_total{service=~\"$service\"})",
+          "legendFormat": "stale",
+          "refId": "A"
+        }
+      ],
+      "title": "Publisher Stale",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 29 },
+      "id": 15,
+      "panels": [],
+      "title": "Order Egress",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "green", "value": 95 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 30 },
+      "id": 16,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "expr": "100 * sum(rate(hft_order_egress_zmq_ok_total{service=~\"$service\"}[1m])) / clamp_min(sum(rate(hft_order_egress_zmq_ok_total{service=~\"$service\"}[1m])) + sum(rate(hft_order_egress_backpressure_dropped_total{service=~\"$service\"}[1m])) + sum(rate(hft_order_egress_backpressure_blocked_total{service=~\"$service\"}[1m])) + sum(rate(hft_order_egress_backpressure_retry_exhausted_total{service=~\"$service\"}[1m])), 0.000001)",
+          "legendFormat": "success_rate",
+          "refId": "A"
+        }
+      ],
+      "title": "Order Success Rate",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 30 },
+      "id": 17,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(hft_order_egress_backpressure_dropped_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "dropped",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_order_egress_backpressure_retried_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "retried",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_order_egress_backpressure_retry_exhausted_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "retry_exhausted",
+          "refId": "C"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_order_egress_backpressure_blocked_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "blocked",
+          "refId": "D"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_order_egress_backpressure_block_timeout_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "block_timeout",
+          "refId": "E"
+        }
+      ],
+      "title": "Backpressure Events",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 30 },
+      "id": 18,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(hft_order_gateway_routed_ok_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "routed_ok",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_order_gateway_router_queue_full_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "queue_full",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_order_gateway_exchange_not_found_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "exchange_not_found",
+          "refId": "C"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_order_gateway_unknown_symbol_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "unknown_symbol",
+          "refId": "D"
+        }
+      ],
+      "title": "Gateway Routing",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 30 },
+      "id": 19,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(hft_order_result_received_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "received",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (service) (rate(hft_order_result_rejected_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "rejected",
+          "refId": "B"
+        }
+      ],
+      "title": "Order Results",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 38 },
+      "id": 20,
+      "panels": [],
+      "title": "Heartbeat & Health",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3000 },
+              { "color": "red", "value": 5000 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 39 },
+      "id": 21,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "max by (service) (hft_last_heartbeat_age_ms{service=~\"$service\"})",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Heartbeat Age",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 39 },
+      "id": 22,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(hft_strategy_gateway_stale_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway Stale Events",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 39 },
+      "id": 23,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(hft_gateway_heartbeat_emitted_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Heartbeat Emitted",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["hft", "latency", "ops"],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(hft_uptime_seconds, service)",
+        "includeAll": true,
+        "label": "Service",
+        "multi": true,
+        "name": "service",
+        "options": [],
+        "query": {
+          "query": "label_values(hft_uptime_seconds, service)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "HFT Pipeline",
+  "uid": "hft-pipeline",
+  "version": 1,
+  "weekStart": ""
+}

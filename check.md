@@ -528,9 +528,9 @@ Funding / EMA / misc: ✅
 - [ ] TCP 9009 healthcheck 30s/10s
 - ✅ 런타임 ILP 클라이언트는 `hft-storage::QuestDbSink` + `tools/questdb-export` 에서 이미 동작 (Phase 1).
 
-### 13.2 Grafana — ⏳ Phase 3
-- [ ] port 3000, 1 CPU / 8GB
-- [ ] default password `admin`
+### 13.2 Grafana — ✅
+- [x] port 3000, 1 CPU / 8GB → `mono/deploy/monitoring/docker-compose.yml`
+- [x] default password `admin` → `GF_SECURITY_ADMIN_PASSWORD=admin`
 
 ### 13.3 Redis — ⏳ Phase 3
 - [ ] port 6379, 1 CPU / 2GB
@@ -538,11 +538,13 @@ Funding / EMA / misc: ✅
 - [ ] PING healthcheck 10s/5s
 
 ### 13.4 Prometheus / PushGateway — ⏳ Phase 3
-- [ ] port 9090 / 9091, retention 30d
-- [ ] Phase 3 에서 `hft-telemetry::prometheus_exporter` 활성화 여부 결정 (현재 HDR sink 만 구현)
+- [x] port 9090, retention 30d → `mono/deploy/monitoring/docker-compose.yml`
+- [~] PushGateway (9091) 는 미구현 — 현재는 각 서비스 `/metrics` 직접 scrape
+- [x] Prometheus scrape 기반 수집 → `mono/deploy/monitoring/prometheus/prometheus.yml`
 
 ### 13.5 monitoring/prometheus.yml, monitoring/grafana/, PUSHGATEWAY_SETUP.md — ⏳ Phase 3
-- [ ] scrape config 이관 → `mono/deploy/monitoring/`
+- [x] scrape config 이관 → `mono/deploy/monitoring/`
+- [x] Grafana datasource / dashboard provisioning → `mono/deploy/monitoring/grafana/`
 
 ---
 
