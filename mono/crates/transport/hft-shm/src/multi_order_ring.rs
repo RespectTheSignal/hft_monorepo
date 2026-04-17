@@ -143,7 +143,9 @@ impl MultiOrderRingReader {
 
     /// 지정 ring 한 개만 poll (테스트용).
     pub fn poll_ring(&mut self, vm_id: u32) -> Option<OrderFrame> {
-        self.readers.get_mut(vm_id as usize).and_then(|r| r.try_consume())
+        self.readers
+            .get_mut(vm_id as usize)
+            .and_then(|r| r.try_consume())
     }
 
     /// 주 루프: `stop` 이 true 가 될 때까지 반복 polling.
@@ -226,12 +228,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("mr1");
         let s = spec(4);
-        let sr = SharedRegion::create_or_attach(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::Publisher,
-        )
-        .unwrap();
+        let sr =
+            SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+                .unwrap();
         // 전략 VM 4개 각각이 ring writer 를 연다.
         let mut writers = Vec::new();
         for vm_id in 0..s.n_max {
@@ -239,12 +238,9 @@ mod tests {
             writers.push(OrderRingWriter::from_region(sub, s.order_ring_capacity).unwrap());
         }
         // gateway 가 attach.
-        let gw = SharedRegion::open_view(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::OrderGateway,
-        )
-        .unwrap();
+        let gw =
+            SharedRegion::open_view(Backing::DevShm { path: p.clone() }, s, Role::OrderGateway)
+                .unwrap();
         let mut m = MultiOrderRingReader::attach(&gw).unwrap();
         // 각 ring 에 3건씩.
         for (vm_id, w) in writers.iter().enumerate() {
@@ -270,23 +266,17 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("mr2");
         let s = spec(3);
-        let sr = SharedRegion::create_or_attach(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::Publisher,
-        )
-        .unwrap();
+        let sr =
+            SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+                .unwrap();
         let mut writers = Vec::new();
         for vm_id in 0..s.n_max {
             let sub = sr.sub_region(SubKind::OrderRing { vm_id }).unwrap();
             writers.push(OrderRingWriter::from_region(sub, s.order_ring_capacity).unwrap());
         }
-        let gw = SharedRegion::open_view(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::OrderGateway,
-        )
-        .unwrap();
+        let gw =
+            SharedRegion::open_view(Backing::DevShm { path: p.clone() }, s, Role::OrderGateway)
+                .unwrap();
         let mut m = MultiOrderRingReader::attach(&gw).unwrap();
         // ring 0 에만 5 건 쓰고, 다른 ring 은 빔. poll 이 ring 0 을 전부 소비하고 다른
         // ring 에 대해 poll 해 봄도 수행해야 한다.
@@ -299,7 +289,7 @@ mod tests {
             true
         });
         assert_eq!(got, 3); // max_per_ring=3 제한.
-        // 한 번 더 돌면 남은 2 건.
+                            // 한 번 더 돌면 남은 2 건.
         let mut got2 = 0;
         m.poll_batch(10, |_, _| {
             got2 += 1;
@@ -313,22 +303,16 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("mr3");
         let s = spec(2);
-        let sr = SharedRegion::create_or_attach(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::Publisher,
-        )
-        .unwrap();
+        let sr =
+            SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+                .unwrap();
         for vm_id in 0..s.n_max {
             let sub = sr.sub_region(SubKind::OrderRing { vm_id }).unwrap();
             let _ = OrderRingWriter::from_region(sub, s.order_ring_capacity).unwrap();
         }
-        let gw = SharedRegion::open_view(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::OrderGateway,
-        )
-        .unwrap();
+        let gw =
+            SharedRegion::open_view(Backing::DevShm { path: p.clone() }, s, Role::OrderGateway)
+                .unwrap();
         let mut m = MultiOrderRingReader::attach(&gw).unwrap();
         assert_eq!(m.poll_batch(10, |_, _| true), 0);
     }
@@ -338,23 +322,17 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("mr4");
         let s = spec(3);
-        let sr = SharedRegion::create_or_attach(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::Publisher,
-        )
-        .unwrap();
+        let sr =
+            SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+                .unwrap();
         // 0, 2 만 초기화.
         for vm_id in [0, 2] {
             let sub = sr.sub_region(SubKind::OrderRing { vm_id }).unwrap();
             let _ = OrderRingWriter::from_region(sub, s.order_ring_capacity).unwrap();
         }
-        let gw = SharedRegion::open_view(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::OrderGateway,
-        )
-        .unwrap();
+        let gw =
+            SharedRegion::open_view(Backing::DevShm { path: p.clone() }, s, Role::OrderGateway)
+                .unwrap();
         let m = MultiOrderRingReader::attach_lenient(&gw);
         assert_eq!(m.len(), 2);
     }

@@ -380,14 +380,10 @@ impl OkxFeed {
             });
             write.send(Message::Text(sub.to_string())).await?;
         }
-        info!(
-            symbols = inst_ids.len(),
-            "okx subscribed bbo-tbt + trades"
-        );
+        info!(symbols = inst_ids.len(), "okx subscribed bbo-tbt + trades");
 
         let read_to = Duration::from_secs(self.cfg.read_timeout_secs);
-        let mut ping_iv =
-            tokio::time::interval(Duration::from_secs(self.cfg.ping_interval_secs));
+        let mut ping_iv = tokio::time::interval(Duration::from_secs(self.cfg.ping_interval_secs));
         ping_iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // 첫 tick 은 즉시 발화 — skip.
         ping_iv.tick().await;
@@ -421,10 +417,7 @@ impl OkxFeed {
                     return Ok(());
                 }
                 Err(_) => {
-                    warn!(
-                        timeout_s = self.cfg.read_timeout_secs,
-                        "okx read timeout"
-                    );
+                    warn!(timeout_s = self.cfg.read_timeout_secs, "okx read timeout");
                     return Err(anyhow::anyhow!("read timeout"));
                 }
             };
@@ -444,8 +437,7 @@ impl OkxFeed {
                 // OKX 가 바이너리를 보낼 일은 없지만 방어적 처리.
                 Message::Binary(bytes) => {
                     let ws_recv = Stamp::now(&*self.clock);
-                    let reply =
-                        dispatch_text_bytes(&bytes, ws_recv, inst_map, &self.cache, emit);
+                    let reply = dispatch_text_bytes(&bytes, ws_recv, inst_map, &self.cache, emit);
                     if let Some(out) = reply {
                         if let Err(e) = write.send(out).await {
                             warn!(error = %e, "okx reply send failed");
@@ -752,9 +744,7 @@ fn handle_trades_frame(
     for e in entries {
         // entry 의 instId 가 비어있으면 arg.instId 로 fallback.
         let sym = match e.inst_id {
-            Some(iid) if !iid.is_empty() && iid != inst_id => {
-                resolve_symbol(iid, inst_map, cache)
-            }
+            Some(iid) if !iid.is_empty() && iid != inst_id => resolve_symbol(iid, inst_map, cache),
             _ => default_sym.clone(),
         };
 
@@ -1230,10 +1220,8 @@ mod tests {
     #[test]
     fn build_inst_map_populates_ids_and_map() {
         let cache = Arc::new(SymbolCache::new());
-        let (ids, map) = build_inst_map(
-            &[Symbol::new("BTC_USDT"), Symbol::new("SOL_USDC")],
-            &cache,
-        );
+        let (ids, map) =
+            build_inst_map(&[Symbol::new("BTC_USDT"), Symbol::new("SOL_USDC")], &cache);
         assert_eq!(ids, vec!["BTC-USDT-SWAP", "SOL-USDC-SWAP"]);
         assert_eq!(
             map.get("BTC-USDT-SWAP").map(|s| s.as_str()),
@@ -1295,11 +1283,7 @@ mod tests {
         let mock = MockClock::new(100, 3);
         let clock: Arc<dyn Clock> = mock.clone();
         let shared = Arc::new(SymbolCache::new());
-        let f = OkxFeed::with_clock_and_cache(
-            OkxConfig::default(),
-            clock.clone(),
-            shared.clone(),
-        );
+        let f = OkxFeed::with_clock_and_cache(OkxConfig::default(), clock.clone(), shared.clone());
         let s = Stamp::now(f.clock().as_ref());
         assert_eq!(s.wall_ms, 100);
         assert!(Arc::ptr_eq(f.symbol_cache(), &shared));
@@ -1398,7 +1382,8 @@ mod tests {
         let cache = Arc::new(SymbolCache::new());
         let (_, map) = make_inst_map(&cache);
         let (emit, cnt, last) = emit_trade_counter();
-        let reply = dispatch_text_bytes(&sample_trade_bytes_buy(), recv_stamp(), &map, &cache, &emit);
+        let reply =
+            dispatch_text_bytes(&sample_trade_bytes_buy(), recv_stamp(), &map, &cache, &emit);
         assert!(reply.is_none());
         assert_eq!(cnt.load(Ordering::SeqCst), 1);
         let t = &last.lock().unwrap()[0];
@@ -1418,7 +1403,13 @@ mod tests {
         let cache = Arc::new(SymbolCache::new());
         let (_, map) = make_inst_map(&cache);
         let (emit, cnt, last) = emit_trade_counter();
-        let reply = dispatch_text_bytes(&sample_trade_bytes_sell(), recv_stamp(), &map, &cache, &emit);
+        let reply = dispatch_text_bytes(
+            &sample_trade_bytes_sell(),
+            recv_stamp(),
+            &map,
+            &cache,
+            &emit,
+        );
         assert!(reply.is_none());
         assert_eq!(cnt.load(Ordering::SeqCst), 1);
         let t = &last.lock().unwrap()[0];
@@ -1593,7 +1584,8 @@ mod tests {
     fn dispatch_trade_malformed_entry_skips_batch_safely() {
         // 배열 원소 하나가 schema 위반이면 serde 가 전체 배열 파싱 실패 →
         // handle_trades_frame 이 debug log 만 남기고 return. emit 0 건.
-        let bytes = br#"{"arg":{"channel":"trades","instId":"BTC-USDT-SWAP"},"data":[{"oops":true}]}"#;
+        let bytes =
+            br#"{"arg":{"channel":"trades","instId":"BTC-USDT-SWAP"},"data":[{"oops":true}]}"#;
         let cache = Arc::new(SymbolCache::new());
         let (_, map) = make_inst_map(&cache);
         let (emit, cnt, _) = emit_trade_counter();

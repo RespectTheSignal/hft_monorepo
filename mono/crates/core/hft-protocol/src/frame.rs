@@ -59,7 +59,11 @@ pub fn create_message(msg_type: &str, payload: &[u8]) -> Result<Vec<u8>, FrameEr
 
 /// 프레임을 기존 버퍼에 써 넣음. 버퍼는 미리 resize/clear 되어 있어야 함.
 /// 버퍼를 확장해 정확한 크기로 만든다.
-pub fn write_frame_into(buf: &mut Vec<u8>, msg_type: &str, payload: &[u8]) -> Result<(), FrameError> {
+pub fn write_frame_into(
+    buf: &mut Vec<u8>,
+    msg_type: &str,
+    payload: &[u8],
+) -> Result<(), FrameError> {
     let type_bytes = msg_type.as_bytes();
     if type_bytes.len() > u8::MAX as usize {
         return Err(FrameError::TypeStringTooLong(type_bytes.len()));
@@ -139,7 +143,10 @@ mod tests {
         // type_len = 10, but only 5 bytes follow
         let frame = b"\x0Ahello";
         match parse_frame(frame) {
-            Err(FrameError::TypeLenOverflow { type_len: 10, frame_len: 6 }) => {}
+            Err(FrameError::TypeLenOverflow {
+                type_len: 10,
+                frame_len: 6,
+            }) => {}
             other => panic!("unexpected: {other:?}"),
         }
     }

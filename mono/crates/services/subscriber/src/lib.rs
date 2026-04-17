@@ -153,9 +153,7 @@ pub fn decode(topic: &[u8], payload: &[u8]) -> Option<(MarketEvent, LatencyStamp
 
     match parsed.msg_type.as_str() {
         MSG_BOOKTICKER => decode_bookticker_event(payload, parsed.exchange, parsed.symbol, false),
-        MSG_WEBBOOKTICKER => {
-            decode_bookticker_event(payload, parsed.exchange, parsed.symbol, true)
-        }
+        MSG_WEBBOOKTICKER => decode_bookticker_event(payload, parsed.exchange, parsed.symbol, true),
         MSG_TRADE => decode_trade_event(payload, parsed.exchange, parsed.symbol),
         other => {
             debug!(target: "subscriber::decode", msg_type = other, "unknown msg_type");
@@ -631,9 +629,7 @@ mod tests {
         q.try_push(MarketEvent::BookTicker(bt.clone()), s)
             .expect("second push");
         // full
-        assert!(q
-            .try_push(MarketEvent::BookTicker(bt.clone()), s)
-            .is_err());
+        assert!(q.try_push(MarketEvent::BookTicker(bt.clone()), s).is_err());
 
         // receiver 가 꺼내면 다시 push 가능.
         let _ = rx.recv();

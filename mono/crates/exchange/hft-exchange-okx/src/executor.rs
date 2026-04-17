@@ -148,9 +148,9 @@ impl OkxExecutor {
         body.insert("reduceOnly".into(), req.reduce_only.into());
 
         if matches!(req.order_type, OrderType::Limit) {
-            let p = req.price.ok_or_else(|| {
-                ApiError::InvalidOrder("limit without price".into())
-            })?;
+            let p = req
+                .price
+                .ok_or_else(|| ApiError::InvalidOrder("limit without price".into()))?;
             if !p.is_finite() || p <= 0.0 {
                 return Err(ApiError::InvalidOrder(format!("bad price: {p}")));
             }
@@ -203,9 +203,17 @@ impl OkxExecutor {
             "placing order"
         );
 
-        let resp = self.http.send(Method::POST, &url, &headers, Some(body)).await?;
+        let resp = self
+            .http
+            .send(Method::POST, &url, &headers, Some(body))
+            .await?;
         let resp_body = resp.into_ok_body()?;
-        parse_place_response(&resp_body, req.exchange, req.client_id.clone(), &self.to_inst_id(req.symbol.as_str()))
+        parse_place_response(
+            &resp_body,
+            req.exchange,
+            req.client_id.clone(),
+            &self.to_inst_id(req.symbol.as_str()),
+        )
     }
 
     async fn do_cancel(&self, exchange_order_id: &str) -> Result<(), ApiError> {
@@ -222,7 +230,10 @@ impl OkxExecutor {
         let url = format!("{}{}", self.cfg.rest_base, self.cfg.cancel_path);
         let headers = self.auth_headers(&ts, &sign)?;
 
-        let resp = self.http.send(Method::POST, &url, &headers, Some(body)).await?;
+        let resp = self
+            .http
+            .send(Method::POST, &url, &headers, Some(body))
+            .await?;
         let resp_body = resp.into_ok_body()?;
         parse_ack_only(&resp_body)
     }
@@ -279,8 +290,8 @@ fn parse_place_response(
     client_id: Arc<str>,
     inst_id_hint: &str,
 ) -> Result<OrderAck, ApiError> {
-    let env: OkxEnvelope = serde_json::from_str(body)
-        .map_err(|e| ApiError::Decode(format!("okx resp: {e}")))?;
+    let env: OkxEnvelope =
+        serde_json::from_str(body).map_err(|e| ApiError::Decode(format!("okx resp: {e}")))?;
     // OKX 는 envelope code 0 이어도 data[0].sCode 가 0 이 아니면 reject.
     if env.code != "0" {
         return Err(ApiError::Rejected(format!(
@@ -314,8 +325,8 @@ fn parse_place_response(
 }
 
 fn parse_ack_only(body: &str) -> Result<(), ApiError> {
-    let env: OkxEnvelope = serde_json::from_str(body)
-        .map_err(|e| ApiError::Decode(format!("okx resp: {e}")))?;
+    let env: OkxEnvelope =
+        serde_json::from_str(body).map_err(|e| ApiError::Decode(format!("okx resp: {e}")))?;
     if env.code != "0" {
         return Err(ApiError::Rejected(format!("okx {}: {}", env.code, env.msg)));
     }
@@ -504,7 +515,12 @@ mod tests {
     #[test]
     fn sign_is_base64_44_chars() {
         let e = mk_exec();
-        let s = e.sign("2024-01-01T00:00:00.000Z", "POST", "/api/v5/trade/order", "{}");
+        let s = e.sign(
+            "2024-01-01T00:00:00.000Z",
+            "POST",
+            "/api/v5/trade/order",
+            "{}",
+        );
         assert_eq!(s.len(), 44);
     }
 
@@ -520,26 +536,16 @@ mod tests {
     #[test]
     fn parse_place_response_happy() {
         let body = r#"{"code":"0","msg":"","data":[{"ordId":"ord123","clOrdId":"cl","sCode":"0","sMsg":""}]}"#;
-        let ack = parse_place_response(
-            body,
-            ExchangeId::Okx,
-            Arc::from("cl"),
-            "BTC-USDT-SWAP",
-        )
-        .unwrap();
+        let ack =
+            parse_place_response(body, ExchangeId::Okx, Arc::from("cl"), "BTC-USDT-SWAP").unwrap();
         assert_eq!(ack.exchange_order_id, "BTC-USDT-SWAP:ord123");
     }
 
     #[test]
     fn parse_place_response_envelope_reject() {
         let body = r#"{"code":"50000","msg":"bad","data":[]}"#;
-        let err = parse_place_response(
-            body,
-            ExchangeId::Okx,
-            Arc::from("cl"),
-            "BTC-USDT-SWAP",
-        )
-        .unwrap_err();
+        let err = parse_place_response(body, ExchangeId::Okx, Arc::from("cl"), "BTC-USDT-SWAP")
+            .unwrap_err();
         match err {
             ApiError::Rejected(m) => assert!(m.contains("50000")),
             other => panic!("expected Rejected, got {other:?}"),
@@ -549,13 +555,8 @@ mod tests {
     #[test]
     fn parse_place_response_inner_reject() {
         let body = r#"{"code":"0","msg":"","data":[{"sCode":"51008","sMsg":"insufficient"}]}"#;
-        let err = parse_place_response(
-            body,
-            ExchangeId::Okx,
-            Arc::from("cl"),
-            "BTC-USDT-SWAP",
-        )
-        .unwrap_err();
+        let err = parse_place_response(body, ExchangeId::Okx, Arc::from("cl"), "BTC-USDT-SWAP")
+            .unwrap_err();
         match err {
             ApiError::Rejected(m) => assert!(m.contains("51008")),
             other => panic!("expected Rejected, got {other:?}"),

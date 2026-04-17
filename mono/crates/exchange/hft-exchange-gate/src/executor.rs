@@ -57,7 +57,7 @@ use hft_exchange_api::{
     ApiError, ExchangeExecutor, OrderAck, OrderRequest, OrderSide, OrderType, TimeInForce,
 };
 use hft_exchange_rest::{
-    headers_from_pairs, hmac_sha512_hex, now_epoch_s, now_epoch_ms, sha512_hex, Credentials,
+    headers_from_pairs, hmac_sha512_hex, now_epoch_ms, now_epoch_s, sha512_hex, Credentials,
     RestClient,
 };
 use hft_types::ExchangeId;
@@ -182,9 +182,9 @@ impl GateExecutor {
         let (price_str, tif_str) = match req.order_type {
             OrderType::Market => ("0".to_string(), "ioc".to_string()),
             OrderType::Limit => {
-                let p = req.price.ok_or_else(|| {
-                    ApiError::InvalidOrder("limit without price".into())
-                })?;
+                let p = req
+                    .price
+                    .ok_or_else(|| ApiError::InvalidOrder("limit without price".into()))?;
                 if !p.is_finite() || p <= 0.0 {
                     return Err(ApiError::InvalidOrder(format!("bad price: {p}")));
                 }
@@ -321,8 +321,12 @@ fn parse_place_response(
     client_id: Arc<str>,
 ) -> Result<OrderAck, ApiError> {
     // Gate 는 2xx 인데 에러를 반환할 일은 드물지만, `label` 이 존재하면 reject 처리.
-    let parsed: GatePlaceResp = serde_json::from_str(body)
-        .map_err(|e| ApiError::Decode(format!("place resp json: {e} / raw={}", truncate(body, 256))))?;
+    let parsed: GatePlaceResp = serde_json::from_str(body).map_err(|e| {
+        ApiError::Decode(format!(
+            "place resp json: {e} / raw={}",
+            truncate(body, 256)
+        ))
+    })?;
 
     if let Some(label) = parsed.label.as_deref() {
         if !label.is_empty() {
@@ -439,7 +443,13 @@ mod tests {
     fn sign_empty_body_uses_empty_sha512() {
         // cancel 처럼 body 가 empty 인 경우. SHA512("") = cf83e1...a3e
         let exec = mk_exec();
-        let sig = exec.sign("DELETE", "/api/v4/futures/usdt/orders/123", "", &[], 1_700_000_000);
+        let sig = exec.sign(
+            "DELETE",
+            "/api/v4/futures/usdt/orders/123",
+            "",
+            &[],
+            1_700_000_000,
+        );
         // 길이 = 128 hex
         assert_eq!(sig.len(), 128);
         assert!(sig.chars().all(|c| c.is_ascii_hexdigit()));
@@ -585,8 +595,7 @@ mod tests {
     #[test]
     fn parse_place_response_accepts_numeric_id() {
         let body = r#"{"id":12345,"create_time":1700000000.5}"#;
-        let ack =
-            parse_place_response(body, ExchangeId::Gate, Arc::from("c1")).unwrap();
+        let ack = parse_place_response(body, ExchangeId::Gate, Arc::from("c1")).unwrap();
         assert_eq!(ack.exchange_order_id, "12345");
         assert_eq!(ack.ts_ms, 1_700_000_000_500);
     }
@@ -594,16 +603,14 @@ mod tests {
     #[test]
     fn parse_place_response_accepts_string_id() {
         let body = r#"{"id":"abc-456","create_time":1700000000}"#;
-        let ack =
-            parse_place_response(body, ExchangeId::Gate, Arc::from("c2")).unwrap();
+        let ack = parse_place_response(body, ExchangeId::Gate, Arc::from("c2")).unwrap();
         assert_eq!(ack.exchange_order_id, "abc-456");
     }
 
     #[test]
     fn parse_place_response_rejects_when_label_nonempty() {
         let body = r#"{"label":"INSUFFICIENT_BALANCE","message":"no funds"}"#;
-        let err = parse_place_response(body, ExchangeId::Gate, Arc::from("c3"))
-            .unwrap_err();
+        let err = parse_place_response(body, ExchangeId::Gate, Arc::from("c3")).unwrap_err();
         match err {
             ApiError::Rejected(m) => {
                 assert!(m.contains("INSUFFICIENT_BALANCE"));
@@ -616,8 +623,7 @@ mod tests {
     #[test]
     fn parse_place_response_decode_error_on_missing_id() {
         let body = r#"{"create_time":1700000000}"#;
-        let err = parse_place_response(body, ExchangeId::Gate, Arc::from("c4"))
-            .unwrap_err();
+        let err = parse_place_response(body, ExchangeId::Gate, Arc::from("c4")).unwrap_err();
         match err {
             ApiError::Decode(_) => {}
             other => panic!("expected Decode, got {other:?}"),

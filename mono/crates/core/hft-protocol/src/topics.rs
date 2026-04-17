@@ -37,7 +37,8 @@ pub struct TopicBuilder;
 impl TopicBuilder {
     /// `{exchange}_{msg_type}_{symbol}` 형식의 토픽.
     pub fn build(exchange: ExchangeId, msg_type: &str, symbol: &str) -> String {
-        let mut s = String::with_capacity(exchange.as_str().len() + msg_type.len() + symbol.len() + 2);
+        let mut s =
+            String::with_capacity(exchange.as_str().len() + msg_type.len() + symbol.len() + 2);
         s.push_str(exchange.as_str());
         s.push(TOPIC_SEP);
         s.push_str(msg_type);
@@ -142,7 +143,10 @@ mod tests {
 
     #[test]
     fn prefix_ends_with_sep() {
-        assert_eq!(TopicBuilder::prefix(ExchangeId::Gate, MSG_BOOKTICKER), "gate_bookticker_");
+        assert_eq!(
+            TopicBuilder::prefix(ExchangeId::Gate, MSG_BOOKTICKER),
+            "gate_bookticker_"
+        );
     }
 
     #[test]

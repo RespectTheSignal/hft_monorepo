@@ -138,11 +138,7 @@ impl IlpEncoder {
     }
 
     /// Latency sample 한 줄 append.
-    pub fn append_latency(
-        buf: &mut Vec<u8>,
-        stage: Stage,
-        nanos: u64,
-    ) -> StorageResult<()> {
+    pub fn append_latency(buf: &mut Vec<u8>, stage: Stage, nanos: u64) -> StorageResult<()> {
         let ts_ns = stamp_to_ns_or_now(0);
         buf.extend_from_slice(TABLE_LATENCY.as_bytes());
         write_tag(buf, "stage", stage_name(stage))?;
@@ -522,22 +518,14 @@ impl QuestDbSink {
     }
 
     /// Trade 를 buffer 에 append.
-    pub fn push_trade(
-        &mut self,
-        tr: &Trade,
-        stamps: &LatencyStamps,
-    ) -> StorageResult<()> {
+    pub fn push_trade(&mut self, tr: &Trade, stamps: &LatencyStamps) -> StorageResult<()> {
         IlpEncoder::append_trade(&mut self.buffer, tr, stamps)?;
         self.rows_in_buffer += 1;
         Ok(())
     }
 
     /// Latency sample append.
-    pub fn push_latency_sample(
-        &mut self,
-        stage: Stage,
-        nanos: u64,
-    ) -> StorageResult<()> {
+    pub fn push_latency_sample(&mut self, stage: Stage, nanos: u64) -> StorageResult<()> {
         IlpEncoder::append_latency(&mut self.buffer, stage, nanos)?;
         self.rows_in_buffer += 1;
         Ok(())

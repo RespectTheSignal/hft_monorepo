@@ -239,10 +239,7 @@ impl V6Strategy {
             0.0,
             exposure.this_symbol_usdt,
             ts.trade_size_trigger,
-            exposure
-                .symbol_risk_limit
-                .max(ts.max_position_size) as i64
-                + 1,
+            exposure.symbol_risk_limit.max(ts.max_position_size) as i64 + 1,
             ts.trade_size_trigger,
             ts.order_size.max(1.0) as i64,
             exposure.this_symbol_usdt,
@@ -284,7 +281,11 @@ impl V6Strategy {
             }
         };
 
-        let api_side = if side.is_buy() { ApiSide::Buy } else { ApiSide::Sell };
+        let api_side = if side.is_buy() {
+            ApiSide::Buy
+        } else {
+            ApiSide::Sell
+        };
         let order_type = if dec.level == OrderLevel::MarketClose {
             OrderType::Market
         } else {
@@ -324,12 +325,7 @@ impl V6Strategy {
         self.orders_emitted = self.orders_emitted.saturating_add(1);
         self.rate.push(&symbol_ref, now_ms);
 
-        trace!(
-            symbol,
-            level = dec.level.as_str(),
-            qty,
-            "V6 order emitted"
-        );
+        trace!(symbol, level = dec.level.as_str(), qty, "V6 order emitted");
         debug!(
             target: "strategy::v6",
             symbol,
@@ -475,11 +471,7 @@ mod tests {
             gate_last_webbook_ticker_latency_ms: 60 * 60 * 1000,
             ..Default::default()
         };
-        let cfg = Arc::new(StrategyConfig::new(
-            "t".into(),
-            vec!["BTC_USDT".into()],
-            ts,
-        ));
+        let cfg = Arc::new(StrategyConfig::new("t".into(), vec!["BTC_USDT".into()], ts));
         let meta = Arc::new(SymbolMetaCache::seeded([(
             Symbol::new("BTC_USDT"),
             ContractMeta {

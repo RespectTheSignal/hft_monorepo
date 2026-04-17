@@ -147,7 +147,11 @@ pub struct BitgetFeed {
 impl BitgetFeed {
     /// 기본 `SystemClock` + 새 `SymbolCache` 로 feed 생성.
     pub fn new(cfg: BitgetConfig) -> Self {
-        Self::with_clock_and_cache(cfg, Arc::new(SystemClock::new()), Arc::new(SymbolCache::new()))
+        Self::with_clock_and_cache(
+            cfg,
+            Arc::new(SystemClock::new()),
+            Arc::new(SymbolCache::new()),
+        )
     }
 
     /// 테스트 / MockClock 주입용.
@@ -322,14 +326,10 @@ impl BitgetFeed {
             let sub = serde_json::json!({ "op": "subscribe", "args": args });
             write.send(Message::Text(sub.to_string())).await?;
         }
-        info!(
-            symbols = inst_ids.len(),
-            "bitget subscribed books1 + trade"
-        );
+        info!(symbols = inst_ids.len(), "bitget subscribed books1 + trade");
 
         let read_to = Duration::from_secs(self.cfg.read_timeout_secs);
-        let mut ping_iv =
-            tokio::time::interval(Duration::from_secs(self.cfg.ping_interval_secs));
+        let mut ping_iv = tokio::time::interval(Duration::from_secs(self.cfg.ping_interval_secs));
         ping_iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // 첫 tick 은 즉시 발화 — skip.
         ping_iv.tick().await;
@@ -853,7 +853,10 @@ mod tests {
         let bytes = text.as_bytes();
         dispatch_primary_bytes(
             bytes,
-            Stamp { wall_ms: 10, mono_ns: 20 },
+            Stamp {
+                wall_ms: 10,
+                mono_ns: 20,
+            },
             &inst_map,
             &cache,
             &emit,
@@ -1167,7 +1170,10 @@ mod tests {
 
         dispatch_primary_bytes(
             &sample_trade_buy_bytes(),
-            Stamp { wall_ms: 50, mono_ns: 11 },
+            Stamp {
+                wall_ms: 50,
+                mono_ns: 11,
+            },
             &inst_map,
             &cache,
             &emit,

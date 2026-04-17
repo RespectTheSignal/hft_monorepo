@@ -67,10 +67,7 @@ impl OrderEgressConfig {
                 !zmq.endpoint.is_empty(),
                 "order_egress.zmq.endpoint must not be empty"
             );
-            ensure!(
-                zmq.send_hwm > 0,
-                "order_egress.zmq.send_hwm must be > 0"
-            );
+            ensure!(zmq.send_hwm > 0, "order_egress.zmq.send_hwm must be > 0");
             ensure!(
                 zmq.linger_ms >= 0,
                 "order_egress.zmq.linger_ms must be >= 0"
@@ -98,8 +95,7 @@ impl OrderEgressConfig {
 
         if self.heartbeat_timeout_ms > 0 && self.heartbeat_timeout_ms < 1000 {
             return Err(ConfigError::Invalid(
-                "order_egress.heartbeat_timeout_ms must be 0 (disabled) or >= 1000"
-                    .to_string(),
+                "order_egress.heartbeat_timeout_ms must be 0 (disabled) or >= 1000".to_string(),
             ));
         }
 
@@ -249,7 +245,9 @@ mod tests {
     fn order_egress_serde_roundtrip_full() {
         let cfg = OrderEgressConfig {
             mode: OrderEgressMode::Zmq,
-            shm: ShmOrderEgressConfig { strategy_ring_id: 7 },
+            shm: ShmOrderEgressConfig {
+                strategy_ring_id: 7,
+            },
             zmq: Some(ZmqOrderEgressConfig {
                 endpoint: "tcp://infra-vm:5560".into(),
                 send_hwm: 2048,

@@ -179,15 +179,7 @@ pub enum OrderType {
 
 /// TimeInForce — Phase 1 최소 3종.
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
 )]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TimeInForce {
@@ -238,11 +230,17 @@ impl OrderRequest {
         if matches!(self.order_type, OrderType::Limit) {
             match self.price {
                 Some(p) if p.is_finite() && p > 0.0 => {}
-                _ => return Err(ApiError::InvalidOrder("limit 주문은 양의 price 필요".into())),
+                _ => {
+                    return Err(ApiError::InvalidOrder(
+                        "limit 주문은 양의 price 필요".into(),
+                    ))
+                }
             }
         }
         if self.client_id.is_empty() {
-            return Err(ApiError::InvalidOrder("client_id 는 비어있을 수 없음".into()));
+            return Err(ApiError::InvalidOrder(
+                "client_id 는 비어있을 수 없음".into(),
+            ));
         }
         if self.symbol.as_str().is_empty() {
             return Err(ApiError::InvalidOrder("symbol 은 비어있을 수 없음".into()));
@@ -395,7 +393,11 @@ pub struct Backoff {
 impl Backoff {
     /// `base_ms` 부터 2^n 배로 증가하며 `cap_ms` 에서 포화.
     pub const fn new(base_ms: u64, cap_ms: u64) -> Self {
-        Self { base_ms, cap_ms, attempt: 0 }
+        Self {
+            base_ms,
+            cap_ms,
+            attempt: 0,
+        }
     }
 
     /// 200ms 시작, 5000ms 상한 — WebSocket feed 에 적당한 기본값.
@@ -564,7 +566,8 @@ mod tests {
         let t2 = token.clone();
 
         let handle = tokio::spawn(async move {
-            feed.stream(&[Symbol::new("BTC_USDT")], noop_emitter(), t2).await
+            feed.stream(&[Symbol::new("BTC_USDT")], noop_emitter(), t2)
+                .await
         });
 
         // 잠깐 대기 후 cancel.
@@ -575,7 +578,11 @@ mod tests {
             .await
             .expect("task did not complete on cancel")
             .expect("task panicked");
-        assert!(res.is_ok(), "stream must return Ok on cancel: {:?}", res.err());
+        assert!(
+            res.is_ok(),
+            "stream must return Ok on cancel: {:?}",
+            res.err()
+        );
     }
 
     #[tokio::test]
@@ -668,7 +675,9 @@ mod tests {
 
     #[test]
     fn api_error_display() {
-        let e = ApiError::RateLimited { retry_after_ms: 250 };
+        let e = ApiError::RateLimited {
+            retry_after_ms: 250,
+        };
         assert!(format!("{e}").contains("rate limited"));
         let e = ApiError::Rejected("insufficient balance".into());
         assert!(format!("{e}").contains("insufficient"));

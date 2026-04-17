@@ -212,7 +212,10 @@ impl Histograms {
 
         // stage pair targets
         for (label, target_ns) in &cli.target_stage_p999 {
-            let Some(idx) = stage_pairs().iter().position(|(_, _, l)| *l == label.as_str()) else {
+            let Some(idx) = stage_pairs()
+                .iter()
+                .position(|(_, _, l)| *l == label.as_str())
+            else {
                 warn!(unknown_label = %label, "stage target ignored — unknown label");
                 continue;
             };
@@ -237,7 +240,12 @@ impl Histograms {
         if let Some(t) = cli.target_internal_p999_ns {
             let h = self.internal.lock();
             if h.len() < min {
-                warn!(label = "internal", samples = h.len(), min, "not enough samples to check");
+                warn!(
+                    label = "internal",
+                    samples = h.len(),
+                    min,
+                    "not enough samples to check"
+                );
             } else {
                 let observed = h.value_at_quantile(0.999);
                 if observed > t {
@@ -256,7 +264,12 @@ impl Histograms {
         if let Some(t) = cli.target_e2e_p999_ms {
             let h = self.e2e_ms.lock();
             if h.len() < min {
-                warn!(label = "e2e", samples = h.len(), min, "not enough samples to check");
+                warn!(
+                    label = "e2e",
+                    samples = h.len(),
+                    min,
+                    "not enough samples to check"
+                );
             } else {
                 let observed = h.value_at_quantile(0.999);
                 if observed > t {
@@ -411,12 +424,14 @@ async fn run(cli: Cli) -> Result<Vec<Violation>> {
     // DirectFn closure — subscriber 의 SubTask 가 매 이벤트마다 호출.
     let hs = histograms.clone();
     let clk = clock.clone();
-    let downstream = Arc::new(DirectFn::new(move |_ev: MarketEvent, mut stamps: LatencyStamps| {
-        // Subscriber 는 이미 Subscribed stage 를 mark 했다. 우리가 여기서
-        // Consumed 까지 mark 해야 sub→con 및 internal/e2e delta 가 완성된다.
-        stamps.mark(Stage::Consumed, &*clk);
-        hs.record(&stamps);
-    }));
+    let downstream = Arc::new(DirectFn::new(
+        move |_ev: MarketEvent, mut stamps: LatencyStamps| {
+            // Subscriber 는 이미 Subscribed stage 를 mark 했다. 우리가 여기서
+            // Consumed 까지 mark 해야 sub→con 및 internal/e2e delta 가 완성된다.
+            stamps.mark(Stage::Consumed, &*clk);
+            hs.record(&stamps);
+        },
+    ));
 
     let handle = subscriber_start(cfg.clone(), downstream)
         .await

@@ -88,12 +88,21 @@ fn boot_publisher(path: &std::path::Path, spec: LayoutSpec) -> SharedRegion {
         Role::Publisher,
     )
     .expect("publisher shared region");
-    let _ = QuoteSlotWriter::from_region(sr.sub_region(SubKind::Quote).unwrap(), spec.quote_slot_count)
-        .expect("quote writer");
-    let _ = TradeRingWriter::from_region(sr.sub_region(SubKind::Trade).unwrap(), spec.trade_ring_capacity)
-        .expect("trade writer");
-    let _ = SymbolTable::from_region(sr.sub_region(SubKind::Symtab).unwrap(), spec.symtab_capacity)
-        .expect("symtab");
+    let _ = QuoteSlotWriter::from_region(
+        sr.sub_region(SubKind::Quote).unwrap(),
+        spec.quote_slot_count,
+    )
+    .expect("quote writer");
+    let _ = TradeRingWriter::from_region(
+        sr.sub_region(SubKind::Trade).unwrap(),
+        spec.trade_ring_capacity,
+    )
+    .expect("trade writer");
+    let _ = SymbolTable::from_region(
+        sr.sub_region(SubKind::Symtab).unwrap(),
+        spec.symtab_capacity,
+    )
+    .expect("symtab");
     let sub = sr.sub_region(SubKind::OrderRing { vm_id: 0 }).unwrap();
     let _ = OrderRingWriter::from_region(sub, spec.order_ring_capacity).expect("order writer");
     sr
@@ -156,14 +165,13 @@ fn drop_policy_counts_backpressure() {
     let meta = sample_meta();
     let before = snapshot_map();
     let egress = PolicyOrderEgress::new(BlockingOrderEgress::default(), BackpressurePolicy::Drop);
-    assert_eq!(egress.submit(&req, &meta).unwrap(), SubmitOutcome::WouldBlock);
+    assert_eq!(
+        egress.submit(&req, &meta).unwrap(),
+        SubmitOutcome::WouldBlock
+    );
     let after = snapshot_map();
     assert_eq!(
-        counter_delta(
-            &before,
-            &after,
-            "order_egress_backpressure_dropped"
-        ),
+        counter_delta(&before, &after, "order_egress_backpressure_dropped"),
         1
     );
 }
@@ -185,19 +193,11 @@ fn retry_policy_succeeds_within_budget() {
     assert_eq!(egress.submit(&req, &meta).unwrap(), SubmitOutcome::Sent);
     let after = snapshot_map();
     assert_eq!(
-        counter_delta(
-            &before,
-            &after,
-            "order_egress_backpressure_retried"
-        ),
+        counter_delta(&before, &after, "order_egress_backpressure_retried"),
         2
     );
     assert_eq!(
-        counter_delta(
-            &before,
-            &after,
-            "order_egress_backpressure_retry_exhausted"
-        ),
+        counter_delta(&before, &after, "order_egress_backpressure_retry_exhausted"),
         0
     );
 }
@@ -216,22 +216,17 @@ fn retry_policy_exhausts() {
             total_timeout_ns: 100_000,
         },
     );
-    assert_eq!(egress.submit(&req, &meta).unwrap(), SubmitOutcome::WouldBlock);
+    assert_eq!(
+        egress.submit(&req, &meta).unwrap(),
+        SubmitOutcome::WouldBlock
+    );
     let after = snapshot_map();
     assert_eq!(
-        counter_delta(
-            &before,
-            &after,
-            "order_egress_backpressure_retried"
-        ),
+        counter_delta(&before, &after, "order_egress_backpressure_retried"),
         3
     );
     assert_eq!(
-        counter_delta(
-            &before,
-            &after,
-            "order_egress_backpressure_retry_exhausted"
-        ),
+        counter_delta(&before, &after, "order_egress_backpressure_retry_exhausted"),
         1
     );
 }
@@ -250,20 +245,18 @@ fn retry_policy_total_timeout_cuts_early() {
             total_timeout_ns: 1_000_000,
         },
     );
-    assert_eq!(egress.submit(&req, &meta).unwrap(), SubmitOutcome::WouldBlock);
-    let after = snapshot_map();
-    let retried = counter_delta(
-        &before,
-        &after,
-        "order_egress_backpressure_retried",
-    );
-    assert!(retried < 1000, "timeout should cut retries early, got {retried}");
     assert_eq!(
-        counter_delta(
-            &before,
-            &after,
-            "order_egress_backpressure_retry_exhausted"
-        ),
+        egress.submit(&req, &meta).unwrap(),
+        SubmitOutcome::WouldBlock
+    );
+    let after = snapshot_map();
+    let retried = counter_delta(&before, &after, "order_egress_backpressure_retried");
+    assert!(
+        retried < 1000,
+        "timeout should cut retries early, got {retried}"
+    );
+    assert_eq!(
+        counter_delta(&before, &after, "order_egress_backpressure_retry_exhausted"),
         1
     );
 }
@@ -283,11 +276,7 @@ fn block_policy_within_timeout_succeeds() {
     assert_eq!(egress.submit(&req, &meta).unwrap(), SubmitOutcome::Sent);
     let after = snapshot_map();
     assert_eq!(
-        counter_delta(
-            &before,
-            &after,
-            "order_egress_backpressure_blocked"
-        ),
+        counter_delta(&before, &after, "order_egress_backpressure_blocked"),
         1
     );
 }
@@ -300,16 +289,17 @@ fn block_policy_timeout_exceeded() {
     let before = snapshot_map();
     let egress = PolicyOrderEgress::new(
         BlockingOrderEgress::default(),
-        BackpressurePolicy::BlockWithTimeout { timeout_ns: 1_000_000 },
+        BackpressurePolicy::BlockWithTimeout {
+            timeout_ns: 1_000_000,
+        },
     );
-    assert_eq!(egress.submit(&req, &meta).unwrap(), SubmitOutcome::WouldBlock);
+    assert_eq!(
+        egress.submit(&req, &meta).unwrap(),
+        SubmitOutcome::WouldBlock
+    );
     let after = snapshot_map();
     assert_eq!(
-        counter_delta(
-            &before,
-            &after,
-            "order_egress_backpressure_block_timeout"
-        ),
+        counter_delta(&before, &after, "order_egress_backpressure_block_timeout"),
         1
     );
 }
@@ -330,11 +320,7 @@ fn adapt_error_propagates_without_transport_call() {
 
     let after = snapshot_map();
     assert_eq!(
-        counter_delta(
-            &before,
-            &after,
-            "order_egress_serialize_error"
-        ),
+        counter_delta(&before, &after, "order_egress_serialize_error"),
         1
     );
     assert_eq!(counter_delta(&before, &after, "order_egress_zmq_ok"), 0);
@@ -423,7 +409,10 @@ fn shm_egress_ring_full() {
     for _ in 0..4 {
         assert_eq!(egress.try_submit(&req, &meta).unwrap(), SubmitOutcome::Sent);
     }
-    assert_eq!(egress.try_submit(&req, &meta).unwrap(), SubmitOutcome::WouldBlock);
+    assert_eq!(
+        egress.try_submit(&req, &meta).unwrap(),
+        SubmitOutcome::WouldBlock
+    );
 
     let after = snapshot_map();
     assert_eq!(counter_delta(&before, &after, "shm_order_full_drop"), 1);
@@ -437,7 +426,8 @@ fn zmq_egress_smoke() {
     let pull = ctx.raw().socket(zmq::PULL).expect("pull socket");
     pull.bind(&ep).expect("bind pull");
     pull.set_rcvtimeo(500).expect("set timeout");
-    let egress = ZmqOrderEgress::connect_with_context(ctx.clone(), &zmq_cfg(ep.clone(), 8)).unwrap();
+    let egress =
+        ZmqOrderEgress::connect_with_context(ctx.clone(), &zmq_cfg(ep.clone(), 8)).unwrap();
     let req = sample_req(ExchangeId::Gate);
     let meta = sample_meta();
     let before = snapshot_map();
@@ -473,7 +463,10 @@ fn zmq_egress_hwm_would_block() {
     assert_eq!(egress.try_submit(&req, &meta).unwrap(), SubmitOutcome::Sent);
     // libzmq inproc pipe 는 sender/receiver queue 각각에 HWM 이 적용되어
     // HWM=1 이어도 2 frame 까지는 수용한다. 3번째부터 backpressure 가 걸린다.
-    assert_eq!(egress.try_submit(&req, &meta).unwrap(), SubmitOutcome::WouldBlock);
+    assert_eq!(
+        egress.try_submit(&req, &meta).unwrap(),
+        SubmitOutcome::WouldBlock
+    );
 
     let after = snapshot_map();
     assert_eq!(counter_delta(&before, &after, "order_egress_zmq_ok"), 2);

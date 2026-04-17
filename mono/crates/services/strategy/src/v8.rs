@@ -257,13 +257,10 @@ impl V8Strategy {
             gate_bt.server_time_ms,
             cache.binance_bt.as_ref().map(|b| b.server_time_ms),
             gate_web_bt.server_time_ms,
-            0.0,                                     // funding_rate — TODO: funding provider
-            exposure.this_symbol_usdt,                // order_count_size — 대용: 포지션 크기
+            0.0,                       // funding_rate — TODO: funding provider
+            exposure.this_symbol_usdt, // order_count_size — 대용: 포지션 크기
             ts.trade_size_trigger,
-            exposure
-                .symbol_risk_limit
-                .max(ts.max_position_size) as i64
-                + 1,
+            exposure.symbol_risk_limit.max(ts.max_position_size) as i64 + 1,
             ts.trade_size_trigger,
             ts.order_size.max(1.0) as i64,
             exposure.this_symbol_usdt,
@@ -307,7 +304,11 @@ impl V8Strategy {
         };
 
         // 7) OrderRequest 생성 + rate tracker push.
-        let api_side = if side.is_buy() { ApiSide::Buy } else { ApiSide::Sell };
+        let api_side = if side.is_buy() {
+            ApiSide::Buy
+        } else {
+            ApiSide::Sell
+        };
         let order_type = if dec.level == OrderLevel::MarketClose {
             OrderType::Market
         } else {
@@ -347,12 +348,7 @@ impl V8Strategy {
         self.orders_emitted = self.orders_emitted.saturating_add(1);
         self.rate.push(&symbol_ref, now_ms);
 
-        trace!(
-            symbol,
-            level = dec.level.as_str(),
-            qty,
-            "V8 order emitted"
-        );
+        trace!(symbol, level = dec.level.as_str(), qty, "V8 order emitted");
         debug!(
             target: "strategy::v8",
             symbol,
@@ -503,11 +499,7 @@ mod tests {
             gate_last_webbook_ticker_latency_ms: 60 * 60 * 1000,
             ..Default::default()
         };
-        let cfg = Arc::new(StrategyConfig::new(
-            "t".into(),
-            vec!["BTC_USDT".into()],
-            ts,
-        ));
+        let cfg = Arc::new(StrategyConfig::new("t".into(), vec!["BTC_USDT".into()], ts));
 
         // Symbol meta — quanto_multiplier=1.0, min_order_size=1.
         let meta = Arc::new(SymbolMetaCache::seeded([(

@@ -127,9 +127,9 @@ impl BybitExecutor {
                 body.insert("orderType".into(), "Market".into());
             }
             OrderType::Limit => {
-                let p = req.price.ok_or_else(|| {
-                    ApiError::InvalidOrder("limit without price".into())
-                })?;
+                let p = req
+                    .price
+                    .ok_or_else(|| ApiError::InvalidOrder("limit without price".into()))?;
                 if !p.is_finite() || p <= 0.0 {
                     return Err(ApiError::InvalidOrder(format!("bad price: {p}")));
                 }
@@ -174,7 +174,10 @@ impl BybitExecutor {
             "placing order"
         );
 
-        let resp = self.http.send(Method::POST, &url, &headers, Some(body)).await?;
+        let resp = self
+            .http
+            .send(Method::POST, &url, &headers, Some(body))
+            .await?;
         let resp_body = resp.into_ok_body()?;
         parse_place_response(&resp_body, req.exchange, req.client_id.clone())
     }
@@ -204,7 +207,10 @@ impl BybitExecutor {
             ("X-BAPI-SIGN", sign.as_str()),
         ])?;
 
-        let resp = self.http.send(Method::POST, &url, &headers, Some(body)).await?;
+        let resp = self
+            .http
+            .send(Method::POST, &url, &headers, Some(body))
+            .await?;
         let resp_body = resp.into_ok_body()?;
         // Bybit 의 "not found" 는 retCode 170213 등 — reject 로 돌아오므로 에러 전파.
         parse_ack_only(&resp_body)
@@ -262,8 +268,8 @@ fn parse_place_response(
     exchange: ExchangeId,
     client_id: Arc<str>,
 ) -> Result<OrderAck, ApiError> {
-    let env: BybitEnvelope = serde_json::from_str(body)
-        .map_err(|e| ApiError::Decode(format!("bybit resp: {e}")))?;
+    let env: BybitEnvelope =
+        serde_json::from_str(body).map_err(|e| ApiError::Decode(format!("bybit resp: {e}")))?;
     if env.ret_code != 0 {
         return Err(ApiError::Rejected(format!(
             "bybit {}: {}",
@@ -287,8 +293,8 @@ fn parse_place_response(
 }
 
 fn parse_ack_only(body: &str) -> Result<(), ApiError> {
-    let env: BybitEnvelope = serde_json::from_str(body)
-        .map_err(|e| ApiError::Decode(format!("bybit resp: {e}")))?;
+    let env: BybitEnvelope =
+        serde_json::from_str(body).map_err(|e| ApiError::Decode(format!("bybit resp: {e}")))?;
     if env.ret_code != 0 {
         return Err(ApiError::Rejected(format!(
             "bybit {}: {}",
@@ -455,8 +461,7 @@ mod tests {
     #[test]
     fn parse_place_response_happy() {
         let body = r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"ord-1","orderLinkId":"link1","symbol":"BTCUSDT"},"time":1700000000000}"#;
-        let ack =
-            parse_place_response(body, ExchangeId::Bybit, Arc::from("link1")).unwrap();
+        let ack = parse_place_response(body, ExchangeId::Bybit, Arc::from("link1")).unwrap();
         assert_eq!(ack.exchange_order_id, "BTCUSDT:ord-1");
         assert_eq!(ack.ts_ms, 1_700_000_000_000);
     }
@@ -464,8 +469,7 @@ mod tests {
     #[test]
     fn parse_place_response_reject_on_retcode() {
         let body = r#"{"retCode":10001,"retMsg":"param error","result":null}"#;
-        let err =
-            parse_place_response(body, ExchangeId::Bybit, Arc::from("c")).unwrap_err();
+        let err = parse_place_response(body, ExchangeId::Bybit, Arc::from("c")).unwrap_err();
         match err {
             ApiError::Rejected(m) => assert!(m.contains("10001")),
             other => panic!("expected Rejected, got {other:?}"),

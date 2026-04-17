@@ -130,8 +130,8 @@ async fn e2e_bookticker_pipeline_delivers_all_events_to_strategy() {
     };
 
     let clock_for_runner: Arc<dyn Clock> = clock.clone();
-    let handle = start_with_clock(strategy, rx, order_tx, clock_for_runner)
-        .expect("start strategy runner");
+    let handle =
+        start_with_clock(strategy, rx, order_tx, clock_for_runner).expect("start strategy runner");
 
     // 10 건 주입.
     const N: usize = 10;
@@ -204,7 +204,9 @@ async fn e2e_mixed_events_reach_strategy() {
     assert_eq!(*last_exchange.lock(), Some(ExchangeId::Gate));
 
     handle.shutdown();
-    timeout(Duration::from_millis(500), handle.join()).await.unwrap();
+    timeout(Duration::from_millis(500), handle.join())
+        .await
+        .unwrap();
     drop(tx);
 }
 
@@ -292,7 +294,10 @@ async fn e2e_internal_latency_under_budget() {
          (p50={p50}ns, p99={p99}ns, n={samples})"
     );
     // sanity: 최소 한 샘플 이상.
-    assert!(samples as usize >= N, "expected >= {N} samples, got {samples}");
+    assert!(
+        samples as usize >= N,
+        "expected >= {N} samples, got {samples}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -334,7 +339,9 @@ async fn e2e_strategy_runner_drains_large_burst() {
     assert_eq!(processed.load(Ordering::SeqCst), N);
 
     handle.shutdown();
-    timeout(Duration::from_millis(500), handle.join()).await.unwrap();
+    timeout(Duration::from_millis(500), handle.join())
+        .await
+        .unwrap();
     drop(tx);
 }
 

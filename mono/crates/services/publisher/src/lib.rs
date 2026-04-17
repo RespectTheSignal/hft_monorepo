@@ -69,8 +69,7 @@ use hft_protocol::{
 use hft_telemetry::{counter_add, counter_inc, CounterKey};
 use hft_time::{Clock, LatencyStamps, Stage, SystemClock};
 use hft_types::{
-    BookTicker as DomainBookTicker, DataRole, ExchangeId, MarketEvent, Symbol,
-    Trade as DomainTrade,
+    BookTicker as DomainBookTicker, DataRole, ExchangeId, MarketEvent, Symbol, Trade as DomainTrade,
 };
 use hft_zmq::{Context as ZmqContext, PubSocket, PullSocket, PushSocket, SendOutcome};
 use tokio::sync::Notify;
@@ -275,13 +274,15 @@ impl Worker {
                         encode_into_bookticker(&mut buf, bt);
                         (t.clone(), BOOK_TICKER_SIZE)
                     }
-                    None => match build_uncached_topic(bt.exchange, MSG_WEBBOOKTICKER, &bt.symbol) {
-                        Some(t) => {
-                            encode_into_bookticker(&mut buf, bt);
-                            (t, BOOK_TICKER_SIZE)
+                    None => {
+                        match build_uncached_topic(bt.exchange, MSG_WEBBOOKTICKER, &bt.symbol) {
+                            Some(t) => {
+                                encode_into_bookticker(&mut buf, bt);
+                                (t, BOOK_TICKER_SIZE)
+                            }
+                            None => return,
                         }
-                        None => return,
-                    },
+                    }
                 }
             }
             MarketEvent::Trade(tr) => match self.topics.get(tr.exchange, MSG_TRADE, &tr.symbol) {
@@ -304,10 +305,9 @@ impl Worker {
 
         // 4) offset 96(bookticker) / 104(trade) 에 pushed_ms 덮어쓰기.
         match payload_len {
-            BOOK_TICKER_SIZE => patch_bookticker_pushed_ms(
-                &mut buf[..BOOK_TICKER_SIZE],
-                stamps.pushed.wall_ms,
-            ),
+            BOOK_TICKER_SIZE => {
+                patch_bookticker_pushed_ms(&mut buf[..BOOK_TICKER_SIZE], stamps.pushed.wall_ms)
+            }
             TRADE_SIZE => patch_trade_pushed_ms(&mut buf[..TRADE_SIZE], stamps.pushed.wall_ms),
             _ => unreachable!("payload_len must be BOOK_TICKER_SIZE or TRADE_SIZE"),
         }
@@ -383,8 +383,9 @@ fn encode_into_bookticker(buf: &mut [u8; WORKER_BUF_SIZE], bt: &DomainBookTicker
     // 고정 120B 구간에 대한 mutable ref 를 얻기 위해 split_at_mut.
     let (head, _tail) = buf.split_at_mut(BOOK_TICKER_SIZE);
     // head 는 &mut [u8] 길이 120 이므로 [u8; 120] 배열 참조로 변환.
-    let arr: &mut [u8; BOOK_TICKER_SIZE] =
-        head.try_into().expect("split_at_mut invariant guarantees 120B");
+    let arr: &mut [u8; BOOK_TICKER_SIZE] = head
+        .try_into()
+        .expect("split_at_mut invariant guarantees 120B");
     encode_bookticker_into(arr, bt);
 }
 
@@ -392,8 +393,9 @@ fn encode_into_bookticker(buf: &mut [u8; WORKER_BUF_SIZE], bt: &DomainBookTicker
 #[inline]
 fn encode_into_trade(buf: &mut [u8; WORKER_BUF_SIZE], tr: &DomainTrade) {
     let (head, _tail) = buf.split_at_mut(TRADE_SIZE);
-    let arr: &mut [u8; TRADE_SIZE] =
-        head.try_into().expect("split_at_mut invariant guarantees 128B");
+    let arr: &mut [u8; TRADE_SIZE] = head
+        .try_into()
+        .expect("split_at_mut invariant guarantees 128B");
     encode_trade_into(arr, tr);
 }
 
@@ -439,13 +441,13 @@ pub struct Aggregator {
 
 impl Aggregator {
     /// 새 Aggregator.
-    pub fn new(
-        clock: Arc<dyn Clock>,
-        pull: PullSocket,
-        pub_: PubSocket,
-        drain_cap: usize,
-    ) -> Self {
-        Self { clock, pull, pub_, drain_cap }
+    pub fn new(clock: Arc<dyn Clock>, pull: PullSocket, pub_: PubSocket, drain_cap: usize) -> Self {
+        Self {
+            clock,
+            pull,
+            pub_,
+            drain_cap,
+        }
     }
 
     /// cancel 이 올 때까지 loop.
@@ -996,7 +998,12 @@ pub async fn start(cfg: Arc<AppConfig>, readiness_port: Option<u16>) -> Result<P
     // (구독자 관점에서 tcp bind 가 accept 가능함 → true 로 기준.)
     ready.set_ready();
 
-    Ok(PublisherHandle { tasks, cancel, ready, zmq_ctx })
+    Ok(PublisherHandle {
+        tasks,
+        cancel,
+        ready,
+        zmq_ctx,
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1165,18 +1172,12 @@ fn build_shm_publisher(cfg: &AppConfig) -> Result<Arc<crate::shm_pub::ShmPublish
 
             let quote = QuoteSlotWriter::create(&cfg.shm.quote_path, cfg.shm.quote_slot_count)
                 .with_context(|| {
-                    format!(
-                        "QuoteSlotWriter::create({})",
-                        cfg.shm.quote_path.display()
-                    )
+                    format!("QuoteSlotWriter::create({})", cfg.shm.quote_path.display())
                 })?;
             let trade = TradeRingWriter::create(&cfg.shm.trade_path, cfg.shm.trade_ring_capacity)
                 .with_context(|| {
-                    format!(
-                        "TradeRingWriter::create({})",
-                        cfg.shm.trade_path.display()
-                    )
-                })?;
+                format!("TradeRingWriter::create({})", cfg.shm.trade_path.display())
+            })?;
             let symtab =
                 SymbolTable::open_or_create(&cfg.shm.symtab_path, cfg.shm.symbol_table_capacity)
                     .with_context(|| {
@@ -1282,10 +1283,7 @@ mod tests {
         }
     }
 
-    fn ex_cfg_with(
-        symbols: Vec<Symbol>,
-        ignore: Vec<Symbol>,
-    ) -> hft_config::ExchangeConfig {
+    fn ex_cfg_with(symbols: Vec<Symbol>, ignore: Vec<Symbol>) -> hft_config::ExchangeConfig {
         hft_config::ExchangeConfig {
             id: ExchangeId::Gate,
             symbols,
@@ -1332,10 +1330,7 @@ mod tests {
             vec![Symbol::new("ETH_USDT")],
         );
         let out = resolve_subscribed_symbols(&feed, &cfg).await;
-        assert_eq!(
-            out,
-            vec![Symbol::new("BTC_USDT"), Symbol::new("SOL_USDT")]
-        );
+        assert_eq!(out, vec![Symbol::new("BTC_USDT"), Symbol::new("SOL_USDT")]);
     }
 
     #[tokio::test]
@@ -1359,11 +1354,7 @@ mod tests {
         let feed = MockFeed {
             id: ExchangeId::Gate,
             role: DataRole::Primary,
-            live: Ok(vec![
-                Symbol::new("C"),
-                Symbol::new("B"),
-                Symbol::new("A"),
-            ]),
+            live: Ok(vec![Symbol::new("C"), Symbol::new("B"), Symbol::new("A")]),
         };
         let cfg = ex_cfg_with(
             vec![Symbol::new("A"), Symbol::new("B"), Symbol::new("C")],
@@ -1426,7 +1417,11 @@ mod tests {
             .get(ExchangeId::Gate, MSG_TRADE, &Symbol::new("ETH_USDT"))
             .is_some());
         assert!(tc
-            .get(ExchangeId::Gate, MSG_WEBBOOKTICKER, &Symbol::new("BTC_USDT"))
+            .get(
+                ExchangeId::Gate,
+                MSG_WEBBOOKTICKER,
+                &Symbol::new("BTC_USDT")
+            )
             .is_none());
     }
 
@@ -1445,16 +1440,28 @@ mod tests {
         tc.populate_from_exchanges(&[ex]);
         assert_eq!(tc.len(), 1);
         assert!(tc
-            .get(ExchangeId::Gate, MSG_WEBBOOKTICKER, &Symbol::new("BTC_USDT"))
+            .get(
+                ExchangeId::Gate,
+                MSG_WEBBOOKTICKER,
+                &Symbol::new("BTC_USDT")
+            )
             .is_some());
     }
 
     #[test]
     fn topic_cache_get_returns_exact_topic_bytes() {
         let mut tc = TopicCache::new();
-        tc.insert(ExchangeId::Binance, MSG_BOOKTICKER, &Symbol::new("BTC_USDT"));
+        tc.insert(
+            ExchangeId::Binance,
+            MSG_BOOKTICKER,
+            &Symbol::new("BTC_USDT"),
+        );
         let got = tc
-            .get(ExchangeId::Binance, MSG_BOOKTICKER, &Symbol::new("BTC_USDT"))
+            .get(
+                ExchangeId::Binance,
+                MSG_BOOKTICKER,
+                &Symbol::new("BTC_USDT"),
+            )
             .unwrap();
         assert_eq!(got.as_ref(), b"binance_bookticker_BTC_USDT");
     }
@@ -1591,7 +1598,11 @@ mod tests {
         // offset 96..104 에 aggregator 가 찍은 published_ms 가 들어가 있어야 함.
         let published_bytes = &m.1[96..104];
         let published = i64::from_le_bytes(published_bytes.try_into().unwrap());
-        assert!(published > 0, "published_ms must be non-zero: {}", published);
+        assert!(
+            published > 0,
+            "published_ms must be non-zero: {}",
+            published
+        );
     }
 
     #[tokio::test]
@@ -1666,15 +1677,17 @@ mod tests {
         };
 
         let handle = start(Arc::new(app), None).await.unwrap();
-        assert!(handle.ready.is_ready(), "handle must be ready right after bind");
+        assert!(
+            handle.ready.is_ready(),
+            "handle must be ready right after bind"
+        );
 
         // 짧게 기다렸다 shutdown.
         tokio::time::sleep(Duration::from_millis(50)).await;
         handle.shutdown();
 
         // 전체 join 은 5초 안에 끝나야 한다.
-        let timed =
-            tokio::time::timeout(Duration::from_secs(5), handle.join()).await;
+        let timed = tokio::time::timeout(Duration::from_secs(5), handle.join()).await;
         assert!(timed.is_ok(), "handle.join() did not complete within 5s");
     }
 
@@ -1774,7 +1787,10 @@ mod tests {
                 ping_interval_s: 15,
                 ignore_symbols: Vec::new(),
             };
-            assert!(load_feed(&ec).is_err(), "{ex:?} web orderbook should be rejected");
+            assert!(
+                load_feed(&ec).is_err(),
+                "{ex:?} web orderbook should be rejected"
+            );
         }
     }
 
@@ -1798,7 +1814,10 @@ mod tests {
         cancel.cancel();
 
         let timed = tokio::time::timeout(Duration::from_secs(3), agg_task).await;
-        assert!(timed.is_ok(), "aggregator did not stop within 3s after cancel");
+        assert!(
+            timed.is_ok(),
+            "aggregator did not stop within 3s after cancel"
+        );
     }
 
     #[test]

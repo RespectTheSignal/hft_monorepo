@@ -120,9 +120,9 @@ impl BinanceExecutor {
                 params.push(("quantity".into(), format_num(req.qty)));
             }
             OrderType::Limit => {
-                let price = req.price.ok_or_else(|| {
-                    ApiError::InvalidOrder("limit without price".into())
-                })?;
+                let price = req
+                    .price
+                    .ok_or_else(|| ApiError::InvalidOrder("limit without price".into()))?;
                 if !price.is_finite() || price <= 0.0 {
                     return Err(ApiError::InvalidOrder(format!("bad price: {price}")));
                 }
@@ -169,9 +169,11 @@ impl BinanceExecutor {
         let sig = self.sign(&query);
         let full_query = format!("{query}&signature={sig}");
 
-        let url = format!("{}{}?{}", self.cfg.rest_base, self.cfg.place_path, full_query);
-        let headers =
-            headers_from_pairs([("X-MBX-APIKEY", self.creds.api_key.as_ref())])?;
+        let url = format!(
+            "{}{}?{}",
+            self.cfg.rest_base, self.cfg.place_path, full_query
+        );
+        let headers = headers_from_pairs([("X-MBX-APIKEY", self.creds.api_key.as_ref())])?;
 
         debug!(
             target: "binance::executor",
@@ -205,8 +207,7 @@ impl BinanceExecutor {
             "{}{}?{}",
             self.cfg.rest_base, self.cfg.cancel_path, full_query
         );
-        let headers =
-            headers_from_pairs([("X-MBX-APIKEY", self.creds.api_key.as_ref())])?;
+        let headers = headers_from_pairs([("X-MBX-APIKEY", self.creds.api_key.as_ref())])?;
 
         let resp = self.http.send(Method::DELETE, &url, &headers, None).await?;
         if resp.status == reqwest::StatusCode::NOT_FOUND {
@@ -269,8 +270,8 @@ fn parse_place_response(
     exchange: ExchangeId,
     client_id: Arc<str>,
 ) -> Result<OrderAck, ApiError> {
-    let p: BinancePlaceResp = serde_json::from_str(body)
-        .map_err(|e| ApiError::Decode(format!("binance resp: {e}")))?;
+    let p: BinancePlaceResp =
+        serde_json::from_str(body).map_err(|e| ApiError::Decode(format!("binance resp: {e}")))?;
     if let Some(code) = p.code {
         // Binance 는 success 2xx 에도 { code: 200, msg: ... } 를 돌려주는 endpoint 가
         // 일부 있어 code > 0 을 무조건 error 로 보진 않는다. 음수 code 는 항상 에러.
@@ -286,7 +287,10 @@ fn parse_place_response(
         .order_id
         .ok_or_else(|| ApiError::Decode(format!("missing orderId in response: {}", body)))?;
     let symbol = p.symbol.unwrap_or_else(|| "?".to_string());
-    let ts_ms = p.update_time.or(p.transact_time).unwrap_or_else(now_epoch_ms);
+    let ts_ms = p
+        .update_time
+        .or(p.transact_time)
+        .unwrap_or_else(now_epoch_ms);
     Ok(OrderAck {
         exchange,
         // cancel 은 symbol 도 필요하므로 합쳐서 보관.
@@ -347,9 +351,7 @@ fn split_symbol_id(s: &str) -> Result<(String, String), ApiError> {
         .split_once(':')
         .ok_or_else(|| ApiError::InvalidOrder(format!("expected SYMBOL:ID, got '{s}'")))?;
     if sym.is_empty() || id.is_empty() {
-        return Err(ApiError::InvalidOrder(format!(
-            "malformed order id '{s}'"
-        )));
+        return Err(ApiError::InvalidOrder(format!("malformed order id '{s}'")));
     }
     Ok((sym.to_string(), id.to_string()))
 }
@@ -514,8 +516,7 @@ mod tests {
     #[test]
     fn parse_place_response_rejects_negative_code() {
         let body = r#"{"code":-2019,"msg":"Margin insufficient."}"#;
-        let err =
-            parse_place_response(body, ExchangeId::Binance, Arc::from("c2")).unwrap_err();
+        let err = parse_place_response(body, ExchangeId::Binance, Arc::from("c2")).unwrap_err();
         match err {
             ApiError::Rejected(m) => assert!(m.contains("-2019")),
             other => panic!("expected Rejected, got {other:?}"),

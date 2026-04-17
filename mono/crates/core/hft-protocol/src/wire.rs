@@ -212,16 +212,37 @@ pub fn encode_bookticker_into(buf: &mut [u8; BOOK_TICKER_SIZE], bt: &BookTicker)
     // 버퍼를 0 으로 초기화 (이전 내용 덮어쓰기 + null terminator 보장)
     buf.fill(0);
 
-    write_cstr(&mut buf[bt_off::EXCHANGE..bt_off::SYMBOL], bt.exchange.as_str());
-    write_cstr(&mut buf[bt_off::SYMBOL..bt_off::BID_PRICE], bt.symbol.as_str());
+    write_cstr(
+        &mut buf[bt_off::EXCHANGE..bt_off::SYMBOL],
+        bt.exchange.as_str(),
+    );
+    write_cstr(
+        &mut buf[bt_off::SYMBOL..bt_off::BID_PRICE],
+        bt.symbol.as_str(),
+    );
 
-    LittleEndian::write_f64(&mut buf[bt_off::BID_PRICE..bt_off::ASK_PRICE], bt.bid_price.0);
-    LittleEndian::write_f64(&mut buf[bt_off::ASK_PRICE..bt_off::BID_SIZE], bt.ask_price.0);
+    LittleEndian::write_f64(
+        &mut buf[bt_off::BID_PRICE..bt_off::ASK_PRICE],
+        bt.bid_price.0,
+    );
+    LittleEndian::write_f64(
+        &mut buf[bt_off::ASK_PRICE..bt_off::BID_SIZE],
+        bt.ask_price.0,
+    );
     LittleEndian::write_f64(&mut buf[bt_off::BID_SIZE..bt_off::ASK_SIZE], bt.bid_size.0);
-    LittleEndian::write_f64(&mut buf[bt_off::ASK_SIZE..bt_off::EVENT_TIME], bt.ask_size.0);
+    LittleEndian::write_f64(
+        &mut buf[bt_off::ASK_SIZE..bt_off::EVENT_TIME],
+        bt.ask_size.0,
+    );
 
-    LittleEndian::write_i64(&mut buf[bt_off::EVENT_TIME..bt_off::SERVER_TIME], bt.event_time_ms);
-    LittleEndian::write_i64(&mut buf[bt_off::SERVER_TIME..bt_off::PUBLISHER_SENT], bt.server_time_ms);
+    LittleEndian::write_i64(
+        &mut buf[bt_off::EVENT_TIME..bt_off::SERVER_TIME],
+        bt.event_time_ms,
+    );
+    LittleEndian::write_i64(
+        &mut buf[bt_off::SERVER_TIME..bt_off::PUBLISHER_SENT],
+        bt.server_time_ms,
+    );
 
     // publisher_sent_ms / subscriber_received_ms / subscriber_dump_ms 는 0 유지.
 }
@@ -255,9 +276,7 @@ pub fn decode_bookticker(buf: &[u8]) -> Result<BookTickerWire, WireError> {
         subscriber_received_ms: LittleEndian::read_i64(
             &buf[bt_off::SUBSCRIBER_RECEIVED..bt_off::SUBSCRIBER_DUMP],
         ),
-        subscriber_dump_ms: LittleEndian::read_i64(
-            &buf[bt_off::SUBSCRIBER_DUMP..BOOK_TICKER_SIZE],
-        ),
+        subscriber_dump_ms: LittleEndian::read_i64(&buf[bt_off::SUBSCRIBER_DUMP..BOOK_TICKER_SIZE]),
     })
 }
 
@@ -327,13 +346,19 @@ impl TradeWire {
 pub fn encode_trade_into(buf: &mut [u8; TRADE_SIZE], t: &Trade) {
     buf.fill(0);
 
-    write_cstr(&mut buf[tr_off::EXCHANGE..tr_off::SYMBOL], t.exchange.as_str());
+    write_cstr(
+        &mut buf[tr_off::EXCHANGE..tr_off::SYMBOL],
+        t.exchange.as_str(),
+    );
     write_cstr(&mut buf[tr_off::SYMBOL..tr_off::PRICE], t.symbol.as_str());
 
     LittleEndian::write_f64(&mut buf[tr_off::PRICE..tr_off::SIZE], t.price.0);
     LittleEndian::write_f64(&mut buf[tr_off::SIZE..tr_off::TRADE_ID], t.size.0);
 
-    LittleEndian::write_i64(&mut buf[tr_off::TRADE_ID..tr_off::CREATE_TIME_S], t.trade_id);
+    LittleEndian::write_i64(
+        &mut buf[tr_off::TRADE_ID..tr_off::CREATE_TIME_S],
+        t.trade_id,
+    );
     LittleEndian::write_i64(
         &mut buf[tr_off::CREATE_TIME_S..tr_off::CREATE_TIME_MS],
         t.create_time_s,
@@ -486,7 +511,10 @@ mod tests {
         assert_eq!(patched, 1_700_000_000_500);
 
         // 나머지는 동일
-        assert_eq!(before[..BOOKTICKER_PUBLISHER_SENT_OFFSET], buf[..BOOKTICKER_PUBLISHER_SENT_OFFSET]);
+        assert_eq!(
+            before[..BOOKTICKER_PUBLISHER_SENT_OFFSET],
+            buf[..BOOKTICKER_PUBLISHER_SENT_OFFSET]
+        );
         assert_eq!(
             before[BOOKTICKER_PUBLISHER_SENT_OFFSET + 8..],
             buf[BOOKTICKER_PUBLISHER_SENT_OFFSET + 8..]
@@ -498,7 +526,10 @@ mod tests {
         let short = [0u8; 100];
         assert!(matches!(
             decode_bookticker(&short),
-            Err(WireError::WrongLength { expected: 120, actual: 100 })
+            Err(WireError::WrongLength {
+                expected: 120,
+                actual: 100
+            })
         ));
     }
 
@@ -568,7 +599,10 @@ mod tests {
         );
         assert_eq!(patched, 1_700_000_000_999);
 
-        assert_eq!(before[..TRADE_PUBLISHER_SENT_OFFSET], buf[..TRADE_PUBLISHER_SENT_OFFSET]);
+        assert_eq!(
+            before[..TRADE_PUBLISHER_SENT_OFFSET],
+            buf[..TRADE_PUBLISHER_SENT_OFFSET]
+        );
         assert_eq!(
             before[TRADE_PUBLISHER_SENT_OFFSET + 8..],
             buf[TRADE_PUBLISHER_SENT_OFFSET + 8..]
@@ -577,7 +611,10 @@ mod tests {
 
     #[test]
     fn trade_is_internal_false_variant() {
-        let t = Trade { is_internal: false, ..sample_trade() };
+        let t = Trade {
+            is_internal: false,
+            ..sample_trade()
+        };
         let mut buf = [0u8; TRADE_SIZE];
         encode_trade_into(&mut buf, &t);
         assert_eq!(buf[tr_off::IS_INTERNAL], 0);
@@ -657,7 +694,11 @@ mod tests {
         let mut ours = [0u8; BOOK_TICKER_SIZE];
         encode_bookticker_into(&mut ours, &bt);
 
-        assert_eq!(&legacy[..], &ours[..], "byte-exact parity with legacy encoder");
+        assert_eq!(
+            &legacy[..],
+            &ours[..],
+            "byte-exact parity with legacy encoder"
+        );
     }
 
     #[test]
@@ -668,6 +709,10 @@ mod tests {
         let mut ours = [0u8; TRADE_SIZE];
         encode_trade_into(&mut ours, &t);
 
-        assert_eq!(&legacy[..], &ours[..], "byte-exact parity with legacy trade encoder");
+        assert_eq!(
+            &legacy[..],
+            &ours[..],
+            "byte-exact parity with legacy trade encoder"
+        );
     }
 }

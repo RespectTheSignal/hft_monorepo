@@ -102,17 +102,23 @@ impl StrategyShmClient {
             .with_context(|| format!("open_view SharedRegion at {backing:?}"))?;
 
         let quote = QuoteSlotReader::from_region(
-            shared.sub_region(SubKind::Quote).context("sub_region(Quote)")?,
+            shared
+                .sub_region(SubKind::Quote)
+                .context("sub_region(Quote)")?,
         )
         .map_err(|e| anyhow!("QuoteSlotReader::from_region: {e}"))?;
 
         let trade = TradeRingReader::from_region(
-            shared.sub_region(SubKind::Trade).context("sub_region(Trade)")?,
+            shared
+                .sub_region(SubKind::Trade)
+                .context("sub_region(Trade)")?,
         )
         .map_err(|e| anyhow!("TradeRingReader::from_region: {e}"))?;
 
         let symtab = SymbolTable::open_from_region(
-            shared.sub_region(SubKind::Symtab).context("sub_region(Symtab)")?,
+            shared
+                .sub_region(SubKind::Symtab)
+                .context("sub_region(Symtab)")?,
         )
         .map_err(|e| anyhow!("SymbolTable::open_from_region: {e}"))?;
 
@@ -340,9 +346,14 @@ mod tests {
     }
 
     fn boot_publisher(path: &std::path::Path, s: LayoutSpec) -> SharedRegion {
-        let sr =
-            SharedRegion::create_or_attach(Backing::DevShm { path: path.to_path_buf() }, s, Role::Publisher)
-                .unwrap();
+        let sr = SharedRegion::create_or_attach(
+            Backing::DevShm {
+                path: path.to_path_buf(),
+            },
+            s,
+            Role::Publisher,
+        )
+        .unwrap();
         // Strategy attach 는 quote/trade/symtab/order ring 이 모두 초기화됐다고
         // 가정하므로, 테스트 helper 도 publisher 부트 순서를 그대로 따른다.
         let _ = hft_shm::QuoteSlotWriter::from_region(
@@ -395,12 +406,8 @@ mod tests {
         let s = spec(4);
         let _pub = boot_publisher(&path, s);
 
-        let client = StrategyShmClient::attach(
-            Backing::DevShm { path: path.clone() },
-            s,
-            2,
-        )
-        .unwrap();
+        let client =
+            StrategyShmClient::attach(Backing::DevShm { path: path.clone() }, s, 2).unwrap();
         assert_eq!(client.vm_id(), 2);
         assert_eq!(client.shared().role(), Role::Strategy { vm_id: 2 });
     }
@@ -412,12 +419,8 @@ mod tests {
         let s = spec(3);
         let sr_pub = boot_publisher(&path, s);
 
-        let client = StrategyShmClient::attach(
-            Backing::DevShm { path: path.clone() },
-            s,
-            1,
-        )
-        .unwrap();
+        let client =
+            StrategyShmClient::attach(Backing::DevShm { path: path.clone() }, s, 1).unwrap();
         assert!(client.publish_order(ExchangeId::Gate, "BTC_USDT", sample_frame(42)));
 
         // publisher 쪽에서 자기 ring 만 consume 해 확인.
@@ -443,12 +446,8 @@ mod tests {
         let s = spec(2);
         let sr_pub = boot_publisher(&path, s);
 
-        let client = StrategyShmClient::attach(
-            Backing::DevShm { path: path.clone() },
-            s,
-            0,
-        )
-        .unwrap();
+        let client =
+            StrategyShmClient::attach(Backing::DevShm { path: path.clone() }, s, 0).unwrap();
 
         let mut frame = sample_frame(77);
         frame.exchange_id = hft_shm::exchange_to_u8(ExchangeId::Bybit);
@@ -485,12 +484,8 @@ mod tests {
         let s = spec(2);
         let sr_pub = boot_publisher(&path, s);
 
-        let client = StrategyShmClient::attach(
-            Backing::DevShm { path: path.clone() },
-            s,
-            0,
-        )
-        .unwrap();
+        let client =
+            StrategyShmClient::attach(Backing::DevShm { path: path.clone() }, s, 0).unwrap();
         // touch 전엔 None.
         assert!(client.heartbeat_age_ns().is_none());
 

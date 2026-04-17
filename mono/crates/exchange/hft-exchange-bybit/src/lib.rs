@@ -355,8 +355,7 @@ impl BybitFeed {
         );
 
         let read_to = Duration::from_secs(self.cfg.read_timeout_secs);
-        let mut ping_iv =
-            tokio::time::interval(Duration::from_secs(self.cfg.ping_interval_secs));
+        let mut ping_iv = tokio::time::interval(Duration::from_secs(self.cfg.ping_interval_secs));
         ping_iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // 첫 tick 은 즉시 발화 — skip.
         ping_iv.tick().await;
@@ -402,8 +401,13 @@ impl BybitFeed {
             match msg {
                 Message::Text(text) => {
                     let ws_recv = Stamp::now(&*self.clock);
-                    let reply =
-                        dispatch_text_bytes(text.as_bytes(), ws_recv, raw_to_sym, &self.cache, emit);
+                    let reply = dispatch_text_bytes(
+                        text.as_bytes(),
+                        ws_recv,
+                        raw_to_sym,
+                        &self.cache,
+                        emit,
+                    );
                     if let Some(out) = reply {
                         if let Err(e) = write.send(out).await {
                             warn!(error = %e, "bybit pong (text) send failed");
@@ -523,7 +527,11 @@ struct BybitBook<'a> {
 #[derive(Debug, Deserialize)]
 struct TradeEntry<'a> {
     /// 체결 시각 ms.
-    #[serde(default, rename = "T", deserialize_with = "deserialize_i64_lenient_opt")]
+    #[serde(
+        default,
+        rename = "T",
+        deserialize_with = "deserialize_i64_lenient_opt"
+    )]
     trade_time_ms: Option<i64>,
     /// wire symbol.
     #[serde(borrow, default)]
@@ -643,9 +651,25 @@ fn dispatch_text_bytes(
     // topic prefix 로 채널 분기. 미상 토픽은 drop.
     let topic = frame.topic.unwrap_or("");
     if topic.starts_with("orderbook.") {
-        handle_book_frame(data_raw.get(), topic, frame.ts, ws_recv, raw_to_sym, cache, emit);
+        handle_book_frame(
+            data_raw.get(),
+            topic,
+            frame.ts,
+            ws_recv,
+            raw_to_sym,
+            cache,
+            emit,
+        );
     } else if topic.starts_with("publicTrade.") {
-        handle_trade_frame(data_raw.get(), topic, frame.ts, ws_recv, raw_to_sym, cache, emit);
+        handle_trade_frame(
+            data_raw.get(),
+            topic,
+            frame.ts,
+            ws_recv,
+            raw_to_sym,
+            cache,
+            emit,
+        );
     } else {
         trace!(topic, "bybit unknown topic — drop");
     }
@@ -1243,8 +1267,7 @@ mod tests {
         let cache = Arc::new(SymbolCache::new());
         let raw = make_raw_map(&cache);
         let (emit, cnt, _) = emit_counter();
-        let bytes =
-            br#"{"op":"subscribe","success":false,"req_id":"x","ret_msg":"bad topic"}"#;
+        let bytes = br#"{"op":"subscribe","success":false,"req_id":"x","ret_msg":"bad topic"}"#;
         let reply = dispatch_text_bytes(bytes, recv_stamp(), &raw, &cache, &emit);
         assert!(reply.is_none());
         assert_eq!(cnt.load(Ordering::SeqCst), 0);
@@ -1313,7 +1336,8 @@ mod tests {
     #[test]
     fn dispatch_missing_bids_drops() {
         // b 필드 없음 → empty default → top-of-book skip.
-        let bytes = br#"{"topic":"orderbook.1.BTCUSDT","data":{"s":"BTCUSDT","a":[["1","1"]]},"ts":1}"#;
+        let bytes =
+            br#"{"topic":"orderbook.1.BTCUSDT","data":{"s":"BTCUSDT","a":[["1","1"]]},"ts":1}"#;
         let cache = Arc::new(SymbolCache::new());
         let raw = make_raw_map(&cache);
         let (emit, cnt, _) = emit_counter();
@@ -1381,8 +1405,7 @@ mod tests {
 
     #[test]
     fn bybit_feed_is_trait_object() {
-        let _boxed: Arc<dyn ExchangeFeed> =
-            Arc::new(BybitFeed::new(BybitConfig::default()));
+        let _boxed: Arc<dyn ExchangeFeed> = Arc::new(BybitFeed::new(BybitConfig::default()));
     }
 
     #[test]
@@ -1410,11 +1433,8 @@ mod tests {
         let mock = MockClock::new(100, 3);
         let clock: Arc<dyn Clock> = mock.clone();
         let shared = Arc::new(SymbolCache::new());
-        let f = BybitFeed::with_clock_and_cache(
-            BybitConfig::default(),
-            clock.clone(),
-            shared.clone(),
-        );
+        let f =
+            BybitFeed::with_clock_and_cache(BybitConfig::default(), clock.clone(), shared.clone());
         let s = Stamp::now(f.clock().as_ref());
         assert_eq!(s.wall_ms, 100);
         assert!(Arc::ptr_eq(f.symbol_cache(), &shared));
@@ -1438,10 +1458,7 @@ mod tests {
     #[test]
     fn build_raw_to_sym_maps_wire_to_canonical() {
         let cache = Arc::new(SymbolCache::new());
-        let m = build_raw_to_sym(
-            &[Symbol::new("BTC_USDT"), Symbol::new("ETH_USDC")],
-            &cache,
-        );
+        let m = build_raw_to_sym(&[Symbol::new("BTC_USDT"), Symbol::new("ETH_USDC")], &cache);
         assert_eq!(m.len(), 2);
         assert_eq!(m.get("BTCUSDT").map(|s| s.as_str()), Some("BTC_USDT"));
         assert_eq!(m.get("ETHUSDC").map(|s| s.as_str()), Some("ETH_USDC"));
@@ -1481,8 +1498,8 @@ mod tests {
             {"T":1700000000498,"s":"ETHUSDT","S":"Buy","v":"2","p":"2500","i":"t1","BT":false},
             {"T":1700000000499,"s":"ETHUSDT","S":"Sell","v":"3","p":"2501","i":"t2","BT":true}
         ]}"#
-            .as_bytes()
-            .to_vec()
+        .as_bytes()
+        .to_vec()
     }
 
     #[test]
@@ -1519,13 +1536,19 @@ mod tests {
         let raw = make_raw_map(&cache);
         let (emit, buf) = emit_capture_all();
 
-        dispatch_text_bytes(&sample_trade_sell_bytes(), recv_stamp(), &raw, &cache, &emit);
+        dispatch_text_bytes(
+            &sample_trade_sell_bytes(),
+            recv_stamp(),
+            &raw,
+            &cache,
+            &emit,
+        );
         let events = buf.lock().unwrap();
         let MarketEvent::Trade(t) = &events[0].0 else {
             unreachable!()
         };
         assert_eq!(t.size.0, -1.25); // Sell → 음수
-        // 순수 숫자 문자열 ID 는 parse 되어야.
+                                     // 순수 숫자 문자열 ID 는 parse 되어야.
         assert_eq!(t.trade_id, 123_456_789);
     }
 
@@ -1535,7 +1558,13 @@ mod tests {
         let raw = build_raw_to_sym(&[Symbol::new("ETH_USDT")], &cache);
         let (emit, buf) = emit_capture_all();
 
-        dispatch_text_bytes(&sample_trade_batch_bytes(), recv_stamp(), &raw, &cache, &emit);
+        dispatch_text_bytes(
+            &sample_trade_batch_bytes(),
+            recv_stamp(),
+            &raw,
+            &cache,
+            &emit,
+        );
         let events = buf.lock().unwrap();
         assert_eq!(events.len(), 2);
 

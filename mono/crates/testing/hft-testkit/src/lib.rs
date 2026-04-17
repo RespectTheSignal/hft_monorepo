@@ -132,17 +132,26 @@ pub struct ScheduledEvent {
 impl ScheduledEvent {
     /// 편의 생성자 — BookTicker 이벤트.
     pub fn bookticker(at_ms: i64, bt: BookTicker) -> Self {
-        Self { at_ms, event: MarketEvent::BookTicker(bt) }
+        Self {
+            at_ms,
+            event: MarketEvent::BookTicker(bt),
+        }
     }
 
     /// 편의 생성자 — WebBookTicker.
     pub fn web_bookticker(at_ms: i64, bt: BookTicker) -> Self {
-        Self { at_ms, event: MarketEvent::WebBookTicker(bt) }
+        Self {
+            at_ms,
+            event: MarketEvent::WebBookTicker(bt),
+        }
     }
 
     /// 편의 생성자 — Trade.
     pub fn trade(at_ms: i64, tr: Trade) -> Self {
-        Self { at_ms, event: MarketEvent::Trade(tr) }
+        Self {
+            at_ms,
+            event: MarketEvent::Trade(tr),
+        }
     }
 }
 
@@ -459,9 +468,8 @@ mod tests {
         let token = CancellationToken::new();
         let t2 = token.clone();
         let f2 = feed.clone();
-        let handle = tokio::spawn(async move {
-            f2.stream(&[Symbol::new("BTC_USDT")], emit, t2).await
-        });
+        let handle =
+            tokio::spawn(async move { f2.stream(&[Symbol::new("BTC_USDT")], emit, t2).await });
 
         // script 가 소진될 때까지 대기 — polling (replayed_all).
         for _ in 0..200 {
@@ -490,13 +498,7 @@ mod tests {
     #[tokio::test]
     async fn mock_feed_empty_symbols_returns_immediately() {
         let clock = MockClock::zero();
-        let feed = MockFeed::new(
-            ExchangeId::Gate,
-            DataRole::Primary,
-            vec![],
-            clock,
-            vec![],
-        );
+        let feed = MockFeed::new(ExchangeId::Gate, DataRole::Primary, vec![], clock, vec![]);
         let res = feed
             .stream(&[], noop_emitter(), CancellationToken::new())
             .await;
@@ -596,8 +598,14 @@ mod tests {
     fn record_delta_roundtrip() {
         let mut hdr = Histogram::<u64>::new(3).unwrap();
         let mut ls = LatencyStamps::new();
-        ls.ws_received = Stamp { wall_ms: 1, mono_ns: 100 };
-        ls.consumed = Stamp { wall_ms: 2, mono_ns: 600 };
+        ls.ws_received = Stamp {
+            wall_ms: 1,
+            mono_ns: 100,
+        };
+        ls.consumed = Stamp {
+            wall_ms: 2,
+            mono_ns: 600,
+        };
         record_delta(&mut hdr, &ls, Stage::WsReceived, Stage::Consumed);
         assert_eq!(hdr.len(), 1);
         assert!(hdr.value_at_quantile(0.5) >= 400);

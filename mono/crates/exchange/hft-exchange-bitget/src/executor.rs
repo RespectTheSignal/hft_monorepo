@@ -136,9 +136,9 @@ impl BitgetExecutor {
                 body.insert("force".into(), "ioc".into());
             }
             OrderType::Limit => {
-                let p = req.price.ok_or_else(|| {
-                    ApiError::InvalidOrder("limit without price".into())
-                })?;
+                let p = req
+                    .price
+                    .ok_or_else(|| ApiError::InvalidOrder("limit without price".into()))?;
                 if !p.is_finite() || p <= 0.0 {
                     return Err(ApiError::InvalidOrder(format!("bad price: {p}")));
                 }
@@ -189,7 +189,10 @@ impl BitgetExecutor {
             "placing order"
         );
 
-        let resp = self.http.send(Method::POST, &url, &headers, Some(body)).await?;
+        let resp = self
+            .http
+            .send(Method::POST, &url, &headers, Some(body))
+            .await?;
         let resp_body = resp.into_ok_body()?;
         parse_place_response(&resp_body, req.exchange, req.client_id.clone())
     }
@@ -210,7 +213,10 @@ impl BitgetExecutor {
         let url = format!("{}{}", self.cfg.rest_base, self.cfg.cancel_path);
         let headers = self.auth_headers(ts, &sign)?;
 
-        let resp = self.http.send(Method::POST, &url, &headers, Some(body)).await?;
+        let resp = self
+            .http
+            .send(Method::POST, &url, &headers, Some(body))
+            .await?;
         let resp_body = resp.into_ok_body()?;
         parse_ack_only(&resp_body)
     }
@@ -267,8 +273,8 @@ fn parse_place_response(
     exchange: ExchangeId,
     client_id: Arc<str>,
 ) -> Result<OrderAck, ApiError> {
-    let env: BitgetEnvelope = serde_json::from_str(body)
-        .map_err(|e| ApiError::Decode(format!("bitget resp: {e}")))?;
+    let env: BitgetEnvelope =
+        serde_json::from_str(body).map_err(|e| ApiError::Decode(format!("bitget resp: {e}")))?;
     if env.code != "00000" {
         return Err(ApiError::Rejected(format!(
             "bitget {}: {}",
@@ -294,8 +300,8 @@ fn parse_place_response(
 }
 
 fn parse_ack_only(body: &str) -> Result<(), ApiError> {
-    let env: BitgetEnvelope = serde_json::from_str(body)
-        .map_err(|e| ApiError::Decode(format!("bitget resp: {e}")))?;
+    let env: BitgetEnvelope =
+        serde_json::from_str(body).map_err(|e| ApiError::Decode(format!("bitget resp: {e}")))?;
     if env.code != "00000" {
         return Err(ApiError::Rejected(format!(
             "bitget {}: {}",
@@ -379,7 +385,12 @@ mod tests {
     #[test]
     fn sign_is_base64() {
         let exec = mk_exec();
-        let s = exec.sign(1_700_000_000_000, "POST", "/api/v2/mix/order/place-order", "{}");
+        let s = exec.sign(
+            1_700_000_000_000,
+            "POST",
+            "/api/v2/mix/order/place-order",
+            "{}",
+        );
         // Base64 표준은 == 또는 = 로 padding. HMAC-SHA256 → 32bytes → 44 char base64.
         assert_eq!(s.len(), 44);
         assert!(s.ends_with('='));
@@ -459,8 +470,7 @@ mod tests {
     #[test]
     fn parse_place_response_reject_on_nonzero_code() {
         let body = r#"{"code":"40408","msg":"order not found"}"#;
-        let err =
-            parse_place_response(body, ExchangeId::Bitget, Arc::from("c")).unwrap_err();
+        let err = parse_place_response(body, ExchangeId::Bitget, Arc::from("c")).unwrap_err();
         match err {
             ApiError::Rejected(m) => assert!(m.contains("40408")),
             other => panic!("expected Rejected, got {other:?}"),

@@ -277,8 +277,7 @@ async fn run() -> Result<()> {
     install_signal_handler(sub_handle.cancel.clone());
 
     let writer_cancel = sub_handle.cancel.child_token();
-    let writer_task =
-        tokio::task::spawn_blocking(move || writer_loop(rx, writer_cancel, out_dir));
+    let writer_task = tokio::task::spawn_blocking(move || writer_loop(rx, writer_cancel, out_dir));
 
     sub_handle.join().await;
     if let Err(e) = writer_task.await {

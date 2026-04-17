@@ -29,8 +29,7 @@ pub use order_adapter::{
     OrderAdaptError, OrderEgressMeta, QuantizeHint, WireLevel, PRICE_SCALE, PRICE_SCALE_INV,
 };
 pub use topics::{
-    parse_topic, ParsedTopic, TopicBuilder, MSG_BOOKTICKER, MSG_TRADE, MSG_WEBBOOKTICKER,
-    TOPIC_SEP,
+    parse_topic, ParsedTopic, TopicBuilder, MSG_BOOKTICKER, MSG_TRADE, MSG_WEBBOOKTICKER, TOPIC_SEP,
 };
 pub use wire::{
     decode_bookticker, decode_trade, encode_bookticker_into, encode_trade_into,

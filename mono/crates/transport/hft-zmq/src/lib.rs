@@ -182,12 +182,7 @@ impl Context {
     ///
     /// `topics` 가 비어있으면 아무것도 받지 않는다. 일반적으로 prefix 매칭 규칙에 따라
     /// `b""` (빈 프레임) 를 넣으면 모든 메시지 구독.
-    pub fn sub(
-        &self,
-        endpoint: &str,
-        topics: &[&[u8]],
-        cfg: &ZmqConfig,
-    ) -> ZmqResult<SubSocket> {
+    pub fn sub(&self, endpoint: &str, topics: &[&[u8]], cfg: &ZmqConfig) -> ZmqResult<SubSocket> {
         let sock = self.0.socket(zmq::SUB)?;
         apply_common_opts(&sock, cfg)?;
         sock.connect(endpoint)?;
@@ -225,11 +220,7 @@ fn apply_common_opts(sock: &zmq::Socket, cfg: &ZmqConfig) -> ZmqResult<()> {
 ///
 /// HWM 초과 → `WouldBlock`, 기타 에러 → `Error`.
 /// 어떤 경로든 적절한 counter 를 bump 한다.
-fn send_multipart_nonblocking(
-    sock: &zmq::Socket,
-    topic: &[u8],
-    payload: &[u8],
-) -> SendOutcome {
+fn send_multipart_nonblocking(sock: &zmq::Socket, topic: &[u8], payload: &[u8]) -> SendOutcome {
     // 1st part: topic, SNDMORE | DONTWAIT
     match sock.send(topic, zmq::SNDMORE | zmq::DONTWAIT) {
         Ok(()) => {}
@@ -341,10 +332,7 @@ pub type TopicPayload = (Vec<u8>, Vec<u8>);
 /// 공통 recv 로직.
 ///
 /// `ZMQ_RCVTIMEO` 를 설정해 blocking recv_multipart 호출. -1 이면 무한 대기.
-fn recv_timeout_inner(
-    sock: &mut zmq::Socket,
-    timeout_ms: i32,
-) -> ZmqResult<Option<TopicPayload>> {
+fn recv_timeout_inner(sock: &mut zmq::Socket, timeout_ms: i32) -> ZmqResult<Option<TopicPayload>> {
     sock.set_rcvtimeo(timeout_ms)?;
     match sock.recv_multipart(0) {
         Ok(parts) => {
@@ -363,10 +351,7 @@ fn recv_timeout_inner(
 }
 
 /// 공통 raw single-frame recv 로직.
-fn recv_bytes_timeout_inner(
-    sock: &mut zmq::Socket,
-    timeout_ms: i32,
-) -> ZmqResult<Option<Vec<u8>>> {
+fn recv_bytes_timeout_inner(sock: &mut zmq::Socket, timeout_ms: i32) -> ZmqResult<Option<Vec<u8>>> {
     sock.set_rcvtimeo(timeout_ms)?;
     match sock.recv_multipart(0) {
         Ok(parts) => {
@@ -384,11 +369,7 @@ fn recv_bytes_timeout_inner(
 /// 배치 drain: `DONTWAIT` 으로 cap 개까지 recv.
 ///
 /// 반환: 실제로 꺼낸 개수. WouldBlock 에 도달하면 조기 종료.
-fn drain_batch_inner(
-    sock: &mut zmq::Socket,
-    cap: usize,
-    out: &mut Vec<TopicPayload>,
-) -> usize {
+fn drain_batch_inner(sock: &mut zmq::Socket, cap: usize, out: &mut Vec<TopicPayload>) -> usize {
     let start = out.len();
     for _ in 0..cap {
         match sock.recv_multipart(zmq::DONTWAIT) {

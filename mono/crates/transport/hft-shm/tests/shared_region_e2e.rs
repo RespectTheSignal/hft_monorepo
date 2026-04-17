@@ -32,12 +32,9 @@ fn publisher_gateway_strategies_interact_on_single_region() {
     let s = spec(4);
 
     // ── Publisher attaches with writable role and initializes all sub-regions ──
-    let sr_pub = SharedRegion::create_or_attach(
-        Backing::DevShm { path: p.clone() },
-        s,
-        Role::Publisher,
-    )
-    .expect("create_or_attach publisher");
+    let sr_pub =
+        SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+            .expect("create_or_attach publisher");
 
     let qw = QuoteSlotWriter::from_region(
         sr_pub.sub_region(SubKind::Quote).unwrap(),
@@ -77,9 +74,7 @@ fn publisher_gateway_strategies_interact_on_single_region() {
         )
         .expect("open_view strategy");
         let w = OrderRingWriter::from_region(
-            sr_strat
-                .sub_region(SubKind::OrderRing { vm_id })
-                .unwrap(),
+            sr_strat.sub_region(SubKind::OrderRing { vm_id }).unwrap(),
             s.order_ring_capacity,
         )
         .expect("strategy OrderRingWriter");
@@ -87,12 +82,8 @@ fn publisher_gateway_strategies_interact_on_single_region() {
     }
 
     // ── Gateway attaches read-only to the whole set of order rings ──
-    let sr_gw = SharedRegion::open_view(
-        Backing::DevShm { path: p.clone() },
-        s,
-        Role::OrderGateway,
-    )
-    .expect("open_view gateway");
+    let sr_gw = SharedRegion::open_view(Backing::DevShm { path: p.clone() }, s, Role::OrderGateway)
+        .expect("open_view gateway");
     let mut multi = MultiOrderRingReader::attach(&sr_gw).expect("MultiOrderRingReader");
 
     // ── Publisher writes 1 quote + 1 trade ──
@@ -160,12 +151,8 @@ fn publisher_gateway_strategies_interact_on_single_region() {
     }
 
     // ── Readers on quote + trade from separate ReadOnly view ──
-    let sr_ro = SharedRegion::open_view(
-        Backing::DevShm { path: p.clone() },
-        s,
-        Role::ReadOnly,
-    )
-    .expect("open_view read-only");
+    let sr_ro = SharedRegion::open_view(Backing::DevShm { path: p.clone() }, s, Role::ReadOnly)
+        .expect("open_view read-only");
     let qr = QuoteSlotReader::from_region(sr_ro.sub_region(SubKind::Quote).unwrap())
         .expect("QuoteSlotReader");
     let snap = qr.read(btc).expect("quote snap");
@@ -195,9 +182,12 @@ fn layout_digest_mismatch_is_rejected() {
         order_ring_capacity: 16,
         n_max: 2,
     };
-    let _sr =
-        SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, spec_a, Role::Publisher)
-            .expect("pub with spec_a");
+    let _sr = SharedRegion::create_or_attach(
+        Backing::DevShm { path: p.clone() },
+        spec_a,
+        Role::Publisher,
+    )
+    .expect("pub with spec_a");
 
     // reader opens with spec B (different n_max). digest mismatch.
     let spec_b = LayoutSpec {
@@ -227,12 +217,9 @@ fn heartbeat_publish_and_observe() {
     let p = dir.path().join("heartbeat");
     let s = spec(2);
 
-    let sr_pub = SharedRegion::create_or_attach(
-        Backing::DevShm { path: p.clone() },
-        s,
-        Role::Publisher,
-    )
-    .expect("create_or_attach publisher");
+    let sr_pub =
+        SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+            .expect("create_or_attach publisher");
 
     // publisher 가 아직 touch 하지 않은 상태 — 모두 0 / None.
     assert_eq!(sr_pub.heartbeat_ns(), 0, "initial heartbeat_ns must be 0");
@@ -248,19 +235,11 @@ fn heartbeat_publish_and_observe() {
     assert_eq!(sr_pub.heartbeat_seq(), 1);
 
     // 별도 view (gateway 또는 strategy 관점) 에서 관찰.
-    let sr_gw = SharedRegion::open_view(
-        Backing::DevShm { path: p.clone() },
-        s,
-        Role::OrderGateway,
-    )
-    .expect("open_view gateway");
+    let sr_gw = SharedRegion::open_view(Backing::DevShm { path: p.clone() }, s, Role::OrderGateway)
+        .expect("open_view gateway");
     assert_eq!(sr_gw.heartbeat_ns(), 1_000);
     assert_eq!(sr_gw.heartbeat_seq(), 1);
-    assert_eq!(
-        sr_gw.heartbeat_age_ns(1_500),
-        Some(500),
-        "age = now - last"
-    );
+    assert_eq!(sr_gw.heartbeat_age_ns(1_500), Some(500), "age = now - last");
     // 역주행 시 None.
     assert!(
         sr_gw.heartbeat_age_ns(500).is_none(),
@@ -299,11 +278,9 @@ fn reattach_same_spec_is_ok() {
     let sr1 =
         SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
             .unwrap();
-    let _q = QuoteSlotWriter::from_region(
-        sr1.sub_region(SubKind::Quote).unwrap(),
-        s.quote_slot_count,
-    )
-    .unwrap();
+    let _q =
+        QuoteSlotWriter::from_region(sr1.sub_region(SubKind::Quote).unwrap(), s.quote_slot_count)
+            .unwrap();
     drop(sr1);
 
     // reattach with same spec must succeed (magic valid, digest matches).
@@ -311,9 +288,7 @@ fn reattach_same_spec_is_ok() {
         SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
             .expect("reattach with same spec");
     // sub-region still reachable.
-    let _q = QuoteSlotWriter::from_region(
-        sr2.sub_region(SubKind::Quote).unwrap(),
-        s.quote_slot_count,
-    )
-    .expect("reopen quote writer");
+    let _q =
+        QuoteSlotWriter::from_region(sr2.sub_region(SubKind::Quote).unwrap(), s.quote_slot_count)
+            .expect("reopen quote writer");
 }

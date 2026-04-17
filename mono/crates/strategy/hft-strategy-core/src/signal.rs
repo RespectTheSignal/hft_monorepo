@@ -368,8 +368,8 @@ mod tests {
     #[test]
     fn v6_fallback_sell_when_gate_mid_below_web_mid() {
         let gate = bt(100.0, 10.0, 100.0, 10.0, 1); // mid=100
-        // bid 는 gate_mid 와 같게 두어 v0 sell 시그널은 막고, web_mid 만 더 높여
-        // v6 fallback sell 분기만 타게 만든다.
+                                                    // bid 는 gate_mid 와 같게 두어 v0 sell 시그널은 막고, web_mid 만 더 높여
+                                                    // v6 fallback sell 분기만 타게 만든다.
         let web = bt(100.0, 1.0, 103.0, 1.0, 1); // mid=101.5
         let r = calculate_signal_v6(&gate, &web, None, &contract());
         assert_eq!(r.order_side, Some("sell"));

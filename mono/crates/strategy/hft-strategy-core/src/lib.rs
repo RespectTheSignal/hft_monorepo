@@ -17,19 +17,19 @@
 
 use std::sync::atomic::{AtomicI64, Ordering};
 
-pub mod signal;
 pub mod decision;
 pub mod risk;
+pub mod signal;
 
-pub use signal::{
-    calculate_signal, calculate_signal_v6, calculate_signal_v8, BookTickerSnap, GateContract,
-    SignalResult, TradeSnap,
-};
 pub use decision::{
     decide_order, decide_order_v6, decide_order_v7, decide_order_v8, OrderDecision, OrderLevel,
     OrderSide, V6DecisionCtx, V7DecisionExtras, V8DecisionCtx,
 };
 pub use risk::{Chance, ExposureSnapshot, PositionOracle, RiskCheck, RiskConfig};
+pub use signal::{
+    calculate_signal, calculate_signal_v6, calculate_signal_v8, BookTickerSnap, GateContract,
+    SignalResult, TradeSnap,
+};
 
 /// 간단한 monotonic 카운터. v8 의 `LAST_TOO_MANY_ORDERS_WARN_MS` 류를
 /// 전역 AtomicI64 난사하지 않도록 명시적 타입으로 감싼다.

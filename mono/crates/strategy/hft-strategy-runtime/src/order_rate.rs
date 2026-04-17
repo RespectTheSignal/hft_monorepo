@@ -115,7 +115,8 @@ impl OrderRateTracker {
         let gap = now_ms - oldest;
         if gap < time_gap_ms {
             // 레거시의 last_too_many_orders_time_ms 를 최신화.
-            self.last_too_many_orders_ms.store(now_ms, Ordering::Relaxed);
+            self.last_too_many_orders_ms
+                .store(now_ms, Ordering::Relaxed);
             true
         } else {
             false
@@ -404,7 +405,7 @@ mod tests {
         t.push(&s("A"), 1);
         t.push(&s("A"), 2);
         assert!(t.is_too_many_orders(3, 1000)); // recent flag 찍힘.
-        // decay 로 모든 엔트리 제거해도 recent flag 는 살아있어야 함.
+                                                // decay 로 모든 엔트리 제거해도 recent flag 는 살아있어야 함.
         let _ = t.decay_before(100);
         assert_eq!(t.len(), 0);
         assert!(t.is_recently_too_many_orders(500));

@@ -26,9 +26,9 @@
 //!   region) 는 backing 종류를 전혀 몰라도 동작.
 
 use std::fs::{File, OpenOptions};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -290,10 +290,7 @@ impl ShmRegion {
     pub fn sub_view(parent: Arc<ShmRegion>, offset: usize, len: usize) -> ShmResult<Self> {
         let parent_len = parent.len();
         let end = offset.checked_add(len).ok_or_else(|| {
-            ShmError::Other(format!(
-                "sub_view overflow: offset={} len={}",
-                offset, len
-            ))
+            ShmError::Other(format!("sub_view overflow: offset={} len={}", offset, len))
         })?;
         if end > parent_len {
             return Err(ShmError::Other(format!(
@@ -321,9 +318,7 @@ impl ShmRegion {
     pub fn as_ptr(&self) -> *const u8 {
         match &self.kind {
             RegionKind::Owned { mmap, .. } | RegionKind::Device { mmap, .. } => mmap.as_ptr(),
-            RegionKind::View {
-                parent, offset, ..
-            } => {
+            RegionKind::View { parent, offset, .. } => {
                 // SAFETY: offset 은 sub_view 시 parent.len 내에 있음이 검증됐다.
                 unsafe { parent.as_ptr().add(*offset) }
             }
@@ -334,9 +329,7 @@ impl ShmRegion {
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
         match &mut self.kind {
             RegionKind::Owned { mmap, .. } | RegionKind::Device { mmap, .. } => mmap.as_mut_ptr(),
-            RegionKind::View {
-                parent, offset, ..
-            } => {
+            RegionKind::View { parent, offset, .. } => {
                 // SAFETY: parent 의 mmap 포인터는 고정이며, offset 은 검증됐다.
                 // 복수 view 가 겹치면 상위 (region.rs) 가 분리를 책임진다.
                 unsafe { parent.raw_base().add(*offset) }
@@ -355,9 +348,7 @@ impl ShmRegion {
             RegionKind::Owned { mmap, .. } | RegionKind::Device { mmap, .. } => {
                 mmap.as_ptr() as *mut u8
             }
-            RegionKind::View {
-                parent, offset, ..
-            } => {
+            RegionKind::View { parent, offset, .. } => {
                 // SAFETY: offset 검증된 값. parent 자체가 atomic 접근 안전.
                 unsafe { parent.raw_base().add(*offset) }
             }
@@ -393,8 +384,9 @@ impl ShmRegion {
     /// view 는 parent 소유.
     pub fn unlink(&self) -> ShmResult<()> {
         match &self.kind {
-            RegionKind::Owned { .. } => std::fs::remove_file(&self.path)
-                .map_err(|e| ShmError::path(self.path.clone(), e)),
+            RegionKind::Owned { .. } => {
+                std::fs::remove_file(&self.path).map_err(|e| ShmError::path(self.path.clone(), e))
+            }
             RegionKind::Device { .. } => Err(ShmError::Unsupported(
                 "cannot unlink device-backed region (PCI BAR)",
             )),

@@ -343,8 +343,7 @@ impl ExchangeFeed for GateFeed {
         }
 
         // Prewarm — hot path 첫 frame 의 intern latency 를 제거.
-        self.cache
-            .prewarm(subs.iter().map(|s| s.as_str()));
+        self.cache.prewarm(subs.iter().map(|s| s.as_str()));
 
         match self.role {
             DataRole::Primary => self.run_primary(subs, emit, cancel).await,
@@ -803,7 +802,10 @@ impl<'de> Deserialize<'de> for BookLevel {
                     .ok_or_else(|| serde::de::Error::invalid_length(1, &"[price, size]"))?;
                 // 남은 요소는 무시 (Gate 가 extra 필드 추가해도 forward-compat).
                 while seq.next_element::<IgnoredAny>()?.is_some() {}
-                Ok(BookLevel { price: price.0, size: size.0 })
+                Ok(BookLevel {
+                    price: price.0,
+                    size: size.0,
+                })
             }
             fn visit_map<A>(self, mut map: A) -> Result<BookLevel, A::Error>
             where
@@ -857,12 +859,7 @@ impl<'de> Deserialize<'de> for F64Lenient {
 ///
 /// - 파싱 실패는 DEBUG 로그 후 drop (frame level).
 /// - subscribe 응답은 status 만 확인 (ack) 하고 emit 하지 않음.
-fn dispatch_primary_bytes(
-    bytes: &[u8],
-    ws_recv: Stamp,
-    cache: &SymbolCache,
-    emit: &Emitter,
-) {
+fn dispatch_primary_bytes(bytes: &[u8], ws_recv: Stamp, cache: &SymbolCache, emit: &Emitter) {
     let frame: GateFrame<'_> = match serde_json::from_slice(bytes) {
         Ok(f) => f,
         Err(e) => {
@@ -1192,7 +1189,12 @@ mod tests {
         }
     }"#;
 
-    fn emit_counter() -> (Emitter, Arc<AtomicUsize>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+    fn emit_counter() -> (
+        Emitter,
+        Arc<AtomicUsize>,
+        Arc<AtomicUsize>,
+        Arc<AtomicUsize>,
+    ) {
         let bt = Arc::new(AtomicUsize::new(0));
         let tr = Arc::new(AtomicUsize::new(0));
         let wb = Arc::new(AtomicUsize::new(0));
@@ -1212,7 +1214,10 @@ mod tests {
     }
 
     fn stamp(n: u64) -> Stamp {
-        Stamp { wall_ms: n as i64, mono_ns: n }
+        Stamp {
+            wall_ms: n as i64,
+            mono_ns: n,
+        }
     }
 
     // ── BookTicker parsing ──────────────────────────────────────────────────
@@ -1334,7 +1339,10 @@ mod tests {
         }
         let v = captured.lock().unwrap().clone();
         assert_eq!(v.len(), 3);
-        assert!(v[0].ptr_eq(&v[1]), "SymbolCache 가 동일 Arc 를 재사용해야 함");
+        assert!(
+            v[0].ptr_eq(&v[1]),
+            "SymbolCache 가 동일 Arc 를 재사용해야 함"
+        );
         assert!(v[1].ptr_eq(&v[2]));
         assert_eq!(cache.len(), 1);
     }
@@ -1587,7 +1595,10 @@ mod tests {
         let emit: Emitter = Arc::new(move |_ev, ls| {
             *cap.lock().unwrap() = Some(ls);
         });
-        let ws_recv = Stamp { wall_ms: 500, mono_ns: 12_345 };
+        let ws_recv = Stamp {
+            wall_ms: 500,
+            mono_ns: 12_345,
+        };
         dispatch_primary_bytes(SAMPLE_BOOKTICKER.as_bytes(), ws_recv, &cache, &emit);
         let ls = captured.lock().unwrap().take().expect("emit called");
         assert_eq!(ls.ws_received.wall_ms, 500);

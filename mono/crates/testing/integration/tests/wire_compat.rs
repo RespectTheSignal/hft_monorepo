@@ -151,9 +151,8 @@ fn patch_trade_only_touches_publisher_sent_offset() {
     let pushed = 1_700_000_000_999_i64;
     patch_trade_pushed_ms(&mut buf, pushed);
 
-    let read_back = LittleEndian::read_i64(
-        &buf[TRADE_PUBLISHER_SENT_OFFSET..TRADE_PUBLISHER_SENT_OFFSET + 8],
-    );
+    let read_back =
+        LittleEndian::read_i64(&buf[TRADE_PUBLISHER_SENT_OFFSET..TRADE_PUBLISHER_SENT_OFFSET + 8]);
     assert_eq!(read_back, pushed);
 
     assert_eq!(

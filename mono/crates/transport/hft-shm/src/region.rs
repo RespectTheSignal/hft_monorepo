@@ -372,21 +372,21 @@ impl LayoutOffsets {
 
         // offsets.
         let offset_quote = header_size;
-        let offset_trade = offset_quote.checked_add(size_quote).ok_or_else(|| {
-            ShmError::Other("offset overflow at trade".into())
-        })?;
-        let offset_symtab = offset_trade.checked_add(size_trade).ok_or_else(|| {
-            ShmError::Other("offset overflow at symtab".into())
-        })?;
-        let offset_orders_base = offset_symtab.checked_add(size_symtab).ok_or_else(|| {
-            ShmError::Other("offset overflow at orders base".into())
-        })?;
+        let offset_trade = offset_quote
+            .checked_add(size_quote)
+            .ok_or_else(|| ShmError::Other("offset overflow at trade".into()))?;
+        let offset_symtab = offset_trade
+            .checked_add(size_trade)
+            .ok_or_else(|| ShmError::Other("offset overflow at symtab".into()))?;
+        let offset_orders_base = offset_symtab
+            .checked_add(size_symtab)
+            .ok_or_else(|| ShmError::Other("offset overflow at orders base".into()))?;
         let orders_total = order_ring_stride
             .checked_mul(spec.n_max as usize)
             .ok_or_else(|| ShmError::Other("orders total overflow".into()))?;
-        let total_bytes = offset_orders_base.checked_add(orders_total).ok_or_else(|| {
-            ShmError::Other("total region overflow".into())
-        })?;
+        let total_bytes = offset_orders_base
+            .checked_add(orders_total)
+            .ok_or_else(|| ShmError::Other("total region overflow".into()))?;
 
         Ok(Self {
             offset_quote,
@@ -411,9 +411,11 @@ impl LayoutOffsets {
         }
         let offset = self
             .offset_orders_base
-            .checked_add((vm_id as usize).checked_mul(self.order_ring_stride).ok_or_else(
-                || ShmError::Other("order ring offset overflow".into()),
-            )?)
+            .checked_add(
+                (vm_id as usize)
+                    .checked_mul(self.order_ring_stride)
+                    .ok_or_else(|| ShmError::Other("order ring offset overflow".into()))?,
+            )
             .ok_or_else(|| ShmError::Other("order ring offset overflow".into()))?;
         Ok((offset, self.order_ring_stride))
     }
@@ -512,11 +514,7 @@ pub struct SharedRegion {
 
 impl SharedRegion {
     /// Publisher (또는 테스트) 가 생성. device backing 은 쓰기 불가.
-    pub fn create_or_attach(
-        backing: Backing,
-        spec: LayoutSpec,
-        role: Role,
-    ) -> ShmResult<Self> {
+    pub fn create_or_attach(backing: Backing, spec: LayoutSpec, role: Role) -> ShmResult<Self> {
         spec.validate()?;
         if backing.is_device() {
             return Err(ShmError::Unsupported(
@@ -525,8 +523,7 @@ impl SharedRegion {
         }
         let offsets = LayoutOffsets::compute(&spec)?;
         let digest = layout_digest(&spec, &offsets);
-        let region =
-            ShmRegion::create_or_attach(backing.path(), offsets.total_bytes, true)?;
+        let region = ShmRegion::create_or_attach(backing.path(), offsets.total_bytes, true)?;
 
         // Header 초기화 또는 검증.
         let was_created = unsafe { init_or_validate_header(&region, &spec, &offsets, &digest)? };
@@ -556,11 +553,7 @@ impl SharedRegion {
     /// Reader (Strategy / OrderGateway / ReadOnly) 가 기존 region 에 연결.
     ///
     /// `expected_spec` 을 제공해 digest 를 비교한다. 일치하지 않으면 에러.
-    pub fn open_view(
-        backing: Backing,
-        expected_spec: LayoutSpec,
-        role: Role,
-    ) -> ShmResult<Self> {
+    pub fn open_view(backing: Backing, expected_spec: LayoutSpec, role: Role) -> ShmResult<Self> {
         expected_spec.validate()?;
         let offsets = LayoutOffsets::compute(&expected_spec)?;
         let expected_digest = layout_digest(&expected_spec, &offsets);
@@ -900,14 +893,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("r1");
         let s = spec();
-        let r1 = SharedRegion::create_or_attach(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::Publisher,
-        )
-        .unwrap();
+        let r1 =
+            SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+                .unwrap();
         assert!(r1.was_created());
-        assert_eq!(r1.total_bytes(), LayoutOffsets::compute(&s).unwrap().total_bytes);
+        assert_eq!(
+            r1.total_bytes(),
+            LayoutOffsets::compute(&s).unwrap().total_bytes
+        );
 
         let r2 = SharedRegion::open_view(
             Backing::DevShm { path: p.clone() },
@@ -924,21 +917,15 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("r2");
         let s = spec();
-        let _r1 = SharedRegion::create_or_attach(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::Publisher,
-        )
-        .unwrap();
+        let _r1 =
+            SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+                .unwrap();
         // expected_spec 이 다름 → digest mismatch.
         let mut wrong = s;
         wrong.n_max = s.n_max + 1;
         // n_max 가 다르면 total_bytes 도 달라 region.len() < expected 가 먼저 터질 수도.
-        let err = SharedRegion::open_view(
-            Backing::DevShm { path: p.clone() },
-            wrong,
-            Role::ReadOnly,
-        );
+        let err =
+            SharedRegion::open_view(Backing::DevShm { path: p.clone() }, wrong, Role::ReadOnly);
         assert!(err.is_err());
     }
 
@@ -947,12 +934,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("r3");
         let s = spec();
-        let sr = SharedRegion::create_or_attach(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::Publisher,
-        )
-        .unwrap();
+        let sr =
+            SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+                .unwrap();
         let o = sr.offsets();
         let q = sr.sub_region(SubKind::Quote).unwrap();
         let t = sr.sub_region(SubKind::Trade).unwrap();
@@ -979,13 +963,12 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("r4");
         let s = spec();
-        let sr = SharedRegion::create_or_attach(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::Publisher,
-        )
-        .unwrap();
-        assert!(sr.sub_region(SubKind::OrderRing { vm_id: s.n_max }).is_err());
+        let sr =
+            SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+                .unwrap();
+        assert!(sr
+            .sub_region(SubKind::OrderRing { vm_id: s.n_max })
+            .is_err());
     }
 
     #[test]
@@ -993,20 +976,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("r5");
         let s = spec();
-        let r1 = SharedRegion::create_or_attach(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::Publisher,
-        )
-        .unwrap();
+        let r1 =
+            SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+                .unwrap();
         drop(r1);
         // 재시작.
-        let r2 = SharedRegion::create_or_attach(
-            Backing::DevShm { path: p.clone() },
-            s,
-            Role::Publisher,
-        )
-        .unwrap();
+        let r2 =
+            SharedRegion::create_or_attach(Backing::DevShm { path: p.clone() }, s, Role::Publisher)
+                .unwrap();
         assert!(!r2.was_created()); // 이미 초기화되어 있었음.
     }
 }

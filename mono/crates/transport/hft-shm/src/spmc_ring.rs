@@ -122,8 +122,7 @@ impl TradeRingWriter {
                         _pad_b: [0; 48],
                     },
                 );
-                let frames_ptr =
-                    (hdr_ptr as *mut u8).add(std::mem::size_of::<TradeRingHeader>());
+                let frames_ptr = (hdr_ptr as *mut u8).add(std::mem::size_of::<TradeRingHeader>());
                 std::ptr::write_bytes(frames_ptr, 0, capacity as usize * elem);
             } else {
                 validate_header(&*hdr_ptr, capacity, elem)?;
@@ -377,10 +376,12 @@ unsafe fn read_frame_body(slot: *const TradeFrame) -> TradeFrame {
 pub(crate) fn compute_ring_size<H, F>(capacity: u64) -> ShmResult<usize> {
     let hdr = std::mem::size_of::<H>();
     let elem = std::mem::size_of::<F>();
-    let body = (capacity as usize).checked_mul(elem).ok_or(ShmError::SizeOverflow {
-        capacity: capacity as usize,
-        element_size: elem,
-    })?;
+    let body = (capacity as usize)
+        .checked_mul(elem)
+        .ok_or(ShmError::SizeOverflow {
+            capacity: capacity as usize,
+            element_size: elem,
+        })?;
     hdr.checked_add(body).ok_or(ShmError::SizeOverflow {
         capacity: capacity as usize,
         element_size: elem,
@@ -445,8 +446,8 @@ mod tests {
     }
 
     fn run_concurrent_monotonic_once() -> u64 {
-        use std::sync::Arc;
         use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
         use std::thread;
 
         let dir = tempdir().unwrap();

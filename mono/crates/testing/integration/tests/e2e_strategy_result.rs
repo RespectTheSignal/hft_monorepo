@@ -16,8 +16,8 @@ use hft_testkit::fixtures;
 use hft_time::{LatencyStamps, Stage, SystemClock};
 use hft_types::{ExchangeId, MarketEvent};
 use order_gateway::{
-    start_with_arc, IngressEnvelope, IngressMeta, NoopExecutor, Route, RoutingTable,
-    DEDUP_CACHE_CAP_DEFAULT, RetryPolicy,
+    start_with_arc, IngressEnvelope, IngressMeta, NoopExecutor, RetryPolicy, Route, RoutingTable,
+    DEDUP_CACHE_CAP_DEFAULT,
 };
 use parking_lot::Mutex;
 use strategy::{
@@ -151,23 +151,24 @@ async fn strategy_gateway_result_roundtrip_accepted() {
     let clock = SystemClock::new();
     stamps.mark(Stage::WsReceived, &clock);
     event_tx
-        .send((MarketEvent::BookTicker(fixtures::bookticker(1_700_000_000_000)), stamps))
+        .send((
+            MarketEvent::BookTicker(fixtures::bookticker(1_700_000_000_000)),
+            stamps,
+        ))
         .unwrap();
 
-    let order = tokio::task::spawn_blocking(move || {
-        orders_rx.recv_timeout(Duration::from_millis(500))
-    })
-    .await
-    .unwrap()
-    .expect("strategy emitted order");
+    let order =
+        tokio::task::spawn_blocking(move || orders_rx.recv_timeout(Duration::from_millis(500)))
+            .await
+            .unwrap()
+            .expect("strategy emitted order");
     req_tx.send(ingress_from_order(order)).unwrap();
 
-    let wire = tokio::task::spawn_blocking(move || {
-        result_rx.recv_timeout(Duration::from_millis(1000))
-    })
-    .await
-    .unwrap()
-    .expect("gateway emitted result wire");
+    let wire =
+        tokio::task::spawn_blocking(move || result_rx.recv_timeout(Duration::from_millis(1000)))
+            .await
+            .unwrap()
+            .expect("gateway emitted result wire");
 
     assert_eq!(wire.client_seq, 1);
     assert_eq!(wire.status, STATUS_ACCEPTED);

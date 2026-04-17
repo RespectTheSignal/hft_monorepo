@@ -273,8 +273,12 @@ pub fn order_request_to_order_frame(
         size,
         client_id: req.client_seq,
         ts_ns: req.origin_ts_ns,
-        aux: PlaceAuxMeta::from_parts(place_level_code(meta.level), req.reduce_only, meta.strategy_tag)
-            .pack(),
+        aux: PlaceAuxMeta::from_parts(
+            place_level_code(meta.level),
+            req.reduce_only,
+            meta.strategy_tag,
+        )
+        .pack(),
         _pad3: [0; 16],
     })
 }
@@ -296,9 +300,7 @@ pub fn order_request_to_order_request_wire(
                 quantized_limit_price(p, meta.quantize)?,
             )
         }
-        OrderType::Market => {
-            (quantized_qty(req.qty, meta.quantize)?, 0.0)
-        }
+        OrderType::Market => (quantized_qty(req.qty, meta.quantize)?, 0.0),
     };
 
     let mut wire = OrderRequestWire {

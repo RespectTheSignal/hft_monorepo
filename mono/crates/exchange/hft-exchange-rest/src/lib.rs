@@ -89,7 +89,11 @@ impl std::fmt::Debug for Credentials {
             .field("api_secret", &"***")
             .field(
                 "passphrase",
-                &if self.passphrase.is_some() { "<set>" } else { "<none>" },
+                &if self.passphrase.is_some() {
+                    "<set>"
+                } else {
+                    "<none>"
+                },
             )
             .finish()
     }
@@ -117,8 +121,7 @@ type HmacSha512 = Hmac<Sha512>;
 ///
 /// secret 이 빈 문자열이어도 panic 하지 않는다 (HMAC 는 빈 key 허용).
 pub fn hmac_sha256_hex(secret: &[u8], msg: &[u8]) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret)
-        .expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size");
     mac.update(msg);
     hex::encode(mac.finalize().into_bytes())
 }
@@ -235,10 +238,18 @@ pub struct RetryPolicy {
 
 impl RetryPolicy {
     pub const fn none() -> Self {
-        Self { max_attempts: 1, base_backoff_ms: 0, max_backoff_ms: 0 }
+        Self {
+            max_attempts: 1,
+            base_backoff_ms: 0,
+            max_backoff_ms: 0,
+        }
     }
     pub const fn defaults() -> Self {
-        Self { max_attempts: 3, base_backoff_ms: 100, max_backoff_ms: 1_000 }
+        Self {
+            max_attempts: 3,
+            base_backoff_ms: 100,
+            max_backoff_ms: 1_000,
+        }
     }
     fn delay(&self, attempt: u32) -> Duration {
         let shift = attempt.min(10);
@@ -578,7 +589,11 @@ mod tests {
 
     #[test]
     fn retry_policy_delay_saturates() {
-        let p = RetryPolicy { max_attempts: 10, base_backoff_ms: 100, max_backoff_ms: 500 };
+        let p = RetryPolicy {
+            max_attempts: 10,
+            base_backoff_ms: 100,
+            max_backoff_ms: 500,
+        };
         // attempt 0: 100, 1: 200, 2: 400, 3: 500(capped), ...
         assert_eq!(p.delay(0), Duration::from_millis(100));
         assert_eq!(p.delay(1), Duration::from_millis(200));

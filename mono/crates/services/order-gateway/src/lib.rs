@@ -769,8 +769,7 @@ mod tests {
             self.id
         }
         async fn place_order(&self, _req: OrderRequest) -> Result<OrderAck> {
-            self.calls
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Err(anyhow!("simulated network error"))
         }
         async fn cancel(&self, _id: &str) -> Result<()> {
@@ -807,7 +806,9 @@ mod tests {
         )
         .unwrap();
 
-        req_tx.send((sample_req("retry-cid"), sample_meta())).unwrap();
+        req_tx
+            .send((sample_req("retry-cid"), sample_meta()))
+            .unwrap();
 
         // 2+1 = 3회 호출 후 포기.
         let deadline = std::time::Instant::now() + Duration::from_millis(500);

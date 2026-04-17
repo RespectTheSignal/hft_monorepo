@@ -144,7 +144,8 @@ pub fn decide_order(
     };
 
     // close_based_on_binance_ok
-    let close_based_on_binance_ok = matches!(signal.binance_mid_gap_chance_bp, Some(bp) if bp > 0.0);
+    let close_based_on_binance_ok =
+        matches!(signal.binance_mid_gap_chance_bp, Some(bp) if bp > 0.0);
 
     let orderbook_size_i = signal.orderbook_size as i64;
 
@@ -260,8 +261,8 @@ pub fn decide_order_v8(
         let mut order_size = contract_order_size;
         if let Some(close_size_usdt) = trade_settings.close_stale_minutes_size {
             if close_size_usdt > 0.0 && ctx.quanto_multiplier > 0.0 {
-                let sized = (close_size_usdt * ctx.quanto_multiplier)
-                    .max(contract_order_size as f64);
+                let sized =
+                    (close_size_usdt * ctx.quanto_multiplier).max(contract_order_size as f64);
                 order_size = sized as i64;
             }
         }
@@ -434,8 +435,8 @@ pub fn decide_order_v6(
         let mut order_size = contract_order_size;
         if let Some(close_size_usdt) = trade_settings.close_stale_minutes_size {
             if close_size_usdt > 0.0 && ctx.quanto_multiplier > 0.0 {
-                let sized = (close_size_usdt * ctx.quanto_multiplier)
-                    .max(contract_order_size as f64);
+                let sized =
+                    (close_size_usdt * ctx.quanto_multiplier).max(contract_order_size as f64);
                 order_size = sized as i64;
             }
         }
@@ -821,7 +822,21 @@ mod tests {
     fn no_signal_returns_none() {
         let mut sig = base_signal("buy", 5.0);
         sig.order_side = None;
-        let out = decide_order(&sig, &ts(), 1000, 1000, Some(1000), 1000, 0.0, 0.0, 100, 10_000, 200, 1, 0.0);
+        let out = decide_order(
+            &sig,
+            &ts(),
+            1000,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            1,
+            0.0,
+        );
         assert!(out.is_none());
     }
 
@@ -831,11 +846,17 @@ mod tests {
         let out = decide_order(
             &sig,
             &ts(),
-            100_000,                            // current
-            100_000 - 9999,                     // gate bt 10s 전 → default latency 500ms 초과
+            100_000,        // current
+            100_000 - 9999, // gate bt 10s 전 → default latency 500ms 초과
             Some(100_000),
             100_000,
-            0.0, 0.0, 100, 10_000, 200, 1, 0.0,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            1,
+            0.0,
         );
         assert!(out.is_none());
     }
@@ -844,7 +865,19 @@ mod tests {
     fn binance_missing_rejects_v0() {
         let sig = base_signal("buy", 5.0);
         let out = decide_order(
-            &sig, &ts(), 1000, 1000, None, 1000, 0.0, 0.0, 100, 10_000, 200, 1, 0.0,
+            &sig,
+            &ts(),
+            1000,
+            1000,
+            None,
+            1000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            1,
+            0.0,
         );
         assert!(out.is_none());
     }
@@ -853,7 +886,19 @@ mod tests {
     fn triggers_limit_open_when_all_gates_pass() {
         let sig = base_signal("buy", 5.0);
         let d = decide_order(
-            &sig, &ts(), 1000, 1000, Some(1000), 1000, 0.0, 0.0, 100, 10_000, 200, 3, 0.0,
+            &sig,
+            &ts(),
+            1000,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,
+            0.0,
         )
         .unwrap();
         assert_eq!(d.level, OrderLevel::LimitOpen);
@@ -868,7 +913,19 @@ mod tests {
         let mut t = ts();
         t.funding_rate_threshold = 0.001;
         let d = decide_order(
-            &sig, &t, 1000, 1000, Some(1000), 1000, 0.002, 0.0, 100, 10_000, 200, 3, 0.0,
+            &sig,
+            &t,
+            1000,
+            1000,
+            Some(1000),
+            1000,
+            0.002,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,
+            0.0,
         )
         .unwrap();
         assert!(d.only_close);
@@ -885,9 +942,18 @@ mod tests {
         t.close_raw_mid_profit_bp = 0.1;
         t.close_order_count = 0;
         let d = decide_order(
-            &sig, &t, 1000, 1000, Some(1000), 1000, 0.0,
+            &sig,
+            &t,
+            1000,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
             10.0, // order_count_size — abs > close_order_count(0)
-            100, 10_000, 200, 3,
+            100,
+            10_000,
+            200,
+            3,
             100.0, // 롱 포지션인데 side=buy → 잘못된 방향
         );
         assert!(d.is_none());
@@ -932,7 +998,19 @@ mod tests {
         ctx.current_time_sec = 1000;
         ctx.position_update_time_sec = 1000 - 120; // 2분 전 — stale
         let d = decide_order_v8(
-            &sig, &t, &ctx, 1000, Some(1000), 1000, 0.0, 0.0, 100, 10_000, 200, 3, 100.0,
+            &sig,
+            &t,
+            &ctx,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,
+            100.0,
         )
         .unwrap();
         assert_eq!(d.level, OrderLevel::MarketClose);
@@ -951,7 +1029,19 @@ mod tests {
         ctx.position_update_time_sec = 1000 - 120;
         ctx.quanto_multiplier = 2.0;
         let d = decide_order_v8(
-            &sig, &t, &ctx, 1000, Some(1000), 1000, 0.0, 0.0, 100, 10_000, 200, 3, 100.0,
+            &sig,
+            &t,
+            &ctx,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,
+            100.0,
         )
         .unwrap();
         // 500.0 * 2.0 = 1000 > contract_order_size(3) → 1000
@@ -964,7 +1054,19 @@ mod tests {
         let t = ts();
         let ctx = v8_ctx();
         let d = decide_order_v8(
-            &sig, &t, &ctx, 1000, Some(1000), 1000, 0.0, 0.0, 100, 10_000, 200, 3, 0.0,
+            &sig,
+            &t,
+            &ctx,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,
+            0.0,
         )
         .unwrap();
         assert_eq!(d.level, OrderLevel::LimitOpen);
@@ -981,12 +1083,19 @@ mod tests {
         let mut ctx = v8_ctx();
         ctx.is_too_many_orders = true;
         let d = decide_order_v8(
-            &sig, &t, &ctx,
-            1000, Some(1000), 1000,
-            0.0, 0.0,
-            300,          // size_trigger
-            10_000,       // max_size_trigger
-            200, 3, 0.0,
+            &sig,
+            &t,
+            &ctx,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            300,    // size_trigger
+            10_000, // max_size_trigger
+            200,
+            3,
+            0.0,
         );
         // 300 * 2 = 600 → 500 < 600 → None (open reject)
         assert!(d.is_none());
@@ -999,9 +1108,19 @@ mod tests {
         let mut ctx = v8_ctx();
         ctx.current_time_ms = 100_000;
         let d = decide_order_v8(
-            &sig, &t, &ctx,
-            100_000 - 9999, Some(100_000), 100_000,
-            0.0, 0.0, 100, 10_000, 200, 3, 0.0,
+            &sig,
+            &t,
+            &ctx,
+            100_000 - 9999,
+            Some(100_000),
+            100_000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,
+            0.0,
         );
         assert!(d.is_none());
     }
@@ -1029,7 +1148,19 @@ mod tests {
         ctx.current_time_sec = 1000;
         ctx.position_update_time_sec = 1000 - 120; // 2분 전
         let d = decide_order_v6(
-            &sig, &t, &ctx, 1000, Some(1000), 1000, 0.0, 0.0, 100, 10_000, 200, 3, 100.0,
+            &sig,
+            &t,
+            &ctx,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,
+            100.0,
         )
         .unwrap();
         assert_eq!(d.level, OrderLevel::MarketClose);
@@ -1044,12 +1175,20 @@ mod tests {
         let t = ts();
         let mut ctx = v6_ctx();
         ctx.account_net_position_usdt = 1000.0; // 계정 long
-        // sell 시그널: orderbook_size=500 → size_trigger=100 통과해야 함.
+                                                // sell 시그널: orderbook_size=500 → size_trigger=100 통과해야 함.
         let d = decide_order_v6(
-            &sig, &t, &ctx, 1000, Some(1000), 1000,
-            0.0, 0.0,
-            100, 10_000, 200,
-            3, // contract_order_size
+            &sig,
+            &t,
+            &ctx,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,   // contract_order_size
             0.0, // 심볼 자체는 포지션 0
         )
         .unwrap();
@@ -1066,11 +1205,19 @@ mod tests {
         let mut ctx = v6_ctx();
         ctx.is_too_many_orders = true;
         let d = decide_order_v6(
-            &sig, &t, &ctx, 1000, Some(1000), 1000,
-            0.0, 0.0,
-            300,    // size_trigger → *2 = 600 > 500 → reject
-            10_000, 200,
-            3, 0.0,
+            &sig,
+            &t,
+            &ctx,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            300, // size_trigger → *2 = 600 > 500 → reject
+            10_000,
+            200,
+            3,
+            0.0,
         );
         assert!(d.is_none());
     }
@@ -1081,7 +1228,19 @@ mod tests {
         let t = ts();
         let ctx = v6_ctx();
         let d = decide_order_v6(
-            &sig, &t, &ctx, 1000, Some(1000), 1000, 0.0, 0.0, 100, 10_000, 200, 3, 0.0,
+            &sig,
+            &t,
+            &ctx,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,
+            0.0,
         )
         .unwrap();
         assert_eq!(d.level, OrderLevel::LimitOpen);
@@ -1098,10 +1257,20 @@ mod tests {
             account_net_position_usdt: 1000.0, // 계정 long
         };
         let d = decide_order_v7(
-            &sig, &t, &extras,
-            1000, 1000, Some(1000), 1000,
-            0.0, 0.0,
-            100, 10_000, 200, 3, 0.0,
+            &sig,
+            &t,
+            &extras,
+            1000,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,
+            0.0,
         )
         .unwrap();
         assert_eq!(d.level, OrderLevel::LimitOpen);
@@ -1116,10 +1285,20 @@ mod tests {
         let extras = V7DecisionExtras::default();
         // V7 은 V6/V8 와 달리 position update time 신호 무시.
         let d = decide_order_v7(
-            &sig, &t, &extras,
-            1000, 1000, Some(1000), 1000,
-            0.0, 0.0,
-            100, 10_000, 200, 3, 0.0,
+            &sig,
+            &t,
+            &extras,
+            1000,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,
+            0.0,
         )
         .unwrap();
         assert_eq!(d.level, OrderLevel::LimitOpen);
@@ -1133,10 +1312,20 @@ mod tests {
         let t = ts();
         let extras = V7DecisionExtras::default();
         let d = decide_order_v7(
-            &sig, &t, &extras,
+            &sig,
+            &t,
+            &extras,
             100_000,
-            100_000 - 9999, Some(100_000), 100_000,
-            0.0, 0.0, 100, 10_000, 200, 3, 0.0,
+            100_000 - 9999,
+            Some(100_000),
+            100_000,
+            0.0,
+            0.0,
+            100,
+            10_000,
+            200,
+            3,
+            0.0,
         );
         assert!(d.is_none());
     }
@@ -1150,11 +1339,20 @@ mod tests {
         let t = ts();
         let extras = V7DecisionExtras::default();
         let d = decide_order_v7(
-            &sig, &t, &extras,
-            1000, 1000, Some(1000), 1000,
-            0.0, 0.0,
+            &sig,
+            &t,
+            &extras,
+            1000,
+            1000,
+            Some(1000),
+            1000,
+            0.0,
+            0.0,
             300, // size_trigger — 500 > 300 → 통과 (multiplier 없음)
-            10_000, 200, 3, 0.0,
+            10_000,
+            200,
+            3,
+            0.0,
         )
         .unwrap();
         assert_eq!(d.level, OrderLevel::LimitOpen);

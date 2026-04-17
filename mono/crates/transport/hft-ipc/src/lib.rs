@@ -99,7 +99,9 @@ pub struct ZmqPushSink {
 
 impl ZmqPushSink {
     pub fn new(sock: PushSocket) -> Self {
-        Self { inner: Mutex::new(sock) }
+        Self {
+            inner: Mutex::new(sock),
+        }
     }
 
     /// 내부 lock 해제 후 소유권 반환 (close 등).
@@ -126,7 +128,9 @@ pub struct ZmqPubSink {
 
 impl ZmqPubSink {
     pub fn new(sock: PubSocket) -> Self {
-        Self { inner: Mutex::new(sock) }
+        Self {
+            inner: Mutex::new(sock),
+        }
     }
 
     pub fn into_inner(self) -> PubSocket {

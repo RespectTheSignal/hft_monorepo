@@ -469,7 +469,9 @@ impl PyStrategyClient {
         n_max: u32,
         vm_id: u32,
     ) -> PyResult<Self> {
-        let backing = Backing::DevShm { path: PathBuf::from(path) };
+        let backing = Backing::DevShm {
+            path: PathBuf::from(path),
+        };
         Self::attach(
             backing,
             quote_slot_count,
@@ -500,7 +502,9 @@ impl PyStrategyClient {
         n_max: u32,
         vm_id: u32,
     ) -> PyResult<Self> {
-        let backing = Backing::Hugetlbfs { path: PathBuf::from(path) };
+        let backing = Backing::Hugetlbfs {
+            path: PathBuf::from(path),
+        };
         Self::attach(
             backing,
             quote_slot_count,
@@ -531,7 +535,9 @@ impl PyStrategyClient {
         n_max: u32,
         vm_id: u32,
     ) -> PyResult<Self> {
-        let backing = Backing::PciBar { path: PathBuf::from(path) };
+        let backing = Backing::PciBar {
+            path: PathBuf::from(path),
+        };
         Self::attach(
             backing,
             quote_slot_count,
@@ -568,7 +574,9 @@ impl PyStrategyClient {
         timeout_ms: u64,
         step_ms: u64,
     ) -> PyResult<Self> {
-        let backing = Backing::DevShm { path: PathBuf::from(path) };
+        let backing = Backing::DevShm {
+            path: PathBuf::from(path),
+        };
         let spec = LayoutSpec {
             quote_slot_count,
             trade_ring_capacity,

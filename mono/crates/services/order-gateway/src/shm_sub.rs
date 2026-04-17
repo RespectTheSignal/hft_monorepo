@@ -39,8 +39,7 @@ use crossbeam_channel::{Sender, TrySendError};
 use hft_exchange_api::{CancellationToken, OrderRequest, OrderSide, OrderType, TimeInForce};
 use hft_shm::{
     exchange_from_u8, Backing, LayoutSpec, MultiOrderRingReader, OrderFrame, OrderKind,
-    OrderRingReader, PlaceAuxMeta, Role, SharedRegion, SubKind, SymbolTable,
-    PLACE_LEVEL_OPEN,
+    OrderRingReader, PlaceAuxMeta, Role, SharedRegion, SubKind, SymbolTable, PLACE_LEVEL_OPEN,
 };
 use hft_telemetry::{counter_add, counter_inc, CounterKey};
 use hft_types::Symbol;
@@ -447,7 +446,12 @@ impl Worker {
         let kind = match frame.kind {
             x if x == OrderKind::Place as u8 => OrderKind::Place,
             x if x == OrderKind::Cancel as u8 => OrderKind::Cancel,
-            x => return Err(HandleFrameError::Invalid(anyhow!("unknown OrderKind={}", x))),
+            x => {
+                return Err(HandleFrameError::Invalid(anyhow!(
+                    "unknown OrderKind={}",
+                    x
+                )))
+            }
         };
 
         match kind {
@@ -655,17 +659,12 @@ pub fn start_shm_order_subscriber(
             (ReaderImpl::Legacy(reader), symtab, None)
         }
         ShmSubscriberSource::SharedRegion { backing, spec } => {
-            let sr = SharedRegion::create_or_attach(
-                backing.clone(),
-                *spec,
-                Role::OrderGateway,
-            )
-            .with_context(|| format!("attach SharedRegion at {backing:?}"))?;
+            let sr = SharedRegion::create_or_attach(backing.clone(), *spec, Role::OrderGateway)
+                .with_context(|| format!("attach SharedRegion at {backing:?}"))?;
             // order rings 은 strict attach — publisher 가 먼저 init 완료 전이라면
             // 여기서 실패하고 caller 가 재시도해야 함. 운영상 publisher 가 먼저
             // 뜨는 규약이므로 strict 로 둔다.
-            let m = MultiOrderRingReader::attach(&sr)
-                .context("attach MultiOrderRingReader")?;
+            let m = MultiOrderRingReader::attach(&sr).context("attach MultiOrderRingReader")?;
             // symbol table 은 read/write 모두 가능한 모드로 연다 (writer 일 필요 없음).
             let sub = sr
                 .sub_region(SubKind::Symtab)
@@ -761,8 +760,8 @@ mod tests {
             exchange_id: hft_shm::exchange_to_u8(ExchangeId::Gate),
             _pad1: [0; 2],
             symbol_idx,
-            side: 0, // Buy
-            tif: 0,  // GTC
+            side: 0,     // Buy
+            tif: 0,      // GTC
             ord_type: 0, // Limit
             _pad2: [0; 1],
             price: 5_000_000_000_000,
@@ -838,9 +837,7 @@ mod tests {
         let sp = dir.join("symtab");
         let writer = OrderRingWriter::create(&op, 64).unwrap();
         let sym = SymbolTable::open_or_create(&sp, 32).unwrap();
-        let idx = sym
-            .get_or_intern(ExchangeId::Gate, "BTC_USDT")
-            .unwrap();
+        let idx = sym.get_or_intern(ExchangeId::Gate, "BTC_USDT").unwrap();
         (writer, sym, idx)
     }
 
@@ -859,10 +856,7 @@ mod tests {
         let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(16);
 
         let cancel = CancellationToken::new();
-        let cfg = ShmSubscriberConfig::legacy(
-            dir.path().join("orders"),
-            dir.path().join("symtab"),
-        );
+        let cfg = ShmSubscriberConfig::legacy(dir.path().join("orders"), dir.path().join("symtab"));
         let handle = start_shm_order_subscriber(
             &cfg,
             routing.clone(),
@@ -875,12 +869,11 @@ mod tests {
         // Python-producer 역할.
         assert!(writer.publish(&sample_place_frame(sym_idx, 42)));
 
-        let (req, meta) = tokio::task::spawn_blocking(move || {
-            req_rx.recv_timeout(Duration::from_millis(500))
-        })
-        .await
-        .unwrap()
-        .expect("router should receive OrderRequest");
+        let (req, meta) =
+            tokio::task::spawn_blocking(move || req_rx.recv_timeout(Duration::from_millis(500)))
+                .await
+                .unwrap()
+                .expect("router should receive OrderRequest");
 
         assert_eq!(req.exchange, ExchangeId::Gate);
         assert_eq!(req.symbol.as_str(), "BTC_USDT");
@@ -908,10 +901,7 @@ mod tests {
 
         let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(16);
         let cancel = CancellationToken::new();
-        let cfg = ShmSubscriberConfig::legacy(
-            dir.path().join("orders"),
-            dir.path().join("symtab"),
-        );
+        let cfg = ShmSubscriberConfig::legacy(dir.path().join("orders"), dir.path().join("symtab"));
         let handle = start_shm_order_subscriber(
             &cfg,
             routing.clone(),
@@ -929,12 +919,11 @@ mod tests {
             "v6",
         )));
 
-        let (req, meta) = tokio::task::spawn_blocking(move || {
-            req_rx.recv_timeout(Duration::from_millis(500))
-        })
-        .await
-        .unwrap()
-        .expect("router should receive OrderRequest");
+        let (req, meta) =
+            tokio::task::spawn_blocking(move || req_rx.recv_timeout(Duration::from_millis(500)))
+                .await
+                .unwrap()
+                .expect("router should receive OrderRequest");
 
         assert!(req.reduce_only);
         assert_eq!(req.client_seq, 4242);
@@ -958,10 +947,7 @@ mod tests {
 
         let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(16);
         let cancel = CancellationToken::new();
-        let cfg = ShmSubscriberConfig::legacy(
-            dir.path().join("orders"),
-            dir.path().join("symtab"),
-        );
+        let cfg = ShmSubscriberConfig::legacy(dir.path().join("orders"), dir.path().join("symtab"));
         let handle = start_shm_order_subscriber(
             &cfg,
             routing.clone(),
@@ -973,12 +959,11 @@ mod tests {
 
         assert!(writer.publish(&sample_place_frame(sym_idx, 7)));
 
-        let (req, _meta) = tokio::task::spawn_blocking(move || {
-            req_rx.recv_timeout(Duration::from_millis(500))
-        })
-        .await
-        .unwrap()
-        .expect("router should receive OrderRequest");
+        let (req, _meta) =
+            tokio::task::spawn_blocking(move || req_rx.recv_timeout(Duration::from_millis(500)))
+                .await
+                .unwrap()
+                .expect("router should receive OrderRequest");
 
         assert!(!req.reduce_only);
         assert_eq!(req.client_seq, 7);
@@ -1004,10 +989,7 @@ mod tests {
 
         let (req_tx, _req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(16);
         let cancel = CancellationToken::new();
-        let cfg = ShmSubscriberConfig::legacy(
-            dir.path().join("orders"),
-            dir.path().join("symtab"),
-        );
+        let cfg = ShmSubscriberConfig::legacy(dir.path().join("orders"), dir.path().join("symtab"));
         let handle = start_shm_order_subscriber(
             &cfg,
             routing.clone(),
@@ -1045,10 +1027,7 @@ mod tests {
 
         let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(16);
         let cancel = CancellationToken::new();
-        let cfg = ShmSubscriberConfig::legacy(
-            dir.path().join("orders"),
-            dir.path().join("symtab"),
-        );
+        let cfg = ShmSubscriberConfig::legacy(dir.path().join("orders"), dir.path().join("symtab"));
         let handle = start_shm_order_subscriber(
             &cfg,
             routing.clone(),
@@ -1064,11 +1043,10 @@ mod tests {
         assert!(writer.publish(&bad));
 
         // shouldn't receive anything.
-        let got = tokio::task::spawn_blocking(move || {
-            req_rx.recv_timeout(Duration::from_millis(100))
-        })
-        .await
-        .unwrap();
+        let got =
+            tokio::task::spawn_blocking(move || req_rx.recv_timeout(Duration::from_millis(100)))
+                .await
+                .unwrap();
         assert!(got.is_err());
 
         handle.join();
@@ -1130,10 +1108,7 @@ mod tests {
         let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(32);
         let cancel = CancellationToken::new();
 
-        let cfg = ShmSubscriberConfig::shared_region(
-            Backing::DevShm { path: p.clone() },
-            spec,
-        );
+        let cfg = ShmSubscriberConfig::shared_region(Backing::DevShm { path: p.clone() }, spec);
         let handle = start_shm_order_subscriber(
             &cfg,
             routing.clone(),
@@ -1187,10 +1162,7 @@ mod tests {
 
         let (req_tx, _req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(1);
         let cancel = CancellationToken::new();
-        let cfg = ShmSubscriberConfig::legacy(
-            dir.path().join("orders"),
-            dir.path().join("symtab"),
-        );
+        let cfg = ShmSubscriberConfig::legacy(dir.path().join("orders"), dir.path().join("symtab"));
         let handle = start_shm_order_subscriber(
             &cfg,
             routing,
@@ -1267,10 +1239,7 @@ mod tests {
 
         let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(32);
         let cancel = CancellationToken::new();
-        let cfg = ShmSubscriberConfig::shared_region(
-            Backing::DevShm { path: p.clone() },
-            spec,
-        );
+        let cfg = ShmSubscriberConfig::shared_region(Backing::DevShm { path: p.clone() }, spec);
         let handle = start_shm_order_subscriber(
             &cfg,
             routing,

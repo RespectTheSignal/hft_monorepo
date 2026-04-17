@@ -179,7 +179,8 @@ impl QuoteSlotWriter {
     unsafe fn slot_mut_ptr(&self, idx: u32) -> *mut QuoteSlot {
         let base = self.region.raw_base();
         // SAFETY: add offsets within our mapped region.
-        let slots_ptr = unsafe { base.add(std::mem::size_of::<QuoteSlotHeader>()) } as *mut QuoteSlot;
+        let slots_ptr =
+            unsafe { base.add(std::mem::size_of::<QuoteSlotHeader>()) } as *mut QuoteSlot;
         unsafe { slots_ptr.add(idx as usize) }
     }
 }
@@ -272,7 +273,8 @@ impl QuoteSlotReader {
 
     unsafe fn slot_ptr(&self, idx: u32) -> *const QuoteSlot {
         let base = self.region.as_ptr();
-        let slots_ptr = unsafe { base.add(std::mem::size_of::<QuoteSlotHeader>()) } as *const QuoteSlot;
+        let slots_ptr =
+            unsafe { base.add(std::mem::size_of::<QuoteSlotHeader>()) } as *const QuoteSlot;
         unsafe { slots_ptr.add(idx as usize) }
     }
 }
@@ -437,10 +439,7 @@ mod tests {
         // magic 훼손.
         {
             use std::io::{Seek, SeekFrom, Write};
-            let mut f = std::fs::OpenOptions::new()
-                .write(true)
-                .open(&p)
-                .unwrap();
+            let mut f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
             f.seek(SeekFrom::Start(0)).unwrap();
             f.write_all(&[0xFFu8; 8]).unwrap();
         }

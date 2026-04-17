@@ -58,26 +58,23 @@ fn sample_frame(client_id: u64, price: i64) -> OrderFrame {
 /// 편의 함수 — publisher 가 모든 sub-region 을 초기화한 뒤 region handle 을 반환.
 fn boot_publisher(path: &std::path::Path, s: LayoutSpec) -> SharedRegion {
     let sr = SharedRegion::create_or_attach(
-        Backing::DevShm { path: path.to_path_buf() },
+        Backing::DevShm {
+            path: path.to_path_buf(),
+        },
         s,
         Role::Publisher,
     )
     .expect("create_or_attach publisher");
-    let _ = QuoteSlotWriter::from_region(
-        sr.sub_region(SubKind::Quote).unwrap(),
-        s.quote_slot_count,
-    )
-    .expect("init quote");
+    let _ =
+        QuoteSlotWriter::from_region(sr.sub_region(SubKind::Quote).unwrap(), s.quote_slot_count)
+            .expect("init quote");
     let _ = TradeRingWriter::from_region(
         sr.sub_region(SubKind::Trade).unwrap(),
         s.trade_ring_capacity,
     )
     .expect("init trade");
-    let _ = SymbolTable::from_region(
-        sr.sub_region(SubKind::Symtab).unwrap(),
-        s.symtab_capacity,
-    )
-    .expect("init symtab");
+    let _ = SymbolTable::from_region(sr.sub_region(SubKind::Symtab).unwrap(), s.symtab_capacity)
+        .expect("init symtab");
     for vm_id in 0..s.n_max {
         let sub = sr.sub_region(SubKind::OrderRing { vm_id }).unwrap();
         let _ = OrderRingWriter::from_region(sub, s.order_ring_capacity).unwrap();
@@ -132,12 +129,8 @@ fn full_pipeline_publisher_n_strategies_gateway_fanin() {
     // ── N 개의 strategy attach ───────────────────────────────────────────────
     let mut strategies: Vec<StrategyShmClient> = (0..s.n_max)
         .map(|vm_id| {
-            StrategyShmClient::attach(
-                Backing::DevShm { path: path.clone() },
-                s,
-                vm_id,
-            )
-            .expect("strategy attach")
+            StrategyShmClient::attach(Backing::DevShm { path: path.clone() }, s, vm_id)
+                .expect("strategy attach")
         })
         .collect();
 
@@ -178,7 +171,8 @@ fn full_pipeline_publisher_n_strategies_gateway_fanin() {
             .get_or_intern(ExchangeId::Gate, "BTC_USDT")
             .unwrap();
         assert_eq!(
-            idx, btc_idx,
+            idx,
+            btc_idx,
             "strategy vm={} symtab 이 publisher 와 다른 idx 를 반환",
             client.vm_id()
         );
@@ -198,7 +192,11 @@ fn full_pipeline_publisher_n_strategies_gateway_fanin() {
         collected.push((vm_id, frame.client_id, frame.price));
         true
     });
-    assert_eq!(consumed, (3 * s.n_max) as usize, "total consumed {consumed}");
+    assert_eq!(
+        consumed,
+        (3 * s.n_max) as usize,
+        "total consumed {consumed}"
+    );
     // 각 vm_id 에 대해 정확히 3건.
     for vm_id in 0..s.n_max {
         let n = collected.iter().filter(|(v, _, _)| *v == vm_id).count();
@@ -242,7 +240,9 @@ fn attach_with_retry_waits_for_publisher() {
 
     let handle = std::thread::spawn(move || {
         let r = StrategyShmClient::attach_with_retry(
-            Backing::DevShm { path: path_for_thread },
+            Backing::DevShm {
+                path: path_for_thread,
+            },
             s,
             0,
             Duration::from_secs(3),

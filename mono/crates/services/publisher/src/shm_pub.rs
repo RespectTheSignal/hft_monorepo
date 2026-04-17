@@ -20,8 +20,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 use hft_shm::{
-    exchange_to_u8, Backing, LayoutSpec, QuoteSlotWriter, QuoteUpdate, Role, SharedRegion,
-    SubKind, SymbolTable, TradeFrame, TradeRingWriter,
+    exchange_to_u8, Backing, LayoutSpec, QuoteSlotWriter, QuoteUpdate, Role, SharedRegion, SubKind,
+    SymbolTable, TradeFrame, TradeRingWriter,
 };
 use hft_telemetry::{counter_inc, CounterKey};
 use hft_types::{BookTicker, ExchangeId, Symbol, Trade};
@@ -101,7 +101,8 @@ impl ShmPublisher {
         )
         .map_err(|e| anyhow::anyhow!("TradeRingWriter::from_region: {e}"))?;
         let sym = SymbolTable::from_region(
-            sr.sub_region(SubKind::Symtab).context("sub_region(Symtab)")?,
+            sr.sub_region(SubKind::Symtab)
+                .context("sub_region(Symtab)")?,
             spec.symtab_capacity,
         )
         .map_err(|e| anyhow::anyhow!("SymbolTable::from_region: {e}"))?;
@@ -175,13 +176,7 @@ impl ShmPublisher {
     ///
     /// stamps 는 ZMQ 쪽과 동일하게 ns 로 통일된 값을 사용. 인자로 받음.
     #[inline]
-    pub fn publish_bookticker(
-        &self,
-        bt: &BookTicker,
-        event_ns: u64,
-        recv_ns: u64,
-        pub_ns: u64,
-    ) {
+    pub fn publish_bookticker(&self, bt: &BookTicker, event_ns: u64, recv_ns: u64, pub_ns: u64) {
         let Some(idx) = self.intern(bt.exchange, &bt.symbol) else {
             return;
         };
@@ -212,13 +207,7 @@ impl ShmPublisher {
 
     /// Trade 를 SHM trade ring 에 broadcast.
     #[inline]
-    pub fn publish_trade(
-        &self,
-        tr: &Trade,
-        event_ns: u64,
-        recv_ns: u64,
-        pub_ns: u64,
-    ) {
+    pub fn publish_trade(&self, tr: &Trade, event_ns: u64, recv_ns: u64, pub_ns: u64) {
         let Some(idx) = self.intern(tr.exchange, &tr.symbol) else {
             return;
         };
@@ -374,5 +363,4 @@ mod tests {
         assert_eq!(s1.bid_price, 50_000);
         assert_eq!(s2.bid_price, 2_500);
     }
-
 }

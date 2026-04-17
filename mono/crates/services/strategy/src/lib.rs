@@ -22,13 +22,13 @@
 
 #![deny(rust_2018_idioms)]
 
+mod egress_seed;
 /// V6 전략 스캐폴드 (Phase 2 A 트랙 #3).
 pub mod v6;
 /// V7 전략 스캐폴드 (Phase 2 A 트랙 #3).
 pub mod v7;
 /// V8 전략 스캐폴드 (Phase 2 A 트랙).
 pub mod v8;
-mod egress_seed;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -628,7 +628,10 @@ mod tests {
         };
 
         tx.try_send((req.clone(), seed)).unwrap();
-        assert!(matches!(tx.try_send((req.clone(), seed)), Err(OrderSendError::Full)));
+        assert!(matches!(
+            tx.try_send((req.clone(), seed)),
+            Err(OrderSendError::Full)
+        ));
 
         drop(rx);
         assert!(matches!(
@@ -665,7 +668,7 @@ mod tests {
         let handle = start(NoopStrategy::default(), ev_rx, orders_tx).unwrap();
 
         drop(ev_tx); // sender 를 닫으면 runner 는 Disconnected 로 loop 탈출.
-        // shutdown 토큰을 cancel 하지 않아도 러너가 빠져나옴.
+                     // shutdown 토큰을 cancel 하지 않아도 러너가 빠져나옴.
         handle.join().await;
     }
 
@@ -676,8 +679,7 @@ mod tests {
         let mock: Arc<MockClock> = MockClock::new(1_700_000_000_010, 10_000_000);
         let clock: Arc<dyn Clock> = mock.clone();
 
-        let handle =
-            start_with_clock(NoopStrategy::default(), ev_rx, orders_tx, clock).unwrap();
+        let handle = start_with_clock(NoopStrategy::default(), ev_rx, orders_tx, clock).unwrap();
 
         let (e, s) = bt_event();
         ev_tx.send((e, s)).unwrap();

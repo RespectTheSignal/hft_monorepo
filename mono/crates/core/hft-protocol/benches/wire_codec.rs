@@ -1,11 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use hft_protocol::{
-    decode_bookticker, decode_trade, encode_bookticker_into, encode_trade_into,
-};
 use hft_protocol::order_wire::{
     OrderRequestWire, OrderResultWire, FLAG_REDUCE_ONLY, LEVEL_CLOSE, ORDER_REQUEST_WIRE_SIZE,
     ORDER_RESULT_WIRE_SIZE, ORDER_TYPE_LIMIT, SIDE_BUY, STATUS_ACCEPTED, TIF_GTC,
 };
+use hft_protocol::{decode_bookticker, decode_trade, encode_bookticker_into, encode_trade_into};
 use hft_types::{BookTicker, ExchangeId, Price, Size, Symbol, Trade};
 
 /// 현실적인 BookTicker fixture.

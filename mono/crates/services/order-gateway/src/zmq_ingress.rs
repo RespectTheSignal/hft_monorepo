@@ -9,11 +9,9 @@ use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{Sender, TrySendError};
 use hft_config::{AppConfig, ShmBackendKind, ZmqConfig};
 use hft_exchange_api::{CancellationToken, OrderRequest, OrderSide, OrderType, TimeInForce};
-use hft_protocol::{
-    order_wire::{
-        OrderRequestWire, WireError, ORDER_REQUEST_WIRE_SIZE, ORDER_TYPE_LIMIT,
-        ORDER_TYPE_MARKET, TIF_FOK, TIF_GTC, TIF_IOC,
-    },
+use hft_protocol::order_wire::{
+    OrderRequestWire, WireError, ORDER_REQUEST_WIRE_SIZE, ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET,
+    TIF_FOK, TIF_GTC, TIF_IOC,
 };
 use hft_shm::{exchange_from_u8, Backing, LayoutSpec, Role, SharedRegion, SubKind, SymbolTable};
 use hft_telemetry::{counter_inc, CounterKey};
@@ -145,8 +143,9 @@ fn normalize_wire_request(
     let mut raw = [0u8; ORDER_REQUEST_WIRE_SIZE];
     raw.copy_from_slice(buf);
     let wire = OrderRequestWire::decode(&raw)?;
-    let exchange = exchange_from_u8(wire.exchange as u8)
-        .ok_or_else(|| IngressDecodeError::Invalid(anyhow!("invalid exchange={}", wire.exchange)))?;
+    let exchange = exchange_from_u8(wire.exchange as u8).ok_or_else(|| {
+        IngressDecodeError::Invalid(anyhow!("invalid exchange={}", wire.exchange))
+    })?;
     let (resolved_exchange, symbol_name) = symtab
         .resolve(wire.symbol_id)
         .ok_or(IngressDecodeError::UnknownSymbol(wire.symbol_id))?;
@@ -300,7 +299,9 @@ fn start_zmq_order_ingress_with_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{start_with_arc, NoopExecutor, Route, RoutingTable, DEDUP_CACHE_CAP_DEFAULT, RetryPolicy};
+    use crate::{
+        start_with_arc, NoopExecutor, RetryPolicy, Route, RoutingTable, DEDUP_CACHE_CAP_DEFAULT,
+    };
     use hft_order_egress::{OrderEgress, SubmitOutcome, ZmqOrderEgress};
     use hft_protocol::{order_request_to_order_request_wire, OrderEgressMeta, WireLevel};
     use hft_telemetry::counters_snapshot;
@@ -345,9 +346,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sym_path = dir.path().join("symtab");
         let symtab = SymbolTable::open_or_create(&sym_path, 16).unwrap();
-        let symbol_id = symtab
-            .get_or_intern(ExchangeId::Gate, "BTC_USDT")
-            .unwrap();
+        let symbol_id = symtab.get_or_intern(ExchangeId::Gate, "BTC_USDT").unwrap();
 
         let mut meta = sample_meta();
         meta.symbol_id = Some(symbol_id);
@@ -393,9 +392,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sym_path = dir.path().join("symtab");
         let symtab = Arc::new(SymbolTable::open_or_create(&sym_path, 16).unwrap());
-        let symbol_id = symtab
-            .get_or_intern(ExchangeId::Gate, "BTC_USDT")
-            .unwrap();
+        let symbol_id = symtab.get_or_intern(ExchangeId::Gate, "BTC_USDT").unwrap();
 
         let (tx, rx) = crossbeam_channel::bounded(4);
         let cancel = CancellationToken::new();
@@ -433,9 +430,14 @@ mod tests {
 
         let mut meta = sample_meta();
         meta.symbol_id = Some(symbol_id);
-        assert_eq!(sender.try_submit(&sample_req(), &meta).unwrap(), SubmitOutcome::Sent);
+        assert_eq!(
+            sender.try_submit(&sample_req(), &meta).unwrap(),
+            SubmitOutcome::Sent
+        );
 
-        let (got, meta) = rx.recv_timeout(std::time::Duration::from_millis(500)).unwrap();
+        let (got, meta) = rx
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .unwrap();
         assert_eq!(got.client_id.as_ref(), "v8-7");
         assert!(got.reduce_only);
         assert_eq!(got.client_seq, 7);
@@ -454,9 +456,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sym_path = dir.path().join("symtab");
         let symtab = Arc::new(SymbolTable::open_or_create(&sym_path, 16).unwrap());
-        let symbol_id = symtab
-            .get_or_intern(ExchangeId::Gate, "BTC_USDT")
-            .unwrap();
+        let symbol_id = symtab.get_or_intern(ExchangeId::Gate, "BTC_USDT").unwrap();
 
         let (req_tx, req_rx) = crossbeam_channel::bounded::<IngressEnvelope>(8);
         let (ack_tx, ack_rx) = crossbeam_channel::bounded::<hft_exchange_api::OrderAck>(8);
@@ -512,7 +512,10 @@ mod tests {
         let before = counter_value("order_gateway_routed_ok");
         let mut meta = sample_meta();
         meta.symbol_id = Some(symbol_id);
-        assert_eq!(sender.try_submit(&sample_req(), &meta).unwrap(), SubmitOutcome::Sent);
+        assert_eq!(
+            sender.try_submit(&sample_req(), &meta).unwrap(),
+            SubmitOutcome::Sent
+        );
 
         let ack = tokio::task::spawn_blocking(move || {
             ack_rx.recv_timeout(std::time::Duration::from_millis(1000))

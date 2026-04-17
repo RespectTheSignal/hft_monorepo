@@ -136,7 +136,11 @@ pub struct BinanceFeed {
 impl BinanceFeed {
     /// 기본 `SystemClock` + 새 `SymbolCache` 로 feed 생성.
     pub fn new(cfg: BinanceConfig) -> Self {
-        Self::with_clock_and_cache(cfg, Arc::new(SystemClock::new()), Arc::new(SymbolCache::new()))
+        Self::with_clock_and_cache(
+            cfg,
+            Arc::new(SystemClock::new()),
+            Arc::new(SymbolCache::new()),
+        )
     }
 
     /// 테스트 / MockClock 주입용.
@@ -357,7 +361,10 @@ impl BinanceFeed {
                     return Ok(());
                 }
                 Err(_) => {
-                    warn!(timeout_s = self.cfg.read_timeout_secs, "binance read timeout");
+                    warn!(
+                        timeout_s = self.cfg.read_timeout_secs,
+                        "binance read timeout"
+                    );
                     return Err(anyhow::anyhow!("read timeout"));
                 }
             };
@@ -450,7 +457,11 @@ struct AggTradeData<'a> {
     #[serde(borrow)]
     s: &'a str,
     /// Aggregate trade ID. 서버에서 언제나 정수로 내려오지만 방어적으로 lenient opt.
-    #[serde(default, rename = "a", deserialize_with = "deserialize_i64_lenient_opt")]
+    #[serde(
+        default,
+        rename = "a",
+        deserialize_with = "deserialize_i64_lenient_opt"
+    )]
     agg_id: Option<i64>,
     /// 체결 가격.
     #[serde(rename = "p", deserialize_with = "deserialize_f64_lenient")]
@@ -459,10 +470,18 @@ struct AggTradeData<'a> {
     #[serde(rename = "q", deserialize_with = "deserialize_f64_lenient")]
     qty: f64,
     /// Trade time (ms).
-    #[serde(default, rename = "T", deserialize_with = "deserialize_i64_lenient_opt")]
+    #[serde(
+        default,
+        rename = "T",
+        deserialize_with = "deserialize_i64_lenient_opt"
+    )]
     trade_time_ms: Option<i64>,
     /// Event time (ms). `T` 누락 시 fallback.
-    #[serde(default, rename = "E", deserialize_with = "deserialize_i64_lenient_opt")]
+    #[serde(
+        default,
+        rename = "E",
+        deserialize_with = "deserialize_i64_lenient_opt"
+    )]
     event_time_ms: Option<i64>,
     /// buyer is maker — true 면 seller aggressor.
     #[serde(default, rename = "m")]
@@ -548,7 +567,9 @@ fn dispatch_primary_bytes(
     };
 
     match kind_hint {
-        EventKind::BookTicker => parse_and_emit_book_ticker(payload, ws_recv, raw_to_sym, cache, emit),
+        EventKind::BookTicker => {
+            parse_and_emit_book_ticker(payload, ws_recv, raw_to_sym, cache, emit)
+        }
         EventKind::AggTrade => parse_and_emit_trade(payload, ws_recv, raw_to_sym, cache, emit),
         EventKind::Unknown => {
             trace!("binance combined stream kind unrecognized — drop");
@@ -630,12 +651,13 @@ fn parse_and_emit_trade(
 
     // `m=true` → seller aggressor → size 음수.
     let qty = at.qty;
-    let signed_size = if at.buyer_is_maker.unwrap_or(false) { -qty } else { qty };
+    let signed_size = if at.buyer_is_maker.unwrap_or(false) {
+        -qty
+    } else {
+        qty
+    };
 
-    let trade_time_ms = at
-        .trade_time_ms
-        .or(at.event_time_ms)
-        .unwrap_or(0);
+    let trade_time_ms = at.trade_time_ms.or(at.event_time_ms).unwrap_or(0);
 
     let trade = Trade {
         exchange: ExchangeId::Binance,
@@ -676,7 +698,9 @@ enum EventKind {
 /// combined stream name ("btcusdt@bookTicker") → [`EventKind`].
 #[inline]
 fn classify_stream(stream: Option<&str>) -> EventKind {
-    let Some(s) = stream else { return EventKind::Unknown };
+    let Some(s) = stream else {
+        return EventKind::Unknown;
+    };
     // 접미사 비교: `@bookTicker` / `@aggTrade`. 대소문자 민감 (Binance 는 camelCase 고정).
     if s.ends_with("@bookTicker") {
         EventKind::BookTicker
@@ -817,7 +841,10 @@ mod tests {
         let bytes = text.into_bytes();
         dispatch_primary_bytes(
             &bytes,
-            Stamp { wall_ms: 10, mono_ns: 20 },
+            Stamp {
+                wall_ms: 10,
+                mono_ns: 20,
+            },
             &raw_map,
             &cache,
             &emit,
@@ -853,7 +880,10 @@ mod tests {
         let bytes = text.into_bytes();
         dispatch_primary_bytes(
             &bytes,
-            Stamp { wall_ms: 10, mono_ns: 20 },
+            Stamp {
+                wall_ms: 10,
+                mono_ns: 20,
+            },
             &raw_map,
             &cache,
             &emit,
@@ -892,10 +922,9 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, cnt) = count_emitter();
 
-        let bytes =
-            r#"{"e":"depthUpdate","s":"BTCUSDT","b":[["1","1"]],"a":[["2","2"]]}"#
-                .as_bytes()
-                .to_vec();
+        let bytes = r#"{"e":"depthUpdate","s":"BTCUSDT","b":[["1","1"]],"a":[["2","2"]]}"#
+            .as_bytes()
+            .to_vec();
         dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         assert_eq!(cnt.load(Ordering::SeqCst), 0);
@@ -931,10 +960,9 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let bytes =
-            r#"{"e":"bookTicker","s":"BTCUSDT","b":"1","B":"2","a":"3","A":"4","E":999}"#
-                .as_bytes()
-                .to_vec();
+        let bytes = r#"{"e":"bookTicker","s":"BTCUSDT","b":"1","B":"2","a":"3","A":"4","E":999}"#
+            .as_bytes()
+            .to_vec();
         dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
@@ -1081,7 +1109,10 @@ mod tests {
         let bytes = trade_direct_sell_text().into_bytes();
         dispatch_primary_bytes(
             &bytes,
-            Stamp { wall_ms: 7, mono_ns: 11 },
+            Stamp {
+                wall_ms: 7,
+                mono_ns: 11,
+            },
             &raw_map,
             &cache,
             &emit,
@@ -1195,10 +1226,9 @@ mod tests {
         let raw_map = mk_raw_map(&cache, &["BTC_USDT"]);
         let (emit, buf) = capture_emitter();
 
-        let bytes =
-            r#"{"e":"aggTrade","E":10,"a":1,"s":"BTCUSDT","p":42,"q":0.5,"T":10,"m":true}"#
-                .as_bytes()
-                .to_vec();
+        let bytes = r#"{"e":"aggTrade","E":10,"a":1,"s":"BTCUSDT","p":42,"q":0.5,"T":10,"m":true}"#
+            .as_bytes()
+            .to_vec();
         dispatch_primary_bytes(&bytes, Stamp::default(), &raw_map, &cache, &emit);
 
         let events = buf.lock().unwrap();
@@ -1334,8 +1364,7 @@ mod tests {
 
     #[test]
     fn binance_feed_is_trait_object() {
-        let _boxed: Arc<dyn ExchangeFeed> =
-            Arc::new(BinanceFeed::new(BinanceConfig::default()));
+        let _boxed: Arc<dyn ExchangeFeed> = Arc::new(BinanceFeed::new(BinanceConfig::default()));
     }
 
     #[tokio::test]

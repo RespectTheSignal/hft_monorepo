@@ -98,8 +98,7 @@ impl OrderRingWriter {
                         _pad_c: [0; 56],
                     },
                 );
-                let frames =
-                    (hdr_ptr as *mut u8).add(std::mem::size_of::<OrderRingHeader>());
+                let frames = (hdr_ptr as *mut u8).add(std::mem::size_of::<OrderRingHeader>());
                 std::ptr::write_bytes(frames, 0, capacity as usize * elem);
             } else {
                 validate_header(&*hdr_ptr, capacity, elem)?;
@@ -156,8 +155,7 @@ impl OrderRingWriter {
 
     unsafe fn frame_mut_ptr(&self, idx: u64) -> *mut OrderFrame {
         let base = self.region.raw_base();
-        let frames =
-            unsafe { base.add(std::mem::size_of::<OrderRingHeader>()) } as *mut OrderFrame;
+        let frames = unsafe { base.add(std::mem::size_of::<OrderRingHeader>()) } as *mut OrderFrame;
         unsafe { frames.add(idx as usize) }
     }
 }
@@ -392,8 +390,8 @@ mod tests {
 
     #[test]
     fn concurrent_spsc_delivers_everything() {
-        use std::sync::Arc;
         use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
         use std::thread;
 
         let dir = tempdir().unwrap();

@@ -92,15 +92,13 @@ pub struct RecordedSubmit {
     pub meta: OwnedOrderEgressMeta,
 }
 
-fn record_submit(
-    log: &Mutex<Vec<RecordedSubmit>>,
-    req: &OrderRequest,
-    meta: &OrderEgressMeta<'_>,
-) {
-    log.lock().expect("record lock poisoned").push(RecordedSubmit {
-        req: req.clone(),
-        meta: OwnedOrderEgressMeta::from(meta),
-    });
+fn record_submit(log: &Mutex<Vec<RecordedSubmit>>, req: &OrderRequest, meta: &OrderEgressMeta<'_>) {
+    log.lock()
+        .expect("record lock poisoned")
+        .push(RecordedSubmit {
+            req: req.clone(),
+            meta: OwnedOrderEgressMeta::from(meta),
+        });
 }
 
 /// 항상 성공하는 테스트용 egress.

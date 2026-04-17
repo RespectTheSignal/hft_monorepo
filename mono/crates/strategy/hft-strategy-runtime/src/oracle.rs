@@ -39,7 +39,10 @@ impl AccountMembership {
         symbols: impl IntoIterator<Item = S>,
     ) -> Self {
         use ahash::AHashSet;
-        let set: AHashSet<String> = symbols.into_iter().map(|s| s.as_ref().to_string()).collect();
+        let set: AHashSet<String> = symbols
+            .into_iter()
+            .map(|s| s.as_ref().to_string())
+            .collect();
         Self::new(move |sym| set.contains(sym))
     }
 

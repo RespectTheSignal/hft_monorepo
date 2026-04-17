@@ -179,10 +179,11 @@ async fn heartbeat_keeps_drain_alive() {
     );
 
     event_tx.send(sample_event()).unwrap();
-    let req = tokio::task::spawn_blocking(move || submitted_rx.recv_timeout(Duration::from_millis(500)))
-        .await
-        .unwrap()
-        .expect("drain should forward live order");
+    let req =
+        tokio::task::spawn_blocking(move || submitted_rx.recv_timeout(Duration::from_millis(500)))
+            .await
+            .unwrap()
+            .expect("drain should forward live order");
 
     assert_eq!(req.client_seq, 1);
     assert_eq!(req.origin_ts_ns, clock.epoch_ns());
@@ -221,10 +222,14 @@ async fn stale_gateway_drops_orders() {
     );
 
     event_tx.send(sample_event()).unwrap();
-    let recv = tokio::task::spawn_blocking(move || submitted_rx.recv_timeout(Duration::from_millis(500)))
-        .await
-        .unwrap();
-    assert!(recv.is_err(), "stale gateway should drop order before submit");
+    let recv =
+        tokio::task::spawn_blocking(move || submitted_rx.recv_timeout(Duration::from_millis(500)))
+            .await
+            .unwrap();
+    assert!(
+        recv.is_err(),
+        "stale gateway should drop order before submit"
+    );
 
     drop(event_tx);
     strategy_handle.shutdown();
@@ -246,7 +251,9 @@ async fn gateway_reject_reaches_strategy() {
     let mut routing = RoutingTable::new();
     routing.insert(
         ExchangeId::Gate,
-        Route::Rust(Arc::new(RejectingExecutor { id: ExchangeId::Gate })),
+        Route::Rust(Arc::new(RejectingExecutor {
+            id: ExchangeId::Gate,
+        })),
     );
     let gateway = start_with_arc(
         Arc::new(routing),
@@ -259,16 +266,18 @@ async fn gateway_reject_reaches_strategy() {
     .unwrap();
 
     event_tx.send(sample_event()).unwrap();
-    let order = tokio::task::spawn_blocking(move || orders_rx.recv_timeout(Duration::from_millis(500)))
-        .await
-        .unwrap()
-        .expect("strategy emitted order");
+    let order =
+        tokio::task::spawn_blocking(move || orders_rx.recv_timeout(Duration::from_millis(500)))
+            .await
+            .unwrap()
+            .expect("strategy emitted order");
     req_tx.send(ingress_from_order(order)).unwrap();
 
-    let wire = tokio::task::spawn_blocking(move || result_rx.recv_timeout(Duration::from_millis(1000)))
-        .await
-        .unwrap()
-        .expect("gateway emitted rejected result wire");
+    let wire =
+        tokio::task::spawn_blocking(move || result_rx.recv_timeout(Duration::from_millis(1000)))
+            .await
+            .unwrap()
+            .expect("gateway emitted rejected result wire");
 
     assert_eq!(wire.client_seq, 1);
     assert_eq!(wire.status, STATUS_REJECTED);

@@ -69,11 +69,11 @@ use hft_exchange_rest::{
     headers_from_pairs, hmac_sha512_hex, now_epoch_ms, now_epoch_s, sha512_hex, Credentials,
     RestClient,
 };
-use hft_telemetry::{counter_inc, CounterKey};
 use hft_strategy_runtime::{
     ContractMeta, PositionCache, PositionProvider, PositionSnapshot, SymbolMetaCache,
     SymbolMetaProvider, SymbolPosition,
 };
+use hft_telemetry::{counter_inc, CounterKey};
 use hft_types::Symbol;
 use reqwest::Method;
 use serde::{Deserialize, Deserializer};
@@ -154,8 +154,9 @@ impl GateAccountClient {
         let headers = reqwest::header::HeaderMap::new();
         let resp = self.http.send(Method::GET, &url, &headers, None).await?;
         let body = resp.into_ok_body()?;
-        serde_json::from_str::<T>(&body)
-            .map_err(|e| ApiError::Decode(format!("{path} body: {e} / raw={}", truncate(&body, 256))))
+        serde_json::from_str::<T>(&body).map_err(|e| {
+            ApiError::Decode(format!("{path} body: {e} / raw={}", truncate(&body, 256)))
+        })
     }
 
     /// 서명 GET. Gate v4 canonical string == executor 와 동일.
@@ -926,10 +927,7 @@ mod tests {
         assert_eq!(snap.total_long_usdt, 1234.5);
         assert_eq!(snap.total_short_usdt, 980.0);
         assert_eq!(snap.by_symbol.len(), 2);
-        let btc = snap
-            .by_symbol
-            .get(&Symbol::new("BTC_USDT"))
-            .expect("btc");
+        let btc = snap.by_symbol.get(&Symbol::new("BTC_USDT")).expect("btc");
         assert_eq!(btc.notional_usdt, 1234.5);
         assert_eq!(btc.update_time_sec, 1_713_100_000);
         let eth = snap.by_symbol.get(&Symbol::new("ETH_USDT")).unwrap();
@@ -992,10 +990,7 @@ mod tests {
 
     #[test]
     fn builder_requires_at_least_one_target() {
-        let client = GateAccountClient::new(
-            Credentials::new("k", "s"),
-            RestClient::new().unwrap(),
-        );
+        let client = GateAccountClient::new(Credentials::new("k", "s"), RestClient::new().unwrap());
         let err = AccountPoller::builder(client)
             .meta_period(Duration::from_secs(1))
             .positions_period(Duration::from_secs(1))
@@ -1008,10 +1003,7 @@ mod tests {
 
     #[test]
     fn builder_rejects_zero_period() {
-        let client = GateAccountClient::new(
-            Credentials::new("k", "s"),
-            RestClient::new().unwrap(),
-        );
+        let client = GateAccountClient::new(Credentials::new("k", "s"), RestClient::new().unwrap());
         let err = AccountPoller::builder(client)
             .meta(Arc::new(SymbolMetaCache::new()))
             .meta_period(Duration::from_secs(0))

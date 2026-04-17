@@ -208,8 +208,7 @@ pub fn handle_chance<O: PositionOracle + ?Sized>(
 
     let is_buy = chance.side.is_buy();
     let pos_usdt = exposure.this_symbol_usdt;
-    let is_same_side =
-        (pos_usdt > 0.0 && is_buy) || (pos_usdt < 0.0 && !is_buy);
+    let is_same_side = (pos_usdt > 0.0 && is_buy) || (pos_usdt < 0.0 && !is_buy);
 
     // 큰 반대포지션이면 close 주문 허용 플래그
     let mut bypass_safe_limit_close = chance.bypass_safe_limit_close;
@@ -273,9 +272,15 @@ pub fn handle_chance<O: PositionOracle + ?Sized>(
     // 6) net_exposure ratio 체크 (open 주문만)
     if !chance.level.is_close() {
         let (expected_long, expected_short) = if is_buy {
-            (exposure.total_long_usdt + final_usdt, exposure.total_short_usdt)
+            (
+                exposure.total_long_usdt + final_usdt,
+                exposure.total_short_usdt,
+            )
         } else {
-            (exposure.total_long_usdt, exposure.total_short_usdt + final_usdt)
+            (
+                exposure.total_long_usdt,
+                exposure.total_short_usdt + final_usdt,
+            )
         };
         let expected_net = expected_long - expected_short;
         let denom = account_balance * risk_cfg.leverage;
@@ -296,9 +301,7 @@ pub fn handle_chance<O: PositionOracle + ?Sized>(
     }
 
     // 7) symbol max position 체크 (same-side 가 문제)
-    if is_same_side
-        && pos_usdt.abs() + final_usdt > max_position_size
-        && !bypass_max_position_size
+    if is_same_side && pos_usdt.abs() + final_usdt > max_position_size && !bypass_max_position_size
     {
         return None;
     }
@@ -400,16 +403,27 @@ mod tests {
     fn not_account_symbol_rejected() {
         let oracle = MockOracle::new();
         let c = chance(OrderSide::Buy, OrderLevel::LimitOpen);
-        oracle.set(&c.symbol, exp_with_last(false, Some(LastOrder {
-            level: OrderLevel::LimitOpen,
-            side: OrderSide::Buy,
-            price: 99.0,
-            timestamp_ms: 0,
-        })));
+        oracle.set(
+            &c.symbol,
+            exp_with_last(
+                false,
+                Some(LastOrder {
+                    level: OrderLevel::LimitOpen,
+                    side: OrderSide::Buy,
+                    price: 99.0,
+                    timestamp_ms: 0,
+                }),
+            ),
+        );
         let e = oracle.snapshot(&c.symbol);
         let r = handle_chance(
-            &oracle, &c, &ts_basic(), &RiskConfig::default(),
-            100.0, 0.0, 1000,
+            &oracle,
+            &c,
+            &ts_basic(),
+            &RiskConfig::default(),
+            100.0,
+            0.0,
+            1000,
             TimeRestrictionJitter::midpoint(&ts_basic()),
             &e,
         );
@@ -422,8 +436,13 @@ mod tests {
         let c = chance(OrderSide::Buy, OrderLevel::LimitOpen);
         let e = exp_with_last(true, None);
         let r = handle_chance(
-            &oracle, &c, &ts_basic(), &RiskConfig::default(),
-            100.0, 0.0, 1000,
+            &oracle,
+            &c,
+            &ts_basic(),
+            &RiskConfig::default(),
+            100.0,
+            0.0,
+            1000,
             TimeRestrictionJitter::midpoint(&ts_basic()),
             &e,
         );
@@ -434,16 +453,24 @@ mod tests {
     fn limit_close_wrong_direction_rejected() {
         let oracle = MockOracle::new();
         let c = chance(OrderSide::Buy, OrderLevel::LimitClose);
-        let mut e = exp_with_last(true, Some(LastOrder {
-            level: OrderLevel::LimitOpen,
-            side: OrderSide::Sell,
-            price: 99.0,
-            timestamp_ms: 0,
-        }));
+        let mut e = exp_with_last(
+            true,
+            Some(LastOrder {
+                level: OrderLevel::LimitOpen,
+                side: OrderSide::Sell,
+                price: 99.0,
+                timestamp_ms: 0,
+            }),
+        );
         e.this_symbol_usdt = 100.0; // 롱 포지션
         let r = handle_chance(
-            &oracle, &c, &ts_basic(), &RiskConfig::default(),
-            100.0, 0.0, 1000,
+            &oracle,
+            &c,
+            &ts_basic(),
+            &RiskConfig::default(),
+            100.0,
+            0.0,
+            1000,
             TimeRestrictionJitter::midpoint(&ts_basic()),
             &e,
         );
@@ -455,15 +482,23 @@ mod tests {
         let oracle = MockOracle::new();
         let c = chance(OrderSide::Buy, OrderLevel::LimitOpen);
         // 동일 level+side+price, 250ms 전에 주문 → default jitter 중앙값 500ms 이내
-        let e = exp_with_last(true, Some(LastOrder {
-            level: OrderLevel::LimitOpen,
-            side: OrderSide::Buy,
-            price: 100.0,
-            timestamp_ms: 750,
-        }));
+        let e = exp_with_last(
+            true,
+            Some(LastOrder {
+                level: OrderLevel::LimitOpen,
+                side: OrderSide::Buy,
+                price: 100.0,
+                timestamp_ms: 750,
+            }),
+        );
         let r = handle_chance(
-            &oracle, &c, &ts_basic(), &RiskConfig::default(),
-            100.0, 0.0, 1000,
+            &oracle,
+            &c,
+            &ts_basic(),
+            &RiskConfig::default(),
+            100.0,
+            0.0,
+            1000,
             TimeRestrictionJitter::midpoint(&ts_basic()),
             &e,
         );
@@ -475,15 +510,23 @@ mod tests {
         let oracle = MockOracle::new();
         let c = chance(OrderSide::Buy, OrderLevel::LimitOpen);
         // 과거 주문 충분히 오래된 상태
-        let e = exp_with_last(true, Some(LastOrder {
-            level: OrderLevel::LimitOpen,
-            side: OrderSide::Sell,
-            price: 0.0,
-            timestamp_ms: 0,
-        }));
+        let e = exp_with_last(
+            true,
+            Some(LastOrder {
+                level: OrderLevel::LimitOpen,
+                side: OrderSide::Sell,
+                price: 0.0,
+                timestamp_ms: 0,
+            }),
+        );
         let r = handle_chance(
-            &oracle, &c, &ts_basic(), &RiskConfig::default(),
-            100.0, 0.0, 10_000,
+            &oracle,
+            &c,
+            &ts_basic(),
+            &RiskConfig::default(),
+            100.0,
+            0.0,
+            10_000,
             TimeRestrictionJitter::midpoint(&ts_basic()),
             &e,
         )
@@ -500,17 +543,28 @@ mod tests {
     fn net_exposure_ratio_caps_buy() {
         let oracle = MockOracle::new();
         let c = chance(OrderSide::Buy, OrderLevel::LimitOpen);
-        let mut e = exp_with_last(true, Some(LastOrder {
-            level: OrderLevel::LimitOpen,
-            side: OrderSide::Sell,
-            price: 0.0,
-            timestamp_ms: 0,
-        }));
+        let mut e = exp_with_last(
+            true,
+            Some(LastOrder {
+                level: OrderLevel::LimitOpen,
+                side: OrderSide::Sell,
+                price: 0.0,
+                timestamp_ms: 0,
+            }),
+        );
         e.total_long_usdt = 1_000_000.0; // 이미 매우 큼
-        let risk = RiskConfig { leverage: 1.0, max_position_side_ratio: 0.5 };
+        let risk = RiskConfig {
+            leverage: 1.0,
+            max_position_side_ratio: 0.5,
+        };
         let r = handle_chance(
-            &oracle, &c, &ts_basic(), &risk,
-            100.0, 0.0, 10_000,
+            &oracle,
+            &c,
+            &ts_basic(),
+            &risk,
+            100.0,
+            0.0,
+            10_000,
             TimeRestrictionJitter::midpoint(&ts_basic()),
             &e,
         );

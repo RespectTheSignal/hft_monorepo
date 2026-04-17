@@ -75,7 +75,10 @@ where
 
     loop {
         if cancel.is_cancelled() {
-            info!(service = service_name, "supervisor cancelled before service start");
+            info!(
+                service = service_name,
+                "supervisor cancelled before service start"
+            );
             return Ok(SupervisorExit::Clean);
         }
 
@@ -152,12 +155,9 @@ mod tests {
     async fn test_clean_exit() {
         let _guard = TEST_LOCK.lock().await;
         let cancel = CancellationToken::new();
-        let out = run_with_restart(
-            "test-clean",
-            RestartConfig::default(),
-            cancel,
-            || async { Ok(()) },
-        )
+        let out = run_with_restart("test-clean", RestartConfig::default(), cancel, || async {
+            Ok(())
+        })
         .await
         .expect("supervisor");
         assert_eq!(out, SupervisorExit::Clean);

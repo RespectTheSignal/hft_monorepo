@@ -116,8 +116,10 @@ impl MockClock {
     /// wall clock 을 `delta_ms` 만큼 전진. monotonic 도 같이 전진 (ms → ns).
     pub fn advance_ms(&self, delta_ms: i64) {
         self.ms.fetch_add(delta_ms, Ordering::SeqCst);
-        self.nanos
-            .fetch_add((delta_ms as u64).saturating_mul(1_000_000), Ordering::SeqCst);
+        self.nanos.fetch_add(
+            (delta_ms as u64).saturating_mul(1_000_000),
+            Ordering::SeqCst,
+        );
     }
 
     /// monotonic 만 전진 (테스트에서 wall clock 과 monotonic 이 다른 속도로 흘러야 할 때).
@@ -210,13 +212,34 @@ impl LatencyStamps {
     /// 빈 stamps — 모두 0.
     pub const fn new() -> Self {
         Self {
-            exchange_server: Stamp { wall_ms: 0, mono_ns: 0 },
-            ws_received: Stamp { wall_ms: 0, mono_ns: 0 },
-            serialized: Stamp { wall_ms: 0, mono_ns: 0 },
-            pushed: Stamp { wall_ms: 0, mono_ns: 0 },
-            published: Stamp { wall_ms: 0, mono_ns: 0 },
-            subscribed: Stamp { wall_ms: 0, mono_ns: 0 },
-            consumed: Stamp { wall_ms: 0, mono_ns: 0 },
+            exchange_server: Stamp {
+                wall_ms: 0,
+                mono_ns: 0,
+            },
+            ws_received: Stamp {
+                wall_ms: 0,
+                mono_ns: 0,
+            },
+            serialized: Stamp {
+                wall_ms: 0,
+                mono_ns: 0,
+            },
+            pushed: Stamp {
+                wall_ms: 0,
+                mono_ns: 0,
+            },
+            published: Stamp {
+                wall_ms: 0,
+                mono_ns: 0,
+            },
+            subscribed: Stamp {
+                wall_ms: 0,
+                mono_ns: 0,
+            },
+            consumed: Stamp {
+                wall_ms: 0,
+                mono_ns: 0,
+            },
         }
     }
 
@@ -329,8 +352,14 @@ mod tests {
 
     #[test]
     fn stamp_elapsed_saturates() {
-        let a = Stamp { wall_ms: 100, mono_ns: 1_000 };
-        let b = Stamp { wall_ms: 200, mono_ns: 500 };
+        let a = Stamp {
+            wall_ms: 100,
+            mono_ns: 1_000,
+        };
+        let b = Stamp {
+            wall_ms: 200,
+            mono_ns: 500,
+        };
         // b 가 a 보다 앞선 mono_ns 면 0 으로 saturate
         assert_eq!(b.elapsed_ns_since(a), 0);
     }

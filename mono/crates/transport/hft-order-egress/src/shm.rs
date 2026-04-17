@@ -32,7 +32,11 @@ impl OrderEgress for ShmOrderEgress {
         req: &OrderRequest,
         meta: &OrderEgressMeta<'_>,
     ) -> Result<SubmitOutcome, SubmitError> {
-        let symbol_idx = match self.client.symtab().get_or_intern(req.exchange, req.symbol.as_str()) {
+        let symbol_idx = match self
+            .client
+            .symtab()
+            .get_or_intern(req.exchange, req.symbol.as_str())
+        {
             Ok(idx) => idx,
             Err(e) => {
                 counter_inc(CounterKey::ShmInternFail);

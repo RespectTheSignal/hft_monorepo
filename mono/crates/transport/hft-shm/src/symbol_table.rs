@@ -21,9 +21,7 @@ use hft_types::ExchangeId;
 use parking_lot::Mutex;
 
 use crate::error::{ShmError, ShmResult};
-use crate::layout::{
-    SymbolEntry, SymbolTableHeader, SHM_VERSION, SYMBOL_MAX_LEN, SYMTAB_MAGIC,
-};
+use crate::layout::{SymbolEntry, SymbolTableHeader, SHM_VERSION, SYMBOL_MAX_LEN, SYMTAB_MAGIC};
 use crate::mmap::ShmRegion;
 
 /// 통계 — 모니터링용.
@@ -87,8 +85,7 @@ impl SymbolTable {
                         _pad_b: [0; 32],
                     },
                 );
-                let entries =
-                    (hdr_ptr as *mut u8).add(std::mem::size_of::<SymbolTableHeader>());
+                let entries = (hdr_ptr as *mut u8).add(std::mem::size_of::<SymbolTableHeader>());
                 std::ptr::write_bytes(entries, 0, capacity as usize * elem);
                 capacity
             } else {
