@@ -1,0 +1,18 @@
+[package]
+name = "hft-common"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "hft_common"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+hft-telemetry = { workspace = true }

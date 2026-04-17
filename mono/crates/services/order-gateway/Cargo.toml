@@ -28,6 +28,7 @@ hft-ipc = { workspace = true }
 hft-config = { workspace = true }
 hft-telemetry = { workspace = true }
 hft-time = { workspace = true }
+hft-common = { workspace = true }
 hft-shm = { workspace = true }
 hft-protocol = { workspace = true }
 hft-zmq = { workspace = true }

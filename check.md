@@ -199,7 +199,7 @@
 - [x] `--interval` (default 10ms) → `StrategyRunner::with_tick_interval` ✅
 - [x] `--binance-latency` / `--base-latency` (default 200ms) → `TradeSettings::binance_last_book_ticker_latency_ms` ✅
 - [x] `--gate-latency` (default 100ms) → `TradeSettings::gate_last_book_ticker_latency_ms` ✅
-- [ ] `--restart-interval` (default 3600s) → `services/strategy::supervisor` **TODO**: Phase 2 E 이후.
+- [x] `--restart-interval` (default 3600s) → `services/strategy::supervisor`
 - [x] `--initial-sleep` (default 100ms) → `services/strategy/src/main.rs::env_duration_ms("HFT_STRATEGY_INITIAL_SLEEP_MS", 100)` ✅
 - [x] `--base-exchange` / `$BASE_EXCHANGE` (default `binance`) → `TradeSettings::base_exchange` ✅
 - [x] `$SUPABASE_URL`, `$SUPABASE_KEY` → `hft-strategy-config::StrategyConfigLoader` (async reqwest + ArcSwap) ✅
@@ -289,7 +289,7 @@ Funding / EMA / misc: ✅
 ### 3.9 Health / Supervisor — **TODO** (Phase 2 E)
 - [ ] `DEBUGGING_ORDERS = [{contract:"BTC_USDT", price:"60000"}, {contract:"ETH_USDT", price:"2000"}]` — healthcheck 테스트 주문 → `services/strategy::healthcheck`
 - [ ] `strategy_status` supabase table upsert → `services/strategy::status`
-- [ ] restart loop: every `restart_interval` seconds → `services/strategy::supervisor`
+- [x] restart loop: every `restart_interval` seconds → `services/strategy::supervisor`
 - [ ] metrics files per-strategy in `$METRICS_DIR` → `hft-telemetry::metrics_writer`
 
 ---

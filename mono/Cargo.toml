@@ -10,6 +10,9 @@ members = [
     # observability
     "crates/obs/hft-telemetry",
 
+    # infra
+    "crates/infra/hft-common",
+
     # transport
     "crates/transport/hft-zmq",
     "crates/transport/hft-shm",
@@ -153,6 +156,7 @@ hft-protocol = { path = "crates/core/hft-protocol" }
 hft-config = { path = "crates/core/hft-config" }
 hft-time = { path = "crates/core/hft-time" }
 hft-telemetry = { path = "crates/obs/hft-telemetry" }
+hft-common = { path = "crates/infra/hft-common" }
 hft-zmq = { path = "crates/transport/hft-zmq" }
 hft-shm = { path = "crates/transport/hft-shm" }
 hft-ipc = { path = "crates/transport/hft-ipc" }

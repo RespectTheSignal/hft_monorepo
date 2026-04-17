@@ -43,6 +43,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{Receiver, Sender};
+use hft_common::supervisor::{run_with_restart, RestartConfig, SupervisorExit};
 use hft_exchange_api::{CancellationToken, OrderRequest};
 use hft_exchange_gate::{AccountPoller, BalanceSlot, GateAccountClient, PollerHandle};
 use hft_order_egress::{
@@ -831,20 +832,17 @@ async fn run_noop_idle(main_cancel: CancellationToken) -> Result<()> {
 // Entry
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn run() -> Result<()> {
-    let cfg = hft_config::load_all().map_err(|e| anyhow!("config load: {e}"))?;
-    let _tele = init_telemetry(&cfg)?;
-
-    let variant = Variant::from_env();
+async fn run_inner(
+    cfg: Arc<AppConfig>,
+    variant: Variant,
+    main_cancel: CancellationToken,
+) -> Result<()> {
     info!(
         target: "strategy::main",
         service = %cfg.service_name,
         variant = ?variant,
         "strategy starting"
     );
-
-    let main_cancel = CancellationToken::new();
-    install_signal_handler(main_cancel.clone());
 
     match variant {
         Variant::Noop => run_noop_idle(main_cancel).await?,
@@ -861,11 +859,52 @@ async fn run() -> Result<()> {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> ExitCode {
-    match run().await {
-        Ok(()) => ExitCode::SUCCESS,
+    let cfg = match hft_config::load_all() {
+        Ok(cfg) => cfg,
         Err(e) => {
-            eprintln!("[strategy] fatal: {e:#}");
-            error!(error = %format!("{e:#}"), "strategy fatal");
+            eprintln!("[strategy] config load failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let _tele = match init_telemetry(&cfg) {
+        Ok(tele) => tele,
+        Err(e) => {
+            eprintln!("[strategy] telemetry init failed: {e:#}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let variant = Variant::from_env();
+    let main_cancel = CancellationToken::new();
+    install_signal_handler(main_cancel.clone());
+
+    match run_with_restart(
+        "strategy",
+        RestartConfig::default(),
+        main_cancel.clone(),
+        {
+            let cfg = cfg.clone();
+            move || {
+                let cfg = cfg.clone();
+                let cancel = main_cancel.clone();
+                async move { run_inner(cfg, variant, cancel).await }
+            }
+        },
+    )
+    .await
+    {
+        Ok(SupervisorExit::Clean) => ExitCode::SUCCESS,
+        Ok(SupervisorExit::MaxRetriesExceeded {
+            attempts,
+            last_error,
+        }) => {
+            eprintln!("[strategy] gave up after {attempts} failures: {last_error}");
+            ExitCode::from(1)
+        }
+        Err(e) => {
+            eprintln!("[strategy] supervisor fatal: {e:#}");
+            error!(error = %format!("{e:#}"), "strategy supervisor fatal");
             ExitCode::from(1)
         }
     }

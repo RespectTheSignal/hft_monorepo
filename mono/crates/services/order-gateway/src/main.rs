@@ -39,6 +39,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
+use hft_common::supervisor::{run_with_restart, RestartConfig, SupervisorExit};
 use hft_exchange_api::{CancellationToken, ExchangeExecutor};
 use hft_protocol::order_wire::{OrderResultWire, ORDER_RESULT_WIRE_SIZE};
 use hft_exchange_rest::Credentials;
@@ -450,13 +451,7 @@ fn spawn_heartbeat_emitter(
 }
 
 /// 실제 run 로직. 에러는 main 에서 exitcode 로 변환.
-async fn run() -> Result<()> {
-    // 1) config
-    let cfg = hft_config::load_all().map_err(|e| anyhow!("config load: {e}"))?;
-
-    // 2) telemetry — main scope 까지 살아있어야 OTel flush 정상 동작.
-    let _tele = init_telemetry(&cfg)?;
-
+async fn run_inner(cfg: Arc<AppConfig>, main_cancel: CancellationToken) -> Result<()> {
     info!(
         service = %cfg.service_name,
         exchanges = cfg.exchanges.len(),
@@ -527,11 +522,20 @@ async fn run() -> Result<()> {
         }
     };
 
-    // 7) signal handler (CancellationToken 만 clone 해서 전달 — handle 은 join 으로 소비).
-    install_signal_handler(handle.cancel.clone());
+    // 7) 상위 signal token 이 trip 되면 router cancel 로 전달한다.
+    let cancel_bridge = {
+        let main_cancel = main_cancel.clone();
+        let router_cancel = handle.cancel.clone();
+        tokio::spawn(async move {
+            main_cancel.cancelled().await;
+            router_cancel.cancel();
+        })
+    };
 
     // 8) router task 종료까지 blocking.
     handle.join().await;
+    cancel_bridge.abort();
+    let _ = cancel_bridge.await;
 
     // 9) SHM subscriber 정리.
     if let Some(h) = shm_handle {
@@ -555,11 +559,51 @@ async fn run() -> Result<()> {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> ExitCode {
-    match run().await {
-        Ok(()) => ExitCode::SUCCESS,
+    let cfg = match hft_config::load_all() {
+        Ok(cfg) => cfg,
         Err(e) => {
-            eprintln!("[order-gateway] fatal: {e:#}");
-            error!(error = %format!("{e:#}"), "order-gateway fatal error");
+            eprintln!("[order-gateway] config load failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let _tele = match init_telemetry(&cfg) {
+        Ok(tele) => tele,
+        Err(e) => {
+            eprintln!("[order-gateway] telemetry init failed: {e:#}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let main_cancel = CancellationToken::new();
+    install_signal_handler(main_cancel.clone());
+
+    match run_with_restart(
+        "order-gateway",
+        RestartConfig::default(),
+        main_cancel.clone(),
+        {
+            let cfg = cfg.clone();
+            move || {
+                let cfg = cfg.clone();
+                let cancel = main_cancel.clone();
+                async move { run_inner(cfg, cancel).await }
+            }
+        },
+    )
+    .await
+    {
+        Ok(SupervisorExit::Clean) => ExitCode::SUCCESS,
+        Ok(SupervisorExit::MaxRetriesExceeded {
+            attempts,
+            last_error,
+        }) => {
+            eprintln!("[order-gateway] gave up after {attempts} failures: {last_error}");
+            ExitCode::from(1)
+        }
+        Err(e) => {
+            eprintln!("[order-gateway] supervisor fatal: {e:#}");
+            error!(error = %format!("{e:#}"), "order-gateway supervisor fatal");
             ExitCode::from(1)
         }
     }

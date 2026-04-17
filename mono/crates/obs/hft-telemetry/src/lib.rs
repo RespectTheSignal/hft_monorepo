@@ -377,6 +377,7 @@ struct Counters {
     order_gateway_invalid_wire: AtomicU64,
     gateway_heartbeat_emitted: AtomicU64,
     strategy_gateway_stale: AtomicU64,
+    supervisor_restart: AtomicU64,
     // 기타 ad-hoc 용 — rare.
     extras: Mutex<ahash::AHashMap<&'static str, Arc<AtomicU64>>>,
 }
@@ -423,6 +424,7 @@ fn counters() -> &'static Counters {
         order_gateway_invalid_wire: AtomicU64::new(0),
         gateway_heartbeat_emitted: AtomicU64::new(0),
         strategy_gateway_stale: AtomicU64::new(0),
+        supervisor_restart: AtomicU64::new(0),
         extras: Mutex::new(ahash::AHashMap::default()),
     })
 }
@@ -516,6 +518,8 @@ pub enum CounterKey {
     GatewayHeartbeatEmitted,
     /// strategy 가 gateway heartbeat timeout 을 감지해 safe mode 진입한 횟수.
     StrategyGatewayStale,
+    /// supervisor 가 서비스를 soft-restart 한 횟수.
+    SupervisorRestart,
 }
 
 /// 알려진 counter 를 1 증가. hot path — atomic fetch_add 만.
@@ -571,6 +575,7 @@ pub fn counter_add(k: CounterKey, n: u64) {
         CounterKey::OrderGatewayInvalidWire => &c.order_gateway_invalid_wire,
         CounterKey::GatewayHeartbeatEmitted => &c.gateway_heartbeat_emitted,
         CounterKey::StrategyGatewayStale => &c.strategy_gateway_stale,
+        CounterKey::SupervisorRestart => &c.supervisor_restart,
     };
     target.fetch_add(n, Ordering::Relaxed);
 }
@@ -737,6 +742,10 @@ pub fn counters_snapshot() -> Vec<(String, u64)> {
             "strategy_gateway_stale".into(),
             c.strategy_gateway_stale.load(Ordering::Relaxed),
         ),
+        (
+            "supervisor_restart".into(),
+            c.supervisor_restart.load(Ordering::Relaxed),
+        ),
     ];
     for (k, v) in c.extras.lock().iter() {
         out.push(((*k).to_string(), v.load(Ordering::Relaxed)));
@@ -835,7 +844,7 @@ mod tests {
     // cargo test 는 기본 병렬 → `--test-threads=1` 권장하지만, 여기서는 sub-lock.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
-    fn new_variants() -> [(CounterKey, &'static str, &'static str); 20] {
+    fn new_variants() -> [(CounterKey, &'static str, &'static str); 21] {
         [
             (
                 CounterKey::OrderEgressZmqOk,
@@ -936,6 +945,11 @@ mod tests {
                 CounterKey::StrategyGatewayStale,
                 "StrategyGatewayStale",
                 "strategy_gateway_stale",
+            ),
+            (
+                CounterKey::SupervisorRestart,
+                "SupervisorRestart",
+                "supervisor_restart",
             ),
         ]
     }
