@@ -59,6 +59,7 @@ use hft_protocol::order_wire::{
     STATUS_HEARTBEAT, STATUS_REJECTED,
 };
 use hft_shm::{Backing, LayoutSpec, Role, SharedRegion, SubKind, SymbolTable};
+use hft_state::{RedisState, StrategySession};
 use hft_strategy_config::StrategyConfig;
 use hft_strategy_core::risk::RiskConfig;
 use hft_strategy_runtime::{
@@ -69,6 +70,7 @@ use hft_time::{Clock, SystemClock};
 use hft_types::{ExchangeId, Symbol};
 use hft_zmq::Context as ZmqContext;
 use subscriber::InprocQueue;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
@@ -125,6 +127,18 @@ impl Variant {
             .unwrap_or_default()
             .to_ascii_lowercase();
         Self::from_name(raw.as_str())
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Variant::Noop => "noop",
+            Variant::V6 => "v6",
+            Variant::V7 => "v7",
+            Variant::V8 => "v8",
+            Variant::CloseV1 => "close_v1",
+            Variant::MmClose => "mm_close",
+            Variant::CloseUnhealthy => "close_unhealthy",
+        }
     }
 }
 
@@ -571,6 +585,13 @@ fn chrono_now_ms() -> i64 {
     SystemClock::default().now_ms()
 }
 
+fn local_hostname() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 fn spawn_strategy_metrics_updater(
     liveness: Option<GatewayLiveness>,
     cancel: CancellationToken,
@@ -598,6 +619,30 @@ fn spawn_strategy_metrics_updater(
         }
         gauge_set(GaugeKey::ActiveStrategies, 0);
         gauge_set(GaugeKey::LastHeartbeatAgeMs, 0);
+    })
+}
+
+fn spawn_redis_state_heartbeat(
+    redis_state: Arc<Mutex<RedisState>>,
+    last_orders: Arc<LastOrderStore>,
+    cancel: CancellationToken,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(30));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => break,
+                _ = ticker.tick() => {
+                    let now_ms = chrono_now_ms();
+                    let mut redis = redis_state.lock().await;
+                    redis.heartbeat(now_ms).await;
+                    redis.save_last_orders(last_orders.as_ref()).await;
+                }
+            }
+        }
+        info!(target: "strategy::main", "Redis state heartbeat task exiting");
     })
 }
 
@@ -923,6 +968,9 @@ struct StackedHandles {
     order_drain: JoinHandle<()>,
     result_listener: Option<JoinHandle<()>>,
     strategy_metrics: JoinHandle<()>,
+    redis_state: Arc<Mutex<RedisState>>,
+    redis_heartbeat: Option<JoinHandle<()>>,
+    last_orders: Arc<LastOrderStore>,
     /// sub-task 들의 shutdown token — 주 cancel 과 분리.
     aux_cancel: CancellationToken,
 }
@@ -948,8 +996,14 @@ impl StackedHandles {
             let _ = h.await;
         }
         let _ = self.strategy_metrics.await;
+        if let Some(h) = self.redis_heartbeat {
+            let _ = h.await;
+        }
         self.subscriber.join().await;
         self.strategy.join().await;
+        let mut redis = self.redis_state.lock().await;
+        redis.save_last_orders(self.last_orders.as_ref()).await;
+        info!(target: "strategy::main", "last_orders saved to Redis on shutdown");
     }
 }
 
@@ -980,9 +1034,43 @@ async fn bring_up_full(
     let oracle = Arc::new(PositionOracleImpl::new(
         meta.clone(),
         positions.clone(),
-        last_orders,
+        last_orders.clone(),
         membership,
     ));
+
+    // ── Redis state restore / session bootstrap.
+    let redis_state = Arc::new(Mutex::new(
+        RedisState::from_env(&strategy_cfg.login_name).await,
+    ));
+    let redis_connected = {
+        let mut redis = redis_state.lock().await;
+        if let Some(prev) = redis.load_session().await {
+            info!(
+                target: "strategy::main",
+                prev_variant = %prev.variant,
+                prev_start = prev.start_time_ms,
+                prev_pid = prev.pid,
+                "previous session found in Redis"
+            );
+        }
+        redis.restore_last_orders(last_orders.as_ref()).await;
+        info!(
+            target: "strategy::main",
+            restored = last_orders.len(),
+            "last_orders after Redis restore"
+        );
+        let now_ms = chrono_now_ms();
+        let session = StrategySession {
+            variant: variant.as_str().to_string(),
+            login_name: strategy_cfg.login_name.clone(),
+            start_time_ms: now_ms,
+            pid: std::process::id(),
+            hostname: local_hostname(),
+            last_heartbeat_ms: now_ms,
+        };
+        redis.save_session(&session).await;
+        redis.is_connected()
+    };
 
     // ── Gate account poller (optional, creds 없으면 skip).
     let poller = maybe_spawn_gate_poller(meta.clone(), positions.clone(), balance.clone());
@@ -1086,6 +1174,15 @@ async fn bring_up_full(
         None => None,
     };
     let strategy_metrics = spawn_strategy_metrics_updater(liveness, aux_cancel.clone());
+    let redis_heartbeat = if redis_connected {
+        Some(spawn_redis_state_heartbeat(
+            redis_state.clone(),
+            last_orders.clone(),
+            aux_cancel.clone(),
+        ))
+    } else {
+        None
+    };
 
     Ok(StackedHandles {
         strategy: strategy_handle,
@@ -1097,6 +1194,9 @@ async fn bring_up_full(
         order_drain,
         result_listener,
         strategy_metrics,
+        redis_state,
+        redis_heartbeat,
+        last_orders,
         aux_cancel,
     })
 }

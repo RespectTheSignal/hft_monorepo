@@ -23,6 +23,7 @@ hft-config = { workspace = true }
 hft-telemetry = { workspace = true }
 hft-time = { workspace = true }
 hft-common = { workspace = true }
+hft-state = { workspace = true }
 hft-exchange-api = { workspace = true }
 # Phase 2 D: main.rs 에서 Gate REST account poller 를 직접 spawn.
 hft-exchange-gate = { workspace = true }

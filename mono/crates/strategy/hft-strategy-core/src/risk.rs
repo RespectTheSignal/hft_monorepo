@@ -14,6 +14,7 @@
 //!     계산한 [`ExposureSnapshot`] 을 반환 → 심볼 수만큼 for-loop 반복 없이 상수 시간.
 
 use hft_strategy_config::TradeSettings;
+use serde::{Deserialize, Serialize};
 
 use crate::decision::{OrderLevel, OrderSide};
 
@@ -33,7 +34,7 @@ pub struct Chance {
 }
 
 /// 최근 주문 정보 (레거시 `LastOrder`).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct LastOrder {
     pub level: OrderLevel,
     pub side: OrderSide,

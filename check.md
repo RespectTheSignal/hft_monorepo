@@ -211,7 +211,7 @@
 - [ ] `$LOGIN_STATUS_URL` → `services/strategy::healthcheck` **TODO** Phase 2 E.
 - [~] `$ORDER_URL`, `$ORDER_UID` (puppeteer) → **Drop reason**: Puppeteer fallback 은 `go/order-processor` 분리 트랙으로 유지. Rust 전략은 REST 직결만.
 - [~] `$IPC_SOCKET_PATH=/tmp/gate_hft_ipc.sock` → **Drop reason**: UDS 브릿지 폐기 (§2 참조).
-- [ ] `$REDIS_URL`, `$REDIS_STATE_PREFIX=gate_hft:state` → `hft-state::redis` **TODO** Phase 3. 현재는 in-process state 만.
+- [x] `$REDIS_URL`, `$REDIS_STATE_PREFIX=gate_hft:state` → `hft-state::redis` (`RedisState::from_env`, `LastOrderStore` restore/save, `StrategySession`) ✅
 - [x] `$SUPABASE_REFRESH_SECS=300` → `StrategyConfigLoader` ArcSwap 주기 reload ✅
 
 ### 3.3 Supabase 설정 로딩 순서
@@ -533,6 +533,7 @@ Funding / EMA / misc: ✅
 - [x] default password `admin` → `GF_SECURITY_ADMIN_PASSWORD=admin`
 
 ### 13.3 Redis — ⏳ Phase 3
+- [x] 런타임 state backend → `mono/crates/infra/hft-state` (`REDIS_URL`, `REDIS_STATE_PREFIX`, `LastOrderStore` persist, `StrategySession`) ✅
 - [ ] port 6379, 1 CPU / 2GB
 - [ ] AOF enabled, redis 7.4-alpine
 - [ ] PING healthcheck 10s/5s

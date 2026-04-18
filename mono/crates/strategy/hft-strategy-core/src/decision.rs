@@ -7,12 +7,13 @@
 //!   * alloc 0. hot path 에서 String 해시/비교 없음.
 
 use hft_strategy_config::TradeSettings;
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 use crate::signal::SignalResult;
 
 /// 주문 side. 문자열 "buy"/"sell" 을 wrap 해 hot path 에서는 비교를 enum 으로.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderSide {
     Buy,
     Sell,
@@ -46,7 +47,7 @@ impl FromStr for OrderSide {
 }
 
 /// 주문 레벨. v8 에서 market_close 가 추가됨.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderLevel {
     LimitOpen,
     LimitClose,

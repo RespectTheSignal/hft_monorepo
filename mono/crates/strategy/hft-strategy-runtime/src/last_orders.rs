@@ -38,6 +38,11 @@ impl LastOrderStore {
         self.inner.len()
     }
 
+    /// 전체 엔트리를 순회한다. Redis snapshot 같은 bulk export 용도.
+    pub fn iter(&self) -> dashmap::iter::Iter<'_, String, LastOrder, ahash::RandomState> {
+        self.inner.iter()
+    }
+
     /// 비어있는지.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
@@ -92,5 +97,38 @@ mod tests {
     fn unknown_symbol_is_none() {
         let s = LastOrderStore::new();
         assert!(s.get("does-not-exist").is_none());
+    }
+
+    #[test]
+    fn iter_returns_all_entries() {
+        let s = LastOrderStore::new();
+        s.record(
+            "BTC_USDT",
+            LastOrder {
+                level: OrderLevel::LimitOpen,
+                side: OrderSide::Buy,
+                price: 10.0,
+                timestamp_ms: 1,
+            },
+        );
+        s.record(
+            "ETH_USDT",
+            LastOrder {
+                level: OrderLevel::LimitClose,
+                side: OrderSide::Sell,
+                price: 20.0,
+                timestamp_ms: 2,
+            },
+        );
+        s.record(
+            "SOL_USDT",
+            LastOrder {
+                level: OrderLevel::LimitOpen,
+                side: OrderSide::Buy,
+                price: 30.0,
+                timestamp_ms: 3,
+            },
+        );
+        assert_eq!(s.iter().count(), 3);
     }
 }

@@ -1,0 +1,21 @@
+[package]
+name = "hft-state"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "hft_state"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+redis.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+hft-strategy-core.workspace = true
+hft-strategy-runtime.workspace = true
