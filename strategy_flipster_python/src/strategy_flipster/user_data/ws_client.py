@@ -17,13 +17,8 @@ import websockets
 
 from strategy_flipster.config import FlipsterApiConfig
 from strategy_flipster.execution.auth import make_ws_auth_headers
-from strategy_flipster.types import (
-    AccountInfo,
-    Balance,
-    MarginType,
-    Position,
-    PositionSide,
-)
+from strategy_flipster.types import AccountInfo, Balance
+from strategy_flipster.user_data.position_parser import parse_position_row
 from strategy_flipster.user_data.state import UserState
 
 logger = structlog.get_logger(__name__)
@@ -151,31 +146,7 @@ class FlipsterUserWsClient:
             ))
 
         elif topic == "account.position":
-            pos_side_str = row.get("positionSide")
-            if pos_side_str == "LONG":
-                pos_side = PositionSide.LONG
-            elif pos_side_str == "SHORT":
-                pos_side = PositionSide.SHORT
-            else:
-                pos_side = PositionSide.NONE
-
-            margin_str = row.get("marginType", "CROSS")
-            margin_type = MarginType.ISOLATED if margin_str == "ISOLATED" else MarginType.CROSS
-
-            liq_str = row.get("liquidationPrice")
-            liq_price = Decimal(liq_str) if liq_str else None
-
-            position = Position(
-                symbol=row["symbol"],
-                leverage=int(row.get("leverage", 1)),
-                margin_type=margin_type,
-                position_side=pos_side,
-                position_amount=Decimal(row.get("positionAmount") or "0"),
-                entry_price=Decimal(row.get("entryPrice") or "0"),
-                mark_price=Decimal(row.get("markPrice") or "0"),
-                unrealized_pnl=Decimal(row.get("unrealizedPnl") or "0"),
-                liquidation_price=liq_price,
-            )
+            position = parse_position_row(row)
             self._state.update_position(position)
 
         elif topic == "account.balance":

@@ -1,4 +1,4 @@
-"""Manages Xvfb + Chrome + x11vnc + noVNC for browser-based Flipster access."""
+"""Manages Xvfb + Chrome + x11vnc + noVNC for browser-based Gate.io access."""
 
 from __future__ import annotations
 
@@ -9,10 +9,8 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 
-# Paths for x11vnc extracted from deb (installed by setup script)
 _X11VNC_LIB = "/tmp/x11vnc-extract/usr/lib/x86_64-linux-gnu"
 _X11VNC_BIN = "/tmp/x11vnc-extract/usr/bin/x11vnc"
 _NOVNC_DIR = Path.home() / ".local/share/noVNC"
@@ -20,19 +18,17 @@ _NOVNC_DIR = Path.home() / ".local/share/noVNC"
 
 @dataclass
 class BrowserManager:
-    """Launches a headless Chrome behind VNC so the user can log in via browser."""
+    """Launches a headless Chrome behind VNC so the user can log in to Gate.io."""
 
-    display: int = 10
-    vnc_port: int = 5910
-    novnc_port: int = 6090
-    chrome_debug_port: int = 9230
-    chrome_user_data: str = "/tmp/chrome-flipster"
-    start_url: str = "https://flipster.io/trade/perpetual/BTCUSDT.PERP"
+    display: int = 11
+    vnc_port: int = 5911
+    novnc_port: int = 6091
+    chrome_debug_port: int = 9231
+    chrome_user_data: str = "/tmp/chrome-gate"
+    start_url: str = "https://www.gate.com/login"
 
     _procs: list[subprocess.Popen] = field(default_factory=list, repr=False)
     _running: bool = field(default=False, repr=False)
-
-    # -- public API -----------------------------------------------------------
 
     def start(self) -> str:
         """Start all services. Returns the noVNC URL."""
@@ -66,13 +62,12 @@ class BrowserManager:
     def cdp_ws_url(self) -> str:
         """Chrome DevTools Protocol WebSocket URL."""
         import urllib.request
+
         resp = urllib.request.urlopen(
             f"http://localhost:{self.chrome_debug_port}/json/version"
         )
         data = json.loads(resp.read())
         return data["webSocketDebuggerUrl"]
-
-    # -- internals ------------------------------------------------------------
 
     def _ensure_deps(self):
         if not Path(_X11VNC_BIN).exists():
@@ -130,9 +125,13 @@ class BrowserManager:
         p = subprocess.Popen(
             [
                 _X11VNC_BIN,
-                "-display", f":{self.display}",
-                "-nopw", "-forever", "-shared",
-                "-rfbport", str(self.vnc_port),
+                "-display",
+                f":{self.display}",
+                "-nopw",
+                "-forever",
+                "-shared",
+                "-rfbport",
+                str(self.vnc_port),
             ],
             env=env,
             stdout=subprocess.DEVNULL,
@@ -146,8 +145,10 @@ class BrowserManager:
         p = subprocess.Popen(
             [
                 str(proxy_script),
-                "--vnc", f"localhost:{self.vnc_port}",
-                "--listen", str(self.novnc_port),
+                "--vnc",
+                f"localhost:{self.vnc_port}",
+                "--listen",
+                str(self.novnc_port),
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

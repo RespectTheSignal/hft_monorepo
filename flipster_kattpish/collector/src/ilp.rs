@@ -191,6 +191,35 @@ impl IlpWriter {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn write_trade_signal(
+        &self,
+        account_id: &str,
+        base: &str,
+        action: &str,          // "entry" | "exit"
+        flipster_side: &str,   // "long" | "short"
+        size_usd: f64,
+        flipster_price: f64,
+        gate_price: f64,
+        position_id: u64,
+        ts: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        let mut g = self.inner.lock().await;
+        g.buffer
+            .table("trade_signal")?
+            .symbol("account_id", account_id)?
+            .symbol("base", base)?
+            .symbol("action", action)?
+            .symbol("flipster_side", flipster_side)?
+            .column_f64("size_usd", size_usd)?
+            .column_f64("flipster_price", flipster_price)?
+            .column_f64("gate_price", gate_price)?
+            .column_i64("position_id", position_id as i64)?
+            .at(TimestampNanos::new(ts.timestamp_nanos_opt().unwrap_or(0)))?;
+        g.do_flush()?;
+        Ok(())
+    }
+
     pub async fn flush(&self) -> Result<()> {
         let mut g = self.inner.lock().await;
         if g.pending > 0 {

@@ -55,7 +55,7 @@
       },
       "targets": [
         { "refId": "A", "format": "table",
-          "rawSql": "SELECT sum(pnl_bp) FROM position_log WHERE mode='paper' AND entry_time > dateadd('d', -1, now())" }
+          "rawSql": "SELECT sum(pnl_bp) FROM position_log WHERE mode='paper' AND timestamp > dateadd('d', -1, now())" }
       ]
     },
     {
@@ -92,7 +92,7 @@
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "fillOpacity": 20 } } },
       "targets": [
         { "refId": "A", "format": "time_series",
-          "rawSql": "SELECT entry_time AS time, sum(pnl_bp) OVER (ORDER BY entry_time) AS cum_bp FROM position_log WHERE mode='paper' AND $__timeFilter(entry_time) ORDER BY entry_time" }
+          "rawSql": "SELECT timestamp AS time, sum(pnl_bp) OVER (ORDER BY timestamp) AS cum_bp FROM position_log WHERE mode='paper' AND $__timeFilter(timestamp) ORDER BY timestamp" }
       ]
     },
     {
@@ -103,7 +103,7 @@
       "datasource": { "type": "postgres", "uid": "questdb" },
       "targets": [
         { "refId": "A", "format": "table",
-          "rawSql": "SELECT symbol, strategy, count() trades, avg(pnl_bp) avg_bp, sum(pnl_bp) total_bp, sum(CASE WHEN pnl_bp > 0 THEN 1 ELSE 0 END)::double / count() hit_rate FROM position_log WHERE mode='paper' AND entry_time > dateadd('d', -1, now()) GROUP BY symbol, strategy ORDER BY total_bp DESC" }
+          "rawSql": "SELECT symbol, strategy, count() trades, avg(pnl_bp) avg_bp, sum(pnl_bp) total_bp, sum(CASE WHEN pnl_bp > 0 THEN 1 ELSE 0 END)::double / count() hit_rate FROM position_log WHERE mode='paper' AND timestamp > dateadd('d', -1, now()) GROUP BY symbol, strategy ORDER BY total_bp DESC" }
       ]
     },
     {

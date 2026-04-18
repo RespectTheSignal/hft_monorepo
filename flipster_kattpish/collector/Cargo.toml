@@ -24,6 +24,7 @@ sha2.workspace = true
 hex.workspace = true
 http.workspace = true
 urlencoding = "2"
+zmq.workspace = true
 
 [[bin]]
 name = "collector"

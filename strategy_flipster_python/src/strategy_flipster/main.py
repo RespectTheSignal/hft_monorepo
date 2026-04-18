@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import signal
 import sys
 from pathlib import Path
@@ -29,7 +30,7 @@ from strategy_flipster.strategy.basis_meanrev import (
 from strategy_flipster.strategy.sample import SampleStrategy
 from strategy_flipster.user_data.rest_client import FlipsterUserRestClient
 from strategy_flipster.user_data.state import UserState
-from strategy_flipster.market_data.symbol import is_supported_symbol
+from strategy_flipster.market_data.symbol import is_supported_symbol, to_exchange_symbol
 from strategy_flipster.types import BookTicker
 from strategy_flipster.user_data.ws_client import FlipsterUserWsClient
 
@@ -204,7 +205,7 @@ async def run(config: AppConfig) -> None:
             beta_fl_assumption=float(os.environ.get("BETA_FL", "0.5")),
             fee_bps_cost=float(os.environ.get("FEE_BPS", "0.45")),
             spread_edge_safety=float(os.environ.get("SPREAD_EDGE_SAFETY", "1.0")),
-            binance_open_cooldown_ms=int(os.environ.get("BN_OPEN_COOLDOWN_MS", os.environ.get("BN_COOLDOWN_MS", "200"))),
+            binance_open_cooldown_ms=int(os.environ.get("BN_OPEN_COOLDOWN_MS", os.environ.get("BN_COOLDOWN_MS", "0"))),
             binance_close_cooldown_ms=int(os.environ.get("BN_CLOSE_COOLDOWN_MS", "0")),
             cooldown_ms=int(os.environ.get("COOLDOWN_MS", "500")),
         )
@@ -314,7 +315,106 @@ async def run(config: AppConfig) -> None:
         except asyncio.CancelledError:
             pass
 
-    # Task 6: Shutdown 대기
+    # Task 6: Strategy 주기 상태 로그
+    async def strategy_status_loop() -> None:
+        interval_sec = float(os.environ.get("STRATEGY_LOG_INTERVAL_SEC", "30"))
+        try:
+            while not shutdown_event.is_set():
+                await asyncio.sleep(interval_sec)
+                now_ns = time.time_ns()
+
+                stale_feeds = []
+                for feed in aggregator.stale_feeds():
+                    last_recv_ns = aggregator.last_recv_ns(feed)
+                    stale_feeds.append({
+                        "feed": type(feed).__name__,
+                        "silent_for_sec": round(max(0.0, (now_ns - last_recv_ns) / 1_000_000_000), 3),
+                    })
+
+                base_payload: dict[str, Any] = {
+                    "strategy": strategy_name,
+                    "positions": len(user_state.positions),
+                    "orders_submitted": order_manager.total_submitted,
+                    "order_errors": order_manager.total_errors,
+                    "market_data": {
+                        "cached_tickers": len(latest_cache),
+                        "queue_pending": aggregator.pending_count,
+                        "stale_feed_count": len(stale_feeds),
+                        "stale_feeds": stale_feeds,
+                    },
+                }
+
+                if isinstance(strategy, BasisMeanRevStrategy):
+                    states: list[dict[str, Any]] = []
+                    for canonical in strategy._p.canonicals:
+                        exec_sym = to_exchange_symbol(strategy._p.execution_exchange, canonical)
+                        bn_sym = to_exchange_symbol("binance", canonical)
+                        sym_state = strategy.symbol_states.get(canonical)
+                        pos = user_state.positions.get(exec_sym)
+                        actual_qty = float(pos.position_amount) if pos is not None else 0.0
+                        exec_ticker = latest_cache.get(strategy._p.execution_exchange, exec_sym)
+                        bn_ticker = latest_cache.get("binance", bn_sym)
+                        exec_mid = (
+                            (exec_ticker.bid_price + exec_ticker.ask_price) * 0.5
+                            if exec_ticker is not None else None
+                        )
+                        bn_mid = (
+                            (bn_ticker.bid_price + bn_ticker.ask_price) * 0.5
+                            if bn_ticker is not None else None
+                        )
+                        z = dev_bps = std_bps = None
+                        if exec_mid is not None and exec_mid > 0 and bn_ticker is not None:
+                            z, dev_bps, std_bps = strategy._signal_inputs(
+                                history, exec_sym, bn_sym, exec_mid,
+                            )
+                        states.append({
+                            "canonical": canonical,
+                            "exec_symbol": exec_sym,
+                            "bn_symbol": bn_sym,
+                            "intent": sym_state.intent.name if sym_state is not None else "FLAT",
+                            "target_qty": round(sym_state.target_qty, 8) if sym_state is not None else 0.0,
+                            "actual_qty": round(actual_qty, 8),
+                            "exec_data_ok": exec_ticker is not None,
+                            "exec_age_ms": round((now_ns - exec_ticker.recv_ts_ns) / 1_000_000, 1) if exec_ticker is not None else None,
+                            "exec_mid": round(exec_mid, 8) if exec_mid is not None else None,
+                            "bn_data_ok": bn_ticker is not None,
+                            "bn_age_ms": round((now_ns - bn_ticker.recv_ts_ns) / 1_000_000, 1) if bn_ticker is not None else None,
+                            "bn_mid": round(bn_mid, 8) if bn_mid is not None else None,
+                            "basis": round(exec_mid - bn_mid, 8) if exec_mid is not None and bn_mid is not None else None,
+                            "z": round(z, 4) if z is not None else None,
+                            "dev_bps": round(dev_bps, 2) if dev_bps is not None else None,
+                            "std_bps": round(std_bps, 2) if std_bps is not None else None,
+                        })
+
+                    s = strategy.stats
+                    base_payload.update({
+                        "thresholds": {
+                            "signal_mode": strategy._p.signal_mode,
+                            "open_k": strategy._p.open_k,
+                            "close_k": strategy._p.close_k,
+                            "min_open_dev_bps": strategy._p.min_open_dev_bps,
+                            "min_open_std_bps": strategy._p.min_open_std_bps,
+                            "min_close_dev_bps": strategy._p.min_close_dev_bps,
+                            "min_close_std_bps": strategy._p.min_close_std_bps,
+                            "binance_open_cooldown_ms": strategy._p.binance_open_cooldown_ms,
+                            "binance_close_cooldown_ms": strategy._p.binance_close_cooldown_ms,
+                            "cooldown_ms": strategy._p.cooldown_ms,
+                        },
+                        "signals": s.signals_seen,
+                        "intent_changes": s.intent_changes,
+                        "orders_emitted": s.orders_emitted,
+                        "open_orders": s.open_orders,
+                        "close_orders": s.close_orders,
+                        "reemits": s.reemits,
+                        "builds": s.builds,
+                        "states": states,
+                    })
+
+                logger.info("strategy_status", **base_payload)
+        except asyncio.CancelledError:
+            pass
+
+    # Task 7: Shutdown 대기
     async def shutdown_watcher() -> None:
         await shutdown_event.wait()
         logger.info("shutdown_signal_received")
@@ -330,6 +430,7 @@ async def run(config: AppConfig) -> None:
         tasks.append(asyncio.create_task(snapshot_sample_loop(), name="snapshot_sampler"))
     if dry_run_pnl is not None:
         tasks.append(asyncio.create_task(dry_run_stats_loop(), name="dry_run_stats"))
+    tasks.append(asyncio.create_task(strategy_status_loop(), name="strategy_status"))
 
     # shutdown_watcher가 완료되면 나머지 태스크 취소
     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)

@@ -78,6 +78,50 @@ pub struct Params {
     pub pairs_min_std_bp: f64,
     pub pairs_cooldown_ms: i64,
 
+    /// Paper-execution latency (ms). When > 0, paper entries and exits for
+    /// the pairs strategy are materialised at `decision_time + latency_ms`
+    /// using the bid/ask prevailing at the fill moment — a crude model for
+    /// maker→taker round-trip / network latency. Latency/funding strategies
+    /// are unaffected.
+    pub paper_fill_latency_ms: i64,
+
+    // ---- Spread-aware cost filter (#1) ----
+    /// Safety multiplier on the cost of crossing the book (spreads + fee).
+    /// Entry requires `potential_edge_bp >= total_cost_bp * safety`. 0 = off.
+    pub pairs_spread_edge_safety: f64,
+
+    // ---- Binance-change cooldown (#3 stealth / adverse avoidance) ----
+    /// When > 0, skip entries for a symbol whose hedge-leg quote changed
+    /// within this many ms. Avoids trading in the exact window where Binance
+    /// information is being absorbed by Flipster.
+    pub pairs_bn_change_cooldown_ms: i64,
+
+    // ---- Signal mode (#4 rolling window vs EWMA) ----
+    /// When > 0, use a simple rolling-window mean/std over this many seconds
+    /// instead of the EWMA. 0 keeps the EWMA path.
+    pub pairs_rolling_window_sec: f64,
+
+    // ---- Per-symbol auto-blacklist (#5) ----
+    /// Minimum closed trades before a symbol may be auto-blacklisted. 0 = off.
+    pub pairs_auto_blacklist_min_trades: usize,
+    /// Threshold (bp, typically negative). If `avg_pnl_bp < this`, blacklist.
+    pub pairs_auto_blacklist_max_avg_bp: f64,
+    /// How long a symbol stays blacklisted (ms) once tripped.
+    pub pairs_auto_blacklist_duration_ms: i64,
+
+    // ---- Asymmetric exit (#6 "close only when we're actually ahead") ----
+    /// When true, the convergence-exit branch closes only if the projected
+    /// net pnl (after spreads + fee) would be positive. Stop-loss and
+    /// hard-timeout still fire unconditionally.
+    pub pairs_asymmetric_exit: bool,
+
+    /// Tag written into `position_log.mode` — "paper" for live paper, or
+    /// "backtest" during historical replay so the two streams don't mix.
+    pub mode_tag: String,
+    /// Skip side-loops that don't fit the backtest replay (funding_poller
+    /// queries the live funding_rate table, etc.). `run()` gates on this.
+    pub backtest_mode: bool,
+
     // Strategy A
     pub funding_scan_interval_sec: u64,
     pub funding_trigger_bp: f64, // require |diff| > this in bp per funding period
@@ -165,6 +209,22 @@ impl Params {
             pairs_min_hold_ms: iget("PAIRS_MIN_HOLD_MS", 0),
             pairs_min_std_bp: fget("PAIRS_MIN_STD_BP", 0.5),
             pairs_cooldown_ms: iget("PAIRS_COOLDOWN_MS", 2_000),
+
+            paper_fill_latency_ms: iget("PAPER_FILL_LATENCY_MS", 50),
+
+            pairs_spread_edge_safety:     fget("PAIRS_SPREAD_EDGE_SAFETY", 0.0),
+            pairs_bn_change_cooldown_ms:  iget("PAIRS_BN_CHANGE_COOLDOWN_MS", 0),
+            pairs_rolling_window_sec:     fget("PAIRS_ROLLING_WINDOW_SEC", 0.0),
+            pairs_auto_blacklist_min_trades: uget("PAIRS_AUTO_BLACKLIST_MIN_TRADES", 0) as usize,
+            pairs_auto_blacklist_max_avg_bp: fget("PAIRS_AUTO_BLACKLIST_MAX_AVG_BP", -2.0),
+            pairs_auto_blacklist_duration_ms: iget("PAIRS_AUTO_BLACKLIST_DURATION_MS", 600_000),
+            pairs_asymmetric_exit: std::env::var("PAIRS_ASYMMETRIC_EXIT")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
+            mode_tag: std::env::var("PAPER_MODE_TAG").unwrap_or_else(|_| "paper".into()),
+            backtest_mode: std::env::var("BACKTEST_MODE")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
 
             funding_scan_interval_sec: uget("FUNDING_SCAN_INTERVAL_SEC", 300),
             funding_trigger_bp: fget("FUNDING_TRIGGER_BP", 5.0),
@@ -279,6 +339,60 @@ impl EwmaStats {
     }
 }
 
+/// Simple rolling window over (ts, bp) points. `push` evicts points older
+/// than `window_sec` and keeps running sum / sum-of-squares for O(1)
+/// mean/std. Alternative signal path to `EwmaStats` — less lagged when the
+/// spread genuinely deviates because the mean does not drift toward the
+/// outlier.
+#[derive(Debug)]
+pub struct RollingWindow {
+    pub pts: VecDeque<(DateTime<Utc>, f64)>,
+    pub window_sec: f64,
+    pub sum: f64,
+    pub sum_sq: f64,
+}
+
+impl RollingWindow {
+    pub fn new(window_sec: f64) -> Self {
+        Self {
+            pts: VecDeque::with_capacity(2048),
+            window_sec,
+            sum: 0.0,
+            sum_sq: 0.0,
+        }
+    }
+
+    pub fn push(&mut self, ts: DateTime<Utc>, x: f64) {
+        self.pts.push_back((ts, x));
+        self.sum += x;
+        self.sum_sq += x * x;
+        let cutoff_ms = (self.window_sec * 1000.0) as i64;
+        while let Some(&(t, v)) = self.pts.front() {
+            if (ts - t).num_milliseconds() > cutoff_ms {
+                self.pts.pop_front();
+                self.sum -= v;
+                self.sum_sq -= v * v;
+            } else {
+                break;
+            }
+        }
+    }
+
+    pub fn len(&self) -> usize { self.pts.len() }
+
+    pub fn mean(&self) -> Option<f64> {
+        if self.pts.is_empty() { None } else { Some(self.sum / self.pts.len() as f64) }
+    }
+
+    pub fn std(&self) -> Option<f64> {
+        let n = self.pts.len();
+        if n < 2 { return None; }
+        let m = self.sum / n as f64;
+        let var = (self.sum_sq / n as f64 - m * m).max(0.0);
+        Some(var.sqrt())
+    }
+}
+
 #[derive(Debug)]
 pub struct BinanceWindow {
     pub pts: VecDeque<(DateTime<Utc>, f64)>, // (ts, mid)
@@ -361,6 +475,16 @@ pub struct OpenPosition {
     // Stored for funding PnL attribution
     pub flipster_rate_entry: Option<f64>,
     pub binance_rate_entry: Option<f64>,
+
+    /// Paper-execution latency model. When Some, the position's
+    /// `flipster_entry` / `binance_entry` are placeholders until `now` reaches
+    /// this instant; at that point the sweep loop freezes them to the prevailing
+    /// bid/ask. Only used by the pairs strategy.
+    pub entry_fill_at: Option<DateTime<Utc>>,
+    /// Paper-execution latency model for exits. When Some, the position has
+    /// been flagged for close but the close prices are frozen at this instant,
+    /// not at the moment the exit condition was detected.
+    pub exit_fill_at: Option<DateTime<Utc>>,
 }
 
 fn net_pnl_bp(pos: &OpenPosition, f_exit: f64, b_exit: f64, fee_bp: f64) -> f64 {
@@ -396,6 +520,35 @@ pub struct PaperBook {
     /// multi-timeframe confirmation filters in the "slow_avg" pairs variant.
     /// Keyed by base; oldest entries evicted once window exceeds 30s.
     pub snapshot_history: HashMap<String, VecDeque<PairSnapshot>>,
+
+    // ---- Rolling window alt signal (#4) ----
+    /// Per-symbol rolling mean/std of diff_bp, maintained in parallel with
+    /// `pair_stats` (EWMA). Variants pick which to use via
+    /// `Params.pairs_rolling_window_sec`.
+    pub pair_stats_rolling: HashMap<String, RollingWindow>,
+
+    // ---- Binance change tracking (#3 stealth) ----
+    /// Last seen hedge-leg quote per symbol (bid, ask). Used to detect price
+    /// changes for the stealth cooldown.
+    pub bn_last_quote: HashMap<String, (f64, f64)>,
+    /// Timestamp of the most recent hedge-leg quote change per symbol.
+    pub bn_last_change: HashMap<String, DateTime<Utc>>,
+
+    // ---- Auto-blacklist (#5) ----
+    /// Symbol → instant at which the auto-blacklist expires. Entries with
+    /// `now < until` are skipped in `try_enter_pairs`.
+    pub auto_blacklist_until: HashMap<String, DateTime<Utc>>,
+
+    /// Simulated "current time", driven from the latest tick ts we've seen.
+    /// In live mode this tracks wall-clock approximately. In backtest mode
+    /// it is the replay's current instant, and `sweep_exits` uses it instead
+    /// of `Utc::now()` so hard_timeout / min_hold / fill_at checks compare
+    /// against market time rather than wall clock.
+    pub sim_now: Option<DateTime<Utc>>,
+    /// sim_now at which sweep_exits last ran. Backtest mode uses this to
+    /// fire a sweep whenever >= 100ms of simulated time has elapsed since
+    /// the previous sweep, instead of relying on a wall-clock interval.
+    pub last_sweep_sim_now: Option<DateTime<Utc>>,
 }
 
 /// Single paired observation at one wall-clock time.
@@ -487,25 +640,33 @@ pub async fn run(
 ) {
     let book = Arc::new(Mutex::new(PaperBook::with_bankroll(params.bankroll_usd)));
 
-    // A: funding scan loop (uses QuestDB pg-wire via tokio-postgres for the
-    // snapshot; for simplicity we hit it through reqwest → QuestDB HTTP API).
-    tokio::spawn(funding_loop(
-        book.clone(),
-        writer.clone(),
-        params.clone(),
-    ));
+    // A: funding scan loop. Skipped in backtest mode because it polls live
+    // funding_rate tables and uses wall-clock `now`, which would produce
+    // phantom positions during historical replay.
+    if !params.backtest_mode {
+        tokio::spawn(funding_loop(
+            book.clone(),
+            writer.clone(),
+            params.clone(),
+        ));
+    }
 
     // B + D share the tick stream. Exit sweeper runs alongside.
-    let book_exit = book.clone();
-    let writer_exit = writer.clone();
-    let params_exit = params.clone();
-    tokio::spawn(async move {
-        let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
-        loop {
-            tick.tick().await;
-            sweep_exits(&book_exit, &writer_exit, &params_exit).await;
-        }
-    });
+    // Live mode uses a wall-clock 100ms timer; backtest mode instead drives
+    // sweeps from the tick loop itself (see on_tick) so they align with the
+    // replay's simulated clock.
+    if !params.backtest_mode {
+        let book_exit = book.clone();
+        let writer_exit = writer.clone();
+        let params_exit = params.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
+            loop {
+                tick.tick().await;
+                sweep_exits(&book_exit, &writer_exit, &params_exit).await;
+            }
+        });
+    }
 
     tick_loop(book, writer, tick_rx, params).await;
 }
@@ -550,9 +711,23 @@ async fn on_tick(
     let ts = tick.timestamp;
 
     let mut b = book.lock().await;
+    // Advance the sim clock from the latest tick we've seen. sweep_exits and
+    // the paper-fill latency logic both consult `sim_now` so that backtest
+    // replays use market time instead of wall clock.
+    match b.sim_now {
+        Some(prev) if prev >= ts => {}
+        _ => b.sim_now = Some(ts),
+    }
 
     match tick.exchange {
         e if e == params.hedge_venue => {
+            // Hedge-leg price-change tracking for the stealth cooldown (#3).
+            let cur = (bid, ask);
+            let prev = b.bn_last_quote.get(&base).copied();
+            if prev.map_or(true, |p| p != cur) {
+                b.bn_last_quote.insert(base.clone(), cur);
+                b.bn_last_change.insert(base.clone(), ts);
+            }
             b.binance_mids.insert(base.clone(), Quote { bid, ask, ts });
             b.binance_win
                 .entry(base.clone())
@@ -570,6 +745,21 @@ async fn on_tick(
                     .entry(base.clone())
                     .or_insert_with(|| EwmaStats::new(params.pairs_ewma_tau_sec));
                 stats.update(diff_bp, ts, params.pairs_ewma_tau_sec);
+
+                // Rolling window alt signal (#4). We always maintain it in
+                // parallel with the EWMA so variants can opt-in per-params.
+                // Use a non-zero default window so the data is ready when a
+                // variant flips to rolling mode.
+                let win_sec = if params.pairs_rolling_window_sec > 0.0 {
+                    params.pairs_rolling_window_sec
+                } else {
+                    30.0
+                };
+                let roll = b
+                    .pair_stats_rolling
+                    .entry(base.clone())
+                    .or_insert_with(|| RollingWindow::new(win_sec));
+                roll.push(ts, diff_bp);
 
                 // Ring buffer of paired snapshots (last ~30s) for multi-timeframe
                 // confirmation in slow-avg mode. Evict older than 30s.
@@ -603,6 +793,23 @@ async fn on_tick(
     // buckets.
     if matches!(tick.exchange, ExchangeName::Flipster) {
         try_enter_pairs(&mut b, writer, &base, params).await?;
+    }
+
+    // Backtest mode: drive sweep_exits from the tick stream so it aligns
+    // with sim_now (there's no wall-clock sweep task in this mode). Fire
+    // whenever >= 100ms of simulated time has passed since the previous
+    // sweep. In live mode the dedicated timer task handles this instead.
+    if params.backtest_mode {
+        let due = match (b.sim_now, b.last_sweep_sim_now) {
+            (Some(now), Some(last)) => (now - last).num_milliseconds() >= 100,
+            (Some(_), None) => true,
+            _ => false,
+        };
+        if due {
+            b.last_sweep_sim_now = b.sim_now;
+            drop(b);
+            sweep_exits(book, writer, params).await;
+        }
     }
     Ok(())
 }
@@ -691,6 +898,8 @@ async fn try_enter_latency(
         settle_time: None,
         flipster_rate_entry: None,
         binance_rate_entry: None,
+        entry_fill_at: None,
+        exit_fill_at: None,
     };
     info!(
         strategy = "latency",
@@ -724,9 +933,25 @@ async fn try_enter_pairs(
     if params.blacklist.contains(base) {
         return Ok(());
     }
+    // Auto-blacklist (#5): symbols the bot has empirically lost on are
+    // silenced for `auto_blacklist_duration_ms` once the threshold is hit.
+    if let Some(until) = b.auto_blacklist_until.get(base).copied() {
+        if now < until {
+            return Ok(());
+        }
+    }
     if let Some(until) = b.cooldowns.get(&("pairs", base.to_string())).copied() {
         if now < until {
             return Ok(());
+        }
+    }
+    // Binance-change stealth cooldown (#3): avoid the window right after a
+    // hedge-leg price change, where adverse selection is highest.
+    if params.pairs_bn_change_cooldown_ms > 0 {
+        if let Some(last) = b.bn_last_change.get(base).copied() {
+            if (now - last).num_milliseconds() < params.pairs_bn_change_cooldown_ms {
+                return Ok(());
+            }
         }
     }
     // capital cap
@@ -772,6 +997,25 @@ async fn try_enter_pairs(
             return Ok(());
         }
         (slow_avg, None, dev, true)
+    } else if params.pairs_rolling_window_sec > 0.0 {
+        // Rolling-window alt signal (#4). Requires at least 40 samples and a
+        // meaningful standard deviation before it fires. Mean no longer
+        // drifts toward outliers the way EWMA does.
+        let (stats_mean, std_bp) = match b.pair_stats_rolling.get(base) {
+            Some(r) if r.len() >= 40 => match (r.mean(), r.std()) {
+                (Some(m), Some(s)) => (m, s),
+                _ => return Ok(()),
+            },
+            _ => return Ok(()),
+        };
+        if std_bp < params.pairs_min_std_bp {
+            return Ok(());
+        }
+        let dev = diff_bp - stats_mean;
+        if dev.abs() < params.pairs_entry_sigma * std_bp {
+            return Ok(());
+        }
+        (stats_mean, Some(std_bp), dev, false)
     } else {
         // Legacy EWMA path
         let (stats_mean, std_bp) = match b.pair_stats.get(base) {
@@ -787,6 +1031,28 @@ async fn try_enter_pairs(
         }
         (stats_mean, Some(std_bp), dev, false)
     };
+
+    // Spread-aware cost filter (#1). Compare realistic captured edge to the
+    // round-trip mechanical cost (both leg spreads + round-trip fee) with a
+    // configurable safety margin. Biggest single change — structurally
+    // refuses trades where the numbers cannot possibly work.
+    if params.pairs_spread_edge_safety > 0.0 {
+        let exit_band_bp = if is_slow_avg {
+            params.pairs_exit_bp
+        } else if let Some(std_bp) = std_bp_opt {
+            params.pairs_exit_sigma * std_bp
+        } else {
+            0.0
+        };
+        // Potential bp captured = distance from current deviation to the
+        // exit band (assuming a clean reversion). Negative values (exit band
+        // already inside us) are clamped to zero and will always fail.
+        let potential_edge_bp = (deviation.abs() - exit_band_bp).max(0.0);
+        let total_cost_bp = fq.spread_bp() + bq.spread_bp() + params.fee_bp;
+        if potential_edge_bp < total_cost_bp * params.pairs_spread_edge_safety {
+            return Ok(());
+        }
+    }
 
     // Multi-timeframe snapshot confirmation (slow-avg mode only). For each of
     // the 1s/5s/10s/20s lookbacks we require the deviation to be shrinking
@@ -833,9 +1099,16 @@ async fn try_enter_pairs(
         return Ok(());
     }
 
-    // Cross the book at entry using bid/ask for both legs.
+    // Decision-time book cross (used as a placeholder when paper fill latency
+    // is enabled — the actual entry prices are frozen later, in sweep_exits,
+    // at `entry_fill_at`).
     let f_entry = if dir > 0 { fq.buy_at() } else { fq.sell_at() };
     let b_entry = if dir > 0 { bq.sell_at() } else { bq.buy_at() };
+    let entry_fill_at = if params.paper_fill_latency_ms > 0 {
+        Some(now + Duration::milliseconds(params.paper_fill_latency_ms))
+    } else {
+        None
+    };
     b.next_id += 1;
 
     // Stop-loss level: in slow-avg mode use an absolute bp offset so stop
@@ -867,6 +1140,8 @@ async fn try_enter_pairs(
         settle_time: None,
         flipster_rate_entry: None,
         binance_rate_entry: None,
+        entry_fill_at,
+        exit_fill_at: None,
     };
     debug!(
         variant = %params.account_id,
@@ -880,11 +1155,30 @@ async fn try_enter_pairs(
         mode = if is_slow_avg { "slow_avg" } else { "ewma" },
         "paper open"
     );
+    let pos_id = pos.id;
     b.positions.push(pos);
     b.cooldowns.insert(
         ("pairs", base.to_string()),
         now + Duration::milliseconds(params.pairs_cooldown_ms),
     );
+    // Emit entry signal for live executor sidecar.
+    let side_s = if dir > 0 { "long" } else { "short" };
+    if let Err(e) = _writer
+        .write_trade_signal(
+            &params.account_id,
+            base,
+            "entry",
+            side_s,
+            size_usd,
+            f_entry,
+            b_entry,
+            pos_id,
+            now,
+        )
+        .await
+    {
+        warn!(error = %e, "trade_signal entry write failed");
+    }
     Ok(())
 }
 
@@ -1014,6 +1308,8 @@ async fn funding_scan(
             settle_time: Some(settle),
             flipster_rate_entry: Some(rate_f),
             binance_rate_entry: Some(rate_b),
+            entry_fill_at: None,
+            exit_fill_at: None,
         };
         info!(
             strategy = "funding",
@@ -1060,15 +1356,65 @@ async fn query_qdb(sql: &str) -> Result<Vec<Vec<serde_json::Value>>> {
 // -----------------------------------------------------------------------------
 
 async fn sweep_exits(book: &Arc<Mutex<PaperBook>>, writer: &IlpWriter, params: &Params) {
-    let now = Utc::now();
     let mut to_close: Vec<OpenPosition> = Vec::new();
     let mut b = book.lock().await;
+    // Use the sim clock if we have one (backtest replay or live with at
+    // least one tick received), otherwise fall back to wall clock. During
+    // backtest the first few ticks may arrive before the sweep timer fires
+    // — the Utc::now() fallback is fine in that cold-start window because
+    // no positions exist yet.
+    let now = b.sim_now.unwrap_or_else(Utc::now);
     // Snapshot current mids once for exit evaluation and for writes below.
     let mids_b: HashMap<String, Quote> = b.binance_mids.clone();
     let mids_f: HashMap<String, Quote> = b.flipster_mids.clone();
 
+    let latency_ms = params.paper_fill_latency_ms;
     let mut keep: Vec<OpenPosition> = Vec::with_capacity(b.positions.len());
-    for pos in b.positions.drain(..) {
+    for mut pos in b.positions.drain(..) {
+        // --- Phase 1: finalize a pending paper entry if its fill_at arrived ---
+        if let Some(fa) = pos.entry_fill_at {
+            if now < fa {
+                // Not yet filled — sit on it. Skip exit evaluation entirely.
+                keep.push(pos);
+                continue;
+            }
+            // Fill time reached: freeze entry prices from the latest quotes.
+            match (mids_f.get(&pos.base), mids_b.get(&pos.base)) {
+                (Some(f), Some(bin))
+                    if (now - f.ts).num_milliseconds() <= params.max_mid_age_ms
+                        && (now - bin.ts).num_milliseconds() <= params.max_mid_age_ms =>
+                {
+                    pos.flipster_entry = if pos.flipster_side > 0 { f.buy_at() } else { f.sell_at() };
+                    pos.binance_entry  = if pos.flipster_side > 0 { bin.sell_at() } else { bin.buy_at() };
+                    pos.entry_time = now;
+                    pos.entry_fill_at = None;
+                }
+                _ => {
+                    // Stale or missing quote at fill time — abandon the entry
+                    // (never written to position_log, no risk taken).
+                    warn!(
+                        variant = %params.account_id,
+                        base = %pos.base,
+                        "stale quote at pending entry fill — dropping intent"
+                    );
+                    continue;
+                }
+            }
+        }
+
+        // --- Phase 2: if a paper exit is already scheduled, wait for its fill_at ---
+        if let Some(fa) = pos.exit_fill_at {
+            if now < fa {
+                keep.push(pos);
+                continue;
+            }
+            // exit fill reached — close it. The write loop below will
+            // recompute f_exit / b_exit from the current mids snapshot.
+            to_close.push(pos);
+            continue;
+        }
+
+        // --- Phase 3: normal exit-condition evaluation ---
         let should_exit = match pos.strategy {
             Strategy::Latency => now >= pos.hard_timeout,
             Strategy::Funding => now >= pos.hard_timeout,
@@ -1099,11 +1445,24 @@ async fn sweep_exits(book: &Arc<Mutex<PaperBook>>, writer: &IlpWriter, params: &
                     } else {
                         0.0
                     };
-                    if dev_now.abs() < exit_band {
+                    // Asymmetric exit (#6): on a "converged" signal, only
+                    // close if the projected net pnl (using current mids as
+                    // the exit prices) is actually positive. Otherwise keep
+                    // holding until hard_timeout — better to wait for a real
+                    // profitable exit than lock in the fee+spread cost now.
+                    let converged = dev_now.abs() < exit_band;
+                    let stopped = (stop - mean) * dev_now > 0.0
+                        && dev_now.abs() >= (stop - mean).abs();
+                    if stopped {
                         true
-                    } else if (stop - mean) * dev_now > 0.0 && dev_now.abs() >= (stop - mean).abs()
-                    {
-                        true
+                    } else if converged {
+                        if params.pairs_asymmetric_exit {
+                            let f_exit_peek = if pos.flipster_side > 0 { f.sell_at() } else { f.buy_at() };
+                            let b_exit_peek = if pos.flipster_side > 0 { bin.buy_at() } else { bin.sell_at() };
+                            net_pnl_bp(&pos, f_exit_peek, b_exit_peek, params.fee_bp) > 0.0
+                        } else {
+                            true
+                        }
                     } else {
                         false
                     }
@@ -1113,7 +1472,15 @@ async fn sweep_exits(book: &Arc<Mutex<PaperBook>>, writer: &IlpWriter, params: &
             }
         };
         if should_exit {
-            to_close.push(pos);
+            // Paper fill latency applies to the pairs strategy only. For
+            // latency/funding strategies we close immediately (their own
+            // hold windows already dominate).
+            if matches!(pos.strategy, Strategy::Pairs) && latency_ms > 0 {
+                pos.exit_fill_at = Some(now + Duration::milliseconds(latency_ms));
+                keep.push(pos);
+            } else {
+                to_close.push(pos);
+            }
         } else {
             keep.push(pos);
         }
@@ -1175,13 +1542,38 @@ async fn sweep_exits(book: &Arc<Mutex<PaperBook>>, writer: &IlpWriter, params: &
         {
             let mut bk = book.lock().await;
             bk.bankroll_usd += pnl_usd;
-            let entry = bk
-                .symbol_stats
-                .entry(pos.base.clone())
-                .or_insert((0, 0.0, 0.0));
-            entry.0 += 1;
-            entry.1 += pnl;
-            entry.2 += pnl * pnl;
+            let (n, avg_bp) = {
+                let entry = bk
+                    .symbol_stats
+                    .entry(pos.base.clone())
+                    .or_insert((0, 0.0, 0.0));
+                entry.0 += 1;
+                entry.1 += pnl;
+                entry.2 += pnl * pnl;
+                (entry.0, entry.1 / entry.0 as f64)
+            };
+            // Auto-blacklist (#5): once a symbol accumulates enough closed
+            // trades and its average bp is worse than the threshold, silence
+            // it for `duration_ms`. Clearing its stats gives the symbol a
+            // clean slate when the cooldown expires.
+            if params.pairs_auto_blacklist_min_trades > 0
+                && n >= params.pairs_auto_blacklist_min_trades
+                && avg_bp < params.pairs_auto_blacklist_max_avg_bp
+            {
+                bk.auto_blacklist_until.insert(
+                    pos.base.clone(),
+                    now + Duration::milliseconds(params.pairs_auto_blacklist_duration_ms),
+                );
+                bk.symbol_stats.insert(pos.base.clone(), (0, 0.0, 0.0));
+                warn!(
+                    variant = %params.account_id,
+                    base = %pos.base,
+                    n,
+                    avg_bp = format!("{:+.2}", avg_bp),
+                    duration_ms = params.pairs_auto_blacklist_duration_ms,
+                    "symbol auto-blacklisted"
+                );
+            }
         }
         if let Err(e) = writer
             .write_position(
@@ -1196,7 +1588,7 @@ async fn sweep_exits(book: &Arc<Mutex<PaperBook>>, writer: &IlpWriter, params: &
                 now,
                 pos.strategy.label(),
                 reason,
-                "paper",
+                &params.mode_tag,
             )
             .await
         {
@@ -1212,5 +1604,25 @@ async fn sweep_exits(book: &Arc<Mutex<PaperBook>>, writer: &IlpWriter, params: &
             pnl_usd = format!("{:+.3}", pnl_usd),
             "paper close"
         );
+        // Emit exit signal for live executor sidecar.
+        if matches!(pos.strategy, Strategy::Pairs) {
+            let exit_side = if pos.flipster_side > 0 { "long" } else { "short" };
+            if let Err(e) = writer
+                .write_trade_signal(
+                    &params.account_id,
+                    &pos.base,
+                    "exit",
+                    exit_side,
+                    pos.size_usd,
+                    f_exit,
+                    b_exit,
+                    pos.id,
+                    now,
+                )
+                .await
+            {
+                warn!(error = %e, "trade_signal exit write failed");
+            }
+        }
     }
 }

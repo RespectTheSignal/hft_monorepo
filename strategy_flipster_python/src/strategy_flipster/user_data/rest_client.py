@@ -11,13 +11,8 @@ import structlog
 from strategy_flipster.config import FlipsterApiConfig
 from strategy_flipster.error import AppError, AppException, ErrorKind
 from strategy_flipster.execution.auth import make_auth_headers
-from strategy_flipster.types import (
-    AccountInfo,
-    Balance,
-    MarginType,
-    Position,
-    PositionSide,
-)
+from strategy_flipster.types import AccountInfo, Balance, Position
+from strategy_flipster.user_data.position_parser import parse_position_row
 
 logger = structlog.get_logger(__name__)
 
@@ -133,28 +128,4 @@ class FlipsterUserRestClient:
 
     @staticmethod
     def _parse_position(raw: dict) -> Position:
-        pos_side_str = raw.get("positionSide")
-        if pos_side_str == "LONG":
-            pos_side = PositionSide.LONG
-        elif pos_side_str == "SHORT":
-            pos_side = PositionSide.SHORT
-        else:
-            pos_side = PositionSide.NONE
-
-        margin_str = raw.get("marginType", "CROSS")
-        margin_type = MarginType.ISOLATED if margin_str == "ISOLATED" else MarginType.CROSS
-
-        liq_price_str = raw.get("liquidationPrice")
-        liq_price = Decimal(liq_price_str) if liq_price_str else None
-
-        return Position(
-            symbol=raw["symbol"],
-            leverage=int(raw.get("leverage", 1)),
-            margin_type=margin_type,
-            position_side=pos_side,
-            position_amount=Decimal(raw.get("positionAmount") or "0"),
-            entry_price=Decimal(raw.get("entryPrice") or "0"),
-            mark_price=Decimal(raw.get("markPrice") or "0"),
-            unrealized_pnl=Decimal(raw.get("unrealizedPnl") or "0"),
-            liquidation_price=liq_price,
-        )
+        return parse_position_row(raw)

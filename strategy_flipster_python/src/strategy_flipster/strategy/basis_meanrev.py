@@ -116,7 +116,7 @@ class BasisMeanRevParams:
     # 목적: 순수 PnL 최적화가 아니라 stealth — 너무 노골적으로 Binance lead 를
     # 따라가면 Flipster 가 arb 로 판단해 API 차단할 위험. open 에만 기본 200ms.
     # 0 으로 설정하면 최대 PnL 모드 (감지 위험 상승).
-    binance_open_cooldown_ms: int = 200
+    binance_open_cooldown_ms: int = 0
     binance_close_cooldown_ms: int = 0
 
     # 기타

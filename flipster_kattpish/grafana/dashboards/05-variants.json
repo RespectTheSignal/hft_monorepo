@@ -2,17 +2,137 @@
   "uid": "flipster-variants",
   "title": "5 · Pairs Variants — A/B Comparison",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "10s",
-  "time": { "from": "now-24h", "to": "now" },
+  "time": { "from": "now-6h", "to": "now" },
   "timezone": "utc",
   "tags": ["flipster", "strategy", "variants"],
+  "templating": {
+    "list": [
+      {
+        "name": "since",
+        "type": "textbox",
+        "label": "Since (UTC ISO)",
+        "description": "Floor timestamp — only trades after this point are counted. Update after every paper-bot restart.",
+        "query": "2026-04-15T11:15:56Z",
+        "current": { "selected": true, "text": "2026-04-15T11:15:56Z", "value": "2026-04-15T11:15:56Z" }
+      }
+    ]
+  },
   "panels": [
+    {
+      "id": 100,
+      "type": "table",
+      "title": "🏆 Variant Leaderboard (since ${since})",
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "right", "minWidth": 80 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "variant" },
+            "properties": [
+              { "id": "custom.align", "value": "left" },
+              { "id": "custom.width", "value": 220 },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "n" },
+            "properties": [
+              { "id": "custom.width", "value": 80 },
+              { "id": "decimals", "value": 0 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "avg_bp" },
+            "properties": [
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.width", "value": 110 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "dark-red", "value": null },
+                { "color": "red", "value": -3 },
+                { "color": "orange", "value": -1 },
+                { "color": "yellow", "value": 0 },
+                { "color": "light-green", "value": 1 },
+                { "color": "green", "value": 3 },
+                { "color": "dark-green", "value": 5 }
+              ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "sum_$" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.width", "value": 130 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "dark-red", "value": null },
+                { "color": "red", "value": -10 },
+                { "color": "orange", "value": -1 },
+                { "color": "yellow", "value": 0 },
+                { "color": "light-green", "value": 1 },
+                { "color": "green", "value": 10 },
+                { "color": "dark-green", "value": 50 }
+              ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "$_per_hr" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.width", "value": 110 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "dark-red", "value": null },
+                { "color": "red", "value": -1 },
+                { "color": "yellow", "value": 0 },
+                { "color": "light-green", "value": 0.5 },
+                { "color": "green", "value": 5 }
+              ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "win%" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "decimals", "value": 1 },
+              { "id": "custom.width", "value": 90 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "dark-red", "value": null },
+                { "color": "red", "value": 30 },
+                { "color": "orange", "value": 45 },
+                { "color": "yellow", "value": 55 },
+                { "color": "light-green", "value": 60 },
+                { "color": "green", "value": 70 }
+              ] } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [{ "displayName": "sum_$", "desc": true }],
+        "footer": { "show": false }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT account_id AS variant, count() AS n, round(avg(pnl_bp), 2) AS avg_bp, round(sum(pnl_bp*size/10000), 2) AS \"sum_$\", round(sum(pnl_bp*size/10000) * 3600.0 / nullif(datediff('s', cast('${since}' as timestamp), now()), 0), 2) AS \"$_per_hr\", round(sum(case when pnl_bp>0 then 1.0 else 0.0 end)/count()*100, 1) AS \"win%\" FROM position_log WHERE strategy='pairs' AND mode='paper' AND timestamp > '${since}' GROUP BY account_id ORDER BY \"sum_$\" DESC"
+        }
+      ]
+    },
     {
       "id": 1,
       "type": "timeseries",
       "title": "Cumulative PnL by variant ($ Kelly-sized, open-position-adjusted)",
-      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 14 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
       "fieldConfig": {
         "defaults": {
@@ -33,7 +153,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT entry_time AS time, account_id AS metric, sum(pnl_bp*size/10000) OVER (PARTITION BY account_id ORDER BY entry_time) AS value FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) ORDER BY entry_time"
+          "rawSql": "SELECT timestamp AS time, account_id AS metric, sum(pnl_bp*size/10000) OVER (PARTITION BY account_id ORDER BY timestamp) AS value FROM position_log WHERE strategy='pairs' AND mode='paper' AND timestamp > '${since}' ORDER BY timestamp"
         }
       ]
     },
@@ -41,7 +161,7 @@
       "id": 2,
       "type": "table",
       "title": "Variant summary ($ Kelly-adjusted)",
-      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 11 },
+      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 25 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
       "fieldConfig": {
         "defaults": { "custom": { "align": "right" } },
@@ -93,7 +213,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT account_id AS variant, count() AS trades, round(avg(pnl_bp),2) AS avg_bp, round(sum(pnl_bp),1) AS sum_bp, round(avg(pnl_bp*size/10000),4) AS \"avg_$\", round(sum(pnl_bp*size/10000),2) AS \"sum_$\", round(sum(case when pnl_bp>0 then 1.0 else 0.0 end)/count()*100, 1) AS win_pct FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) GROUP BY account_id ORDER BY \"sum_$\" DESC"
+          "rawSql": "SELECT account_id AS variant, count() AS trades, round(avg(pnl_bp),2) AS avg_bp, round(sum(pnl_bp),1) AS sum_bp, round(avg(pnl_bp*size/10000),4) AS \"avg_$\", round(sum(pnl_bp*size/10000),2) AS \"sum_$\", round(sum(case when pnl_bp>0 then 1.0 else 0.0 end)/count()*100, 1) AS win_pct FROM position_log WHERE strategy='pairs' AND mode='paper' AND timestamp > '${since}' GROUP BY account_id ORDER BY \"sum_$\" DESC"
         }
       ]
     },
@@ -101,7 +221,7 @@
       "id": 6,
       "type": "stat",
       "title": "Hourly $ rate per variant (Kelly-adjusted)",
-      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 11 },
+      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 25 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
       "fieldConfig": {
         "defaults": {
@@ -127,7 +247,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT account_id AS metric, sum(pnl_bp*size/10000) AS hourly_usd FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -1, now()) GROUP BY account_id"
+          "rawSql": "SELECT account_id AS metric, sum(pnl_bp*size/10000) AS hourly_usd FROM position_log WHERE strategy='pairs' AND mode='paper' AND timestamp > dateadd('h', -1, now()) GROUP BY account_id"
         }
       ]
     },
@@ -135,7 +255,7 @@
       "id": 3,
       "type": "table",
       "title": "Variant × exit_reason ($ Kelly-adjusted)",
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 20 },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 34 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
       "fieldConfig": {
         "defaults": { "custom": { "align": "right" } },
@@ -166,7 +286,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT account_id AS variant, exit_reason, count() AS n, round(avg(pnl_bp*size/10000),4) AS \"avg_$\", round(sum(pnl_bp*size/10000),2) AS \"sum_$\" FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) GROUP BY account_id, exit_reason ORDER BY account_id, exit_reason"
+          "rawSql": "SELECT account_id AS variant, exit_reason, count() AS n, round(avg(pnl_bp*size/10000),4) AS \"avg_$\", round(sum(pnl_bp*size/10000),2) AS \"sum_$\" FROM position_log WHERE strategy='pairs' AND mode='paper' AND timestamp > '${since}' GROUP BY account_id, exit_reason ORDER BY account_id, exit_reason"
         }
       ]
     },
@@ -174,7 +294,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Trade rate (per minute) by variant",
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 20 },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 34 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
       "fieldConfig": {
         "defaults": {
@@ -189,7 +309,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT entry_time AS time, account_id AS metric, count() AS value FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) SAMPLE BY 1m ALIGN TO CALENDAR ORDER BY entry_time"
+          "rawSql": "SELECT timestamp AS time, account_id AS metric, count() AS value FROM position_log WHERE strategy='pairs' AND mode='paper' AND timestamp > '${since}' SAMPLE BY 1m ALIGN TO CALENDAR ORDER BY timestamp"
         }
       ]
     },
@@ -197,7 +317,7 @@
       "id": 5,
       "type": "table",
       "title": "Top symbols across all variants ($ Kelly-adjusted)",
-      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 29 },
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 43 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
       "fieldConfig": {
         "defaults": { "custom": { "align": "right" } },
@@ -228,7 +348,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT symbol, count() AS n, round(avg(pnl_bp*size/10000),4) AS \"avg_$\", round(sum(pnl_bp*size/10000),2) AS \"sum_$\" FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) GROUP BY symbol ORDER BY \"sum_$\" DESC LIMIT 30"
+          "rawSql": "SELECT symbol, count() AS n, round(avg(pnl_bp*size/10000),4) AS \"avg_$\", round(sum(pnl_bp*size/10000),2) AS \"sum_$\" FROM position_log WHERE strategy='pairs' AND mode='paper' AND timestamp > '${since}' GROUP BY symbol ORDER BY \"sum_$\" DESC LIMIT 30"
         }
       ]
     },
@@ -236,7 +356,7 @@
       "id": 7,
       "type": "table",
       "title": "Recent trades — per variant (latest 100)",
-      "gridPos": { "h": 15, "w": 24, "x": 0, "y": 40 },
+      "gridPos": { "h": 15, "w": 24, "x": 0, "y": 54 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
       "fieldConfig": {
         "defaults": {
@@ -264,7 +384,8 @@
                 { "type": "value", "options": { "E_stop6":            { "color": "red"     } } },
                 { "type": "value", "options": { "F_minstd2_fix200":   { "color": "green"   } } },
                 { "type": "value", "options": { "G_minstd3_fix200":   { "color": "#00b3a1" } } },
-                { "type": "value", "options": { "H_minstd2_fix1000":  { "color": "#6cf"    } } }
+                { "type": "value", "options": { "H_minstd2_fix1000":  { "color": "#6cf"    } } },
+                { "type": "value", "options": { "I_minstd3_fix1000":  { "color": "#f0a"    } } }
               ] }
             ]
           },
@@ -367,7 +488,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT exit_time, account_id AS variant, symbol, side, round(size,0) AS \"notional_$\", round(entry_price,6) AS entry_px, round(exit_price,6) AS exit_px, round(pnl_bp,2) AS pnl_bp, round(pnl_bp*size/10000,4) AS \"pnl_$\", datediff('s', entry_time, exit_time) AS hold_s, exit_reason FROM position_log WHERE strategy='pairs' AND mode='paper' AND entry_time > dateadd('h', -24, now()) ORDER BY exit_time DESC LIMIT 100"
+          "rawSql": "SELECT exit_time, account_id AS variant, symbol, side, round(size,0) AS \"notional_$\", round(entry_price,6) AS entry_px, round(exit_price,6) AS exit_px, round(pnl_bp,2) AS pnl_bp, round(pnl_bp*size/10000,4) AS \"pnl_$\", datediff('s', timestamp, exit_time) AS hold_s, exit_reason FROM position_log WHERE strategy='pairs' AND mode='paper' AND timestamp > '${since}' ORDER BY exit_time DESC LIMIT 100"
         }
       ]
     }

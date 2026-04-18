@@ -35,10 +35,23 @@ _HEADERS = {
 class FlipsterClient:
     """High-level client: manages browser, cookies, and order placement."""
 
-    def __init__(self, browser: Optional[BrowserManager] = None):
+    def __init__(self, browser: Optional[BrowserManager] = None,
+                 proxies: Optional[list[str]] = None):
+        """proxies: optional list of "ip:port:user:pass" strings; rotated per request."""
         self._browser = browser or BrowserManager()
         self._session: Optional[requests.Session] = None
         self._cookies: dict[str, str] = {}
+        self._proxies = proxies or []
+        self._proxy_idx = 0
+
+    def _next_proxy(self) -> Optional[dict]:
+        if not self._proxies:
+            return None
+        spec = self._proxies[self._proxy_idx % len(self._proxies)]
+        self._proxy_idx += 1
+        ip, port, user, pwd = spec.split(":")
+        url = f"http://{user}:{pwd}@{ip}:{port}"
+        return {"http": url, "https": url}
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -93,7 +106,7 @@ class FlipsterClient:
         body = params.to_body(ref_price=price)
         url = f"{API_BASE}/api/v2/trade/positions/{symbol}"
 
-        resp = self._session.post(url, json=body)
+        resp = self._session.post(url, json=body, proxies=self._next_proxy())
         status = resp.status_code
 
         if status in (401, 403):
@@ -125,7 +138,7 @@ class FlipsterClient:
         body = OrderParams.close_body(price)
         url = f"{API_BASE}/api/v2/trade/positions/{symbol}/{slot}/size"
 
-        resp = self._session.put(url, json=body)
+        resp = self._session.put(url, json=body, proxies=self._next_proxy())
         status = resp.status_code
 
         if status in (401, 403):
