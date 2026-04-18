@@ -14,6 +14,9 @@ members = [
     "crates/infra/hft-common",
     "crates/infra/hft-state",
 
+    # account
+    "crates/account/hft-account",
+
     # transport
     "crates/transport/hft-zmq",
     "crates/transport/hft-shm",
@@ -142,6 +145,7 @@ ctrlc = { version = "3", features = ["termination"] }
 # testing
 mockall = "0.12"
 proptest = "1"
+tempfile = "3"
 
 # compression (bybit/bitget binary frame decode)
 flate2 = "1"

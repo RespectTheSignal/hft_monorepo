@@ -195,7 +195,7 @@
 
 ### 3.2 CLI / env (runner.rs)
 - [x] `--leverage` / `$LEVERAGE` → `AppConfig.leverage` → `services/strategy/src/main.rs::build_risk_config` → `RiskConfig.leverage`
-- [ ] `--login_names` / `$LOGIN_NAMES` (csv or `prefix001~prefix010` range) → `services/strategy::cli::expand_logins` **TODO**: multi-account 운영 환경 확정 시 구현.
+- [x] `--login_names` / `$LOGIN_NAMES` (csv or `prefix001~prefix010` range) → `hft-account::expand_logins` ✅
 - [x] `--interval` (default 10ms) → `StrategyRunner::with_tick_interval` ✅
 - [x] `--binance-latency` / `--base-latency` (default 200ms) → `TradeSettings::binance_last_book_ticker_latency_ms` ✅
 - [x] `--gate-latency` (default 100ms) → `TradeSettings::gate_last_book_ticker_latency_ms` ✅
@@ -440,7 +440,7 @@ Funding / EMA / misc: ✅
 - [~] FNV-1a / composite key / linear probing — **Drop reason**: ahash + SymbolTable 로 대체.
 - [~] `ipc_client.py` (UDS) — **Drop reason**: SHM 로 대체.
 - [x] `timing.py` → `hft-time::SystemClock` + 공통 심볼 로더는 publisher 에 흡수 ✅
-- [ ] `subaccount_utils.py::get_ip()` / `SubaccountUtils` → `hft-account::ip_detector` / `SubaccountOps` **TODO** Phase 3.
+- [x] `subaccount_utils.py::get_ip()` / `SubaccountUtils` → `hft-account::ip_detect::detect_local_ip()` ✅
 - [x] `mean_timing.py` → `hft-telemetry::record_stage_nanos` HDR 로 대체 ✅
 - [~] `flatbuffer_helpers.py` — **Drop reason**: flatbuffer 제거.
 
@@ -448,9 +448,9 @@ Funding / EMA / misc: ✅
 - [~] `fusion_ingestor.py` — **Drop reason**: QuestDB sink 로 충분.
 - [x] `monitoring_agent.py` → `services/monitoring-agent` (`monitoring-agent` + Telegram alert rules) ✅
 - [x] `strategy_manager.py` → `services/strategy::StrategyRunner` + `StrategyHandle` ✅
-- [ ] `account_manager.py` → `hft-account::AccountManager` **TODO** Phase 3 (multi-subaccount orchestration).
+- [x] `account_manager.py` → `hft-account::AccountManager` ✅
   - 현재 Phase 2 D 의 `GateAccountClient` 는 단일 계정 REST 폴링만 지원.
-- [ ] `margin_manager.py` + `v2.py` → `hft-account::MarginManager` **TODO** Phase 3.
+- [x] `margin_manager.py` + `v2.py` → `hft-account::MarginManager` ✅
 - [ ] `error_manager.py` → `services/error-manager` **TODO** Phase 3 (Telegram bot 포함).
 - [ ] `time_bucket_td_buffer.py` → `hft-strategy-core::buffer` **TODO** (현재 V7 narrative-close 에서 간이 버전만 사용).
 
@@ -481,7 +481,7 @@ Funding / EMA / misc: ✅
 - [ ] `prepare_strategy_v2.py` → 🔶 `tools/prepare-strategy` **TODO** P2 E (multi-account 운영 확정 시).
 - [~] `prepare_strategy_temp.py` — **Drop reason**.
 - [ ] `profit_calculator.py` → 🔷 `tools/profit-calc` **TODO** Phase 3.
-- [ ] `margin_manager.py` (top-level) → `hft-account::MarginManager` **TODO** Phase 3.
+- [x] `margin_manager.py` (top-level) → `hft-account::MarginManager` ✅
 
 ### 11.5 거래소별 WS 스트림 (Python standalone) — ✅ 대부분 Rust 로 대체
 - [~] `gate_bookticker_ws_stream.py` / `gate_order_book_ws_stream.py` / `gate_trades_ws_stream.py` / `gate_fx_ws_stream.py` / `binance_publisher.py` / `binance_subscriber.py` / `bitget_bookticker_stream.py` / `bitget_collector.py` / `bybit_bookticker_ws_stream.py` — **Drop reason**: `services/publisher` + `hft-exchange-{gate,binance,bitget,bybit}` 로 완전 대체.
