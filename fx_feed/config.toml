@@ -1,0 +1,93 @@
+# fx_feed config
+# cp config.example.toml config.toml
+
+[questdb]
+# data_publisher/questdb_uploader와 같은 인스턴스
+endpoint = "tcp::addr=211.181.122.102:9009;"
+table = "fx_bookticker"
+flush_interval_ms = 200
+
+[binance]
+# Binance USD-M PERP — XAU/XAG/XPT metal perps.
+# Spot엔 EURUSDT밖에 없고 나머지 FX는 없음. Perp엔 FX currency 없고 metal만 있음.
+# Gate(XAU_USDT/XAG_USDT/XAUT_USDT) 1:1 매칭. bookTicker 스트림에 E/T 있어서
+# wire_delay_ms 측정 가능.
+ws_url = "wss://fstream.binance.com/stream"
+symbols = [
+    "XAUUSDT",   # gold perp
+    "XAGUSDT",   # silver perp
+    "XPTUSDT",   # platinum perp
+    "XAUTUSDT",  # Tether Gold perp
+    "PAXGUSDT",  # PAX Gold perp
+]
+
+[dxfeed]
+# https://tools.dxfeed.com/webservice 에서 데모 토큰
+# env: DXFEED_TOKEN
+ws_url = "wss://demo.dxfeed.com/dxlink-ws"
+symbols = [
+    "EUR/USD:FXCM", "GBP/USD:FXCM", "USD/JPY:FXCM", "AUD/USD:FXCM",
+    "NZD/USD:FXCM", "USD/CHF:FXCM", "USD/CAD:FXCM",
+    "EUR/GBP:FXCM", "EUR/JPY:FXCM", "GBP/JPY:FXCM", "AUD/JPY:FXCM",
+    "XAU/USD:FXCM", "XAG/USD:FXCM",
+]
+
+[databento]
+# env: DATABENTO_API_KEY
+# dataset 후보:
+#   EFX.FXCM  : FXCM spot FX top-of-book (FX용)
+#   GLBX.MDP3 : CME futures (FX futures: 6E/6B/6J 등, 심볼 다름)
+# schema:
+#   mbp-1  : top-of-book
+#   bbo-1s : 1초 집계
+dataset = "EFX.FXCM"
+schema = "mbp-1"
+symbols = [
+    # Majors
+    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "NZDUSD", "USDCHF", "USDCAD",
+    # Crosses
+    "EURGBP", "EURJPY", "GBPJPY", "AUDJPY", "EURAUD", "EURCHF",
+    # Metals
+    "XAUUSD", "XAGUSD",
+]
+
+# raw symbol → Gate FX symbol 정규화 테이블
+# Gate FX 포맷: {BASE}_{QUOTE} (gate_bookticker 스키마와 동일)
+[symbols.binance]
+XAUUSDT  = "XAU_USDT"
+XAGUSDT  = "XAG_USDT"
+XPTUSDT  = "XPT_USDT"
+XAUTUSDT = "XAUT_USDT"
+PAXGUSDT = "PAXG_USDT"
+
+[symbols.dxfeed]
+"EUR/USD:FXCM" = "EUR_USD"
+"GBP/USD:FXCM" = "GBP_USD"
+"USD/JPY:FXCM" = "USD_JPY"
+"AUD/USD:FXCM" = "AUD_USD"
+"NZD/USD:FXCM" = "NZD_USD"
+"USD/CHF:FXCM" = "USD_CHF"
+"USD/CAD:FXCM" = "USD_CAD"
+"EUR/GBP:FXCM" = "EUR_GBP"
+"EUR/JPY:FXCM" = "EUR_JPY"
+"GBP/JPY:FXCM" = "GBP_JPY"
+"AUD/JPY:FXCM" = "AUD_JPY"
+"XAU/USD:FXCM" = "XAU_USD"
+"XAG/USD:FXCM" = "XAG_USD"
+
+[symbols.databento]
+EURUSD = "EUR_USD"
+GBPUSD = "GBP_USD"
+USDJPY = "USD_JPY"
+AUDUSD = "AUD_USD"
+NZDUSD = "NZD_USD"
+USDCHF = "USD_CHF"
+USDCAD = "USD_CAD"
+EURGBP = "EUR_GBP"
+EURJPY = "EUR_JPY"
+GBPJPY = "GBP_JPY"
+AUDJPY = "AUD_JPY"
+EURAUD = "EUR_AUD"
+EURCHF = "EUR_CHF"
+XAUUSD = "XAU_USD"
+XAGUSD = "XAG_USD"

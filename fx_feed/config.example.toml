@@ -1,0 +1,61 @@
+# fx_feed config
+# cp config.example.toml config.toml
+
+[questdb]
+# data_publisher/questdb_uploader와 같은 인스턴스
+endpoint = "tcp::addr=211.181.122.102:9009;"
+table = "fx_bookticker"
+flush_interval_ms = 200
+
+[binance]
+# Binance spot에서 FX-adjacent stable-quoted pair (진짜 FX majors는 없음)
+symbols = [
+    "EURUSDT",
+    "GBPUSDT",
+    "AUDUSDT",
+    "JPYUSDT",
+]
+ws_url = "wss://stream.binance.com:9443/stream"
+
+[dxfeed]
+# https://tools.dxfeed.com/webservice 등에서 토큰 발급
+# env: DXFEED_TOKEN
+ws_url = "wss://demo.dxfeed.com/dxlink-ws"
+symbols = [
+    "EUR/USD:FXCM",
+    "GBP/USD:FXCM",
+    "USD/JPY:FXCM",
+    "AUD/USD:FXCM",
+]
+
+[databento]
+# env: DATABENTO_API_KEY
+# 실제 FX dataset/schema는 확정 필요. EFX.FXCM 또는 IFEU.IMPACT 등 계약 의존
+dataset = "EFX.FXCM"
+schema = "mbp-1"
+symbols = [
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "AUDUSD",
+]
+
+# raw symbol → Gate FX symbol 정규화 테이블
+# Gate FX 정확한 포맷 확정되면 여기만 고치면 됨
+[symbols.binance]
+EURUSDT = "EUR_USD"
+GBPUSDT = "GBP_USD"
+AUDUSDT = "AUD_USD"
+JPYUSDT = "JPY_USD"
+
+[symbols.dxfeed]
+"EUR/USD:FXCM" = "EUR_USD"
+"GBP/USD:FXCM" = "GBP_USD"
+"USD/JPY:FXCM" = "USD_JPY"
+"AUD/USD:FXCM" = "AUD_USD"
+
+[symbols.databento]
+EURUSD = "EUR_USD"
+GBPUSD = "GBP_USD"
+USDJPY = "USD_JPY"
+AUDUSD = "AUD_USD"

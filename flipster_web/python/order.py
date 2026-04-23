@@ -30,6 +30,7 @@ class OrderParams:
     price: Optional[float] = None  # required for limit orders
     leverage: int = 1
     margin_type: MarginType = MarginType.ISOLATED
+    post_only: bool = False  # if True, reject when would cross (true maker only)
 
     def __post_init__(self):
         if self.order_type == OrderType.LIMIT and self.price is None:
@@ -43,7 +44,7 @@ class OrderParams:
         """
         now_ns = str(time.time_ns())
         price = self.price if self.price is not None else ref_price
-        return {
+        body = {
             "side": self.side.value,
             "requestId": str(uuid.uuid4()),
             "timestamp": now_ns,
@@ -56,6 +57,9 @@ class OrderParams:
             "marginType": self.margin_type.value,
             "orderType": self.order_type.value,
         }
+        if self.post_only:
+            body["postOnly"] = True
+        return body
 
     @staticmethod
     def close_body(price: float) -> dict:

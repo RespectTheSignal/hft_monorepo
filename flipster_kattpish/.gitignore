@@ -1,8 +1,0 @@
-/target
-/run
-/logs
-/.env
-/backtest/.venv
-/backtest/*.png
-/backtest/*.csv
-/grafana/data

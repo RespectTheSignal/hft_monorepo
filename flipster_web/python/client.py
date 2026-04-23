@@ -153,6 +153,26 @@ class FlipsterClient:
 
         return data
 
+    def cancel_order(self, symbol: str, order_id: str) -> dict | None:
+        """Cancel a pending limit order.
+
+        DELETE /api/v2/trade/orders/{symbol}/{orderId}
+        Returns parsed JSON on success, raises on auth/server errors.
+        """
+        if self._session is None:
+            raise RuntimeError("Call login_done() first")
+        url = f"{API_BASE}/api/v2/trade/orders/{symbol}/{order_id}"
+        resp = self._session.delete(url, proxies=self._next_proxy())
+        if resp.status_code in (401, 403):
+            raise PermissionError(f"Auth failed ({resp.status_code})")
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"raw": resp.text[:200]}
+        if resp.status_code >= 400:
+            raise RuntimeError(f"cancel API error {resp.status_code}: {json.dumps(data)[:200]}")
+        return data
+
     def raw_request(self, symbol: str, body: dict) -> dict:
         """Send a raw JSON body to the order endpoint (for debugging)."""
         if self._session is None:
