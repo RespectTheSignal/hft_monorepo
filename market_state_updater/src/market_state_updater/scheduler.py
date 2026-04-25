@@ -27,6 +27,30 @@ class TickResult:
     ok: int
 
 
+def stagger_initial_runs(
+    schedules: list[Schedule],
+    last_run_at: dict[str, float],
+    start_now: float,
+    stagger_step_secs: float,
+) -> None:
+    """첫 tick burst 회피.
+
+    각 schedule 의 last_run_at 을 (start - cadence + offset_i) 로 설정해서
+    next_due = start + offset_i 가 되게 함.
+
+    offset_i = min(i × stagger_step_secs, cadence_secs / 2)
+      - cadence 짧은 schedule 의 첫 실행이 너무 늦어지지 않게 cap (cadence/2).
+      - stagger_step_secs == 0 이면 비활성 (모든 schedule 즉시 due — 이전 동작).
+
+    LCM 시점의 동기화 burst 도 자연 분산됨 (각 schedule 의 first_run 시점이 다르니).
+    """
+    if stagger_step_secs <= 0:
+        return
+    for i, s in enumerate(schedules):
+        offset = min(i * stagger_step_secs, s.cadence_secs / 2)
+        last_run_at[s.name] = start_now - s.cadence_secs + offset
+
+
 def tick(
     schedules: list[Schedule],
     now: float,

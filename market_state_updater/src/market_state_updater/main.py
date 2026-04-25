@@ -40,7 +40,7 @@ from market_state_updater.jobs.common import (
     windows_for_mode,
 )
 from market_state_updater.notifier import TelegramNotifier
-from market_state_updater.scheduler import Schedule, tick
+from market_state_updater.scheduler import Schedule, stagger_initial_runs, tick
 
 logger = structlog.get_logger(__name__)
 
@@ -259,11 +259,16 @@ def main() -> int:
         quote_exchanges=list(cfg.quote_exchanges),
         cadence_secs_distinct=cadence_summary,
         tick_interval_secs=cfg.interval_secs,
+        stagger_step_secs=cfg.stagger_step_secs,
         telegram_enabled=notifier.enabled,
         host=host,
     )
 
     last_run_at: dict[str, float] = {}
+    if not cfg.once:
+        stagger_initial_runs(
+            schedules, last_run_at, time.monotonic(), cfg.stagger_step_secs
+        )
     consecutive_failures = 0
     alert_sent = False
     restart_delay_secs = 1

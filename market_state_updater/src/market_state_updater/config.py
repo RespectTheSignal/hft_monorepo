@@ -52,6 +52,7 @@ class AppConfig:
 
     window_mode: WindowMode
     cadence_overrides: dict[int, float]   # window → cadence_secs override
+    stagger_step_secs: float              # 첫 tick burst 회피 (0 = off)
 
     market_gap_prefix: str
     base_exchange: str
@@ -321,6 +322,12 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
     cadence_overrides = _cadence_overrides_from(
         "CADENCE_OVERRIDES_SECS", sched_section.get("cadence_overrides"), {}
     )
+    stagger_step_secs = float(
+        os.environ.get(
+            "STAGGER_STEP_SECS",
+            sched_section.get("stagger_step_secs", 0.5),
+        )
+    )
 
     return AppConfig(
         questdb_url=questdb_url,
@@ -329,6 +336,7 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
         once=args.once,
         window_mode=window_mode,
         cadence_overrides=cadence_overrides,
+        stagger_step_secs=stagger_step_secs,
         market_gap_prefix=market_gap_prefix,
         base_exchange=base_exchange,
         quote_exchanges=quote_exchanges,

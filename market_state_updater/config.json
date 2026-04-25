@@ -7,7 +7,9 @@
 
   "scheduler": {
     "$cadence_overrides_comment": "윈도우별 갱신 cadence (초). 비워두면 jobs/common.py:DEFAULT_CADENCE_SECS 사용 (1m=5s, 5m=25s, 10m=60s, 30m=180s, 60m=300s, 240m=1200s, 720m=3600s, 1440m=7200s).",
-    "cadence_overrides": {}
+    "cadence_overrides": {},
+    "$stagger_step_secs_comment": "첫 tick burst 회피 — schedule i 의 첫 실행을 i × stagger_step_secs 만큼 지연 (cadence/2 cap). 0 으로 두면 비활성 (모든 schedule 즉시 실행).",
+    "stagger_step_secs": 0.5
   },
 
 
