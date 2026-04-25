@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
 from market_state_updater.config import load_config
 
+# config.json / env 둘 다 영향 주는 키 — fixture 에서 다 비움.
 _KEYS = [
     "QUESTDB_URL",
     "REDIS_URL",
@@ -19,8 +22,13 @@ _KEYS = [
     "MARKET_GAP_INCLUDE_GATE_GATE_WEB_GAP",
     "MARKET_GAP_INCLUDE_PRICE_CHANGE",
     "MARKET_GAP_INCLUDE_PRICE_CHANGE_GAP_CORR",
+    "MARKET_GAP_INCLUDE_MID_CORR",
+    "MARKET_GAP_FILL_PREV_LOOKBACK_MINUTES",
     "CORR_QUOTE_EXCHANGES",
     "CORR_RETURN_SECONDS_OVERRIDES",
+    "MID_CORR_REDIS_PREFIX",
+    "MID_CORR_QUOTE_EXCHANGES",
+    "MID_CORR_MIN_SAMPLES",
     "PRICE_CHANGE_REDIS_PREFIX",
     "PRICE_CHANGE_SOURCES",
     "HEARTBEAT_REDIS_PREFIX",
@@ -31,13 +39,27 @@ _KEYS = [
 
 
 @pytest.fixture
-def clean_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
+    """env 를 비우고 cwd 를 tmp_path 로 이동.
+
+    `_resolve_config_path` 가 cwd → 패키지 루트 순으로 폴백하니, tmp 에 빈 config 를
+    두면 패키지 루트의 실제 config.json 가 잡히지 않음 (테스트 격리).
+    개별 테스트가 `_write_cfg` 로 다시 쓰면 덮어씀.
+    """
     for k in _KEYS:
         monkeypatch.delenv(k, raising=False)
-    yield
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.json").write_text("{}")
+    yield tmp_path
 
 
-def test_load_config_defaults(clean_env: None) -> None:
+def _write_cfg(dir_: Path, cfg: dict) -> Path:
+    p = dir_ / "config.json"
+    p.write_text(json.dumps(cfg))
+    return p
+
+
+def test_load_config_pure_defaults(clean_env: Path) -> None:
     cfg = load_config([])
     assert cfg.questdb_url == "http://localhost:9000"
     assert cfg.redis_url == "redis://localhost:6379"
@@ -48,97 +70,125 @@ def test_load_config_defaults(clean_env: None) -> None:
     assert cfg.gap_bases == ("gate", "gate_web")
     assert cfg.include_spread_pair is True
     assert cfg.include_price_change is True
+    assert cfg.include_price_change_gap_corr is True
     assert cfg.price_change_sources == ("gate", "binance")
+    assert cfg.corr_quote_exchanges == ("binance",)
+    assert cfg.corr_return_seconds_overrides == {}
     assert cfg.heartbeat_prefix == "gate_hft:_meta:market_state_updater"
     assert cfg.telegram_bot_token is None
-    assert cfg.telegram_chat_id is None
     assert cfg.alert_after_consecutive_failures == 5
 
 
-def test_load_config_disable_gate_web(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("MARKET_GAP_INCLUDE_GATE_WEB", "0")
+def test_config_json_loaded_from_cwd(clean_env: Path) -> None:
+    _write_cfg(
+        clean_env,
+        {
+            "interval_secs": 33,
+            "window_mode": "fast",
+            "market_gap": {
+                "redis_prefix": "test:mg",
+                "base_exchange": "binance",
+                "quote_exchanges": ["bybit", "bitget"],
+                "fill_prev_lookback_minutes": 7,
+            },
+            "include": {"gate_web": False, "price_change_gap_corr": False},
+            "price_change": {"sources": ["gate"]},
+            "corr": {"return_seconds_overrides": {"60": 60, "240": 120}},
+            "heartbeat": {"redis_prefix": "test:hb"},
+            "alert_after_consecutive_failures": 9,
+        },
+    )
     cfg = load_config([])
+    assert cfg.interval_secs == 33
+    assert cfg.window_mode == "fast"
+    assert cfg.market_gap_prefix == "test:mg"
+    assert cfg.base_exchange == "binance"
+    assert cfg.quote_exchanges == ("bybit", "bitget")
     assert cfg.include_gate_web is False
-    assert cfg.gap_bases == ("gate",)
+    assert cfg.gap_bases == ("binance",)  # gate_web disabled
+    assert cfg.include_price_change_gap_corr is False
+    assert cfg.price_change_sources == ("gate",)
+    assert cfg.corr_return_seconds_overrides == {60: 60, 240: 120}
+    assert cfg.heartbeat_prefix == "test:hb"
+    assert cfg.alert_after_consecutive_failures == 9
 
 
-def test_load_config_csv_exchanges(clean_env: None) -> None:
-    cfg = load_config(["--exchanges", "binance,bybit,bitget"])
-    assert cfg.quote_exchanges == ("binance", "bybit", "bitget")
+def test_config_json_explicit_path(clean_env: Path) -> None:
+    """--config <path> 으로 임의 경로의 JSON 로드."""
+    p = clean_env / "subdir"
+    p.mkdir()
+    cfg_path = _write_cfg(p, {"interval_secs": 99})
+    cfg = load_config(["--config", str(cfg_path)])
+    assert cfg.interval_secs == 99
 
 
-def test_load_config_once_zeros_interval(clean_env: None) -> None:
+def test_env_overrides_config_json(
+    clean_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_cfg(clean_env, {"window_mode": "fast", "interval_secs": 30})
+    monkeypatch.setenv("WINDOW_MODE", "slow")
+    monkeypatch.setenv("UPDATE_INTERVAL_SECS", "120")
+    cfg = load_config([])
+    assert cfg.window_mode == "slow"
+    assert cfg.interval_secs == 120
+
+
+def test_cli_overrides_env(clean_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_cfg(clean_env, {"window_mode": "fast"})
+    monkeypatch.setenv("WINDOW_MODE", "slow")
+    cfg = load_config(["--windows", "all"])
+    assert cfg.window_mode == "all"
+
+
+def test_cli_exchanges_overrides_config(clean_env: Path) -> None:
+    _write_cfg(clean_env, {"market_gap": {"quote_exchanges": ["binance"]}})
+    cfg = load_config(["--exchanges", "bybit,bitget"])
+    assert cfg.quote_exchanges == ("bybit", "bitget")
+
+
+def test_once_zeros_interval(clean_env: Path) -> None:
+    _write_cfg(clean_env, {"interval_secs": 30})
     cfg = load_config(["--once"])
     assert cfg.once is True
     assert cfg.interval_secs == 0
 
 
-def test_load_config_empty_exchanges_exits(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("MARKET_GAP_QUOTE_EXCHANGES", "")
+def test_empty_quote_exchanges_exits(clean_env: Path) -> None:
+    _write_cfg(clean_env, {"market_gap": {"quote_exchanges": []}})
     with pytest.raises(SystemExit):
-        load_config(["--exchanges", ""])
+        load_config([])
 
 
-def test_gap_bases_when_base_is_gate_web(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """base 가 이미 gate_web 이면 중복 추가 안 함."""
-    monkeypatch.setenv("MARKET_GAP_BASE", "gate_web")
-    cfg = load_config([])
-    assert cfg.gap_bases == ("gate_web",)
-
-
-def test_load_config_window_mode_cli(clean_env: None) -> None:
-    assert load_config(["--windows", "fast"]).window_mode == "fast"
-    assert load_config(["--windows", "slow"]).window_mode == "slow"
-    assert load_config(["--windows", "all"]).window_mode == "all"
-
-
-def test_load_config_window_mode_env(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("WINDOW_MODE", "fast")
-    assert load_config([]).window_mode == "fast"
-
-
-def test_load_config_window_mode_invalid_exits(clean_env: None) -> None:
+def test_invalid_window_mode_exits(clean_env: Path) -> None:
+    _write_cfg(clean_env, {"window_mode": "nope"})
     with pytest.raises(SystemExit):
-        load_config(["--windows", "nope"])
+        load_config([])
 
 
-def test_load_config_corr_defaults(clean_env: None) -> None:
-    cfg = load_config([])
-    assert cfg.include_price_change_gap_corr is True
-    assert cfg.corr_quote_exchanges == ("binance",)
-    assert cfg.corr_return_seconds_overrides == {}
-
-
-def test_load_config_corr_disabled(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("MARKET_GAP_INCLUDE_PRICE_CHANGE_GAP_CORR", "0")
-    assert load_config([]).include_price_change_gap_corr is False
-
-
-def test_load_config_corr_overrides_parsed(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("CORR_RETURN_SECONDS_OVERRIDES", "60:60,240:120")
-    cfg = load_config([])
-    assert cfg.corr_return_seconds_overrides == {60: 60, 240: 120}
-
-
-def test_load_config_telegram_envs(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch
+def test_telegram_envs_picked_up(
+    clean_env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "abc")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
-    monkeypatch.setenv("ALERT_AFTER_CONSECUTIVE_FAILURES", "3")
     cfg = load_config([])
     assert cfg.telegram_bot_token == "abc"
     assert cfg.telegram_chat_id == "12345"
-    assert cfg.alert_after_consecutive_failures == 3
+
+
+def test_dollar_keys_in_config_ignored(clean_env: Path) -> None:
+    """`$comment` 같은 키는 schema 가 아니라 메타 → ignore."""
+    _write_cfg(
+        clean_env,
+        {"$comment": "blah", "$schema_version": 1, "interval_secs": 7},
+    )
+    cfg = load_config([])
+    assert cfg.interval_secs == 7
+
+
+def test_fill_prev_lookback_propagated_to_env(clean_env: Path) -> None:
+    """jobs/common.py 가 import 시 env 만 보니, file 값을 env 로 주입해서 통일."""
+    import os
+
+    _write_cfg(clean_env, {"market_gap": {"fill_prev_lookback_minutes": 13}})
+    load_config([])
+    assert os.environ["MARKET_GAP_FILL_PREV_LOOKBACK_MINUTES"] == "13"

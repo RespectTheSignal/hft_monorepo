@@ -15,6 +15,7 @@ Blob:
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import redis
@@ -134,12 +135,18 @@ def run(
     window_minutes: int,
 ) -> bool:
     log = logger.bind(job="gate_web_gap", window=window_minutes)
+    t0 = time.monotonic()
     try:
         payload = questdb_exec(questdb_url, build_query(window_minutes))
         gaps = parse_dataset(payload)
     except Exception as e:  # noqa: BLE001
-        log.error("questdb_failed", error=str(e))
+        log.error(
+            "questdb_failed",
+            error=str(e),
+            query_ms=int((time.monotonic() - t0) * 1000),
+        )
         return False
+    query_ms = int((time.monotonic() - t0) * 1000)
     valid = filter_valid_gaps(gaps)
     blob = {
         "window_minutes": window_minutes,
@@ -153,7 +160,7 @@ def run(
         log.error("redis_set_failed", error=str(e), key=key)
         return False
     if not valid:
-        log.info("updated_empty", key=key)
+        log.info("updated_empty", key=key, query_ms=query_ms)
         return True
 
     mean = sum(valid.values()) / len(valid)
@@ -167,5 +174,6 @@ def run(
         max_symbol=max_sym,
         min_bp=round(min_v * 10000, 2),
         min_symbol=min_sym,
+        query_ms=query_ms,
     )
     return True

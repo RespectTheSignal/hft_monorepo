@@ -21,6 +21,7 @@ def test_gap_query_short_window_uses_fill_prev() -> None:
 def test_gap_query_long_window_no_fill_prev() -> None:
     sql = gap.build_query("gate", "bybit", 60)
     assert "FILL(PREV)" not in sql
+    # 60m 디폴트 SAMPLE BY = 1s
     assert "SAMPLE BY 1s" in sql
     assert "bybit_bookticker" in sql
 
@@ -31,9 +32,10 @@ def test_gap_query_gate_web_base_uses_webbookticker() -> None:
     assert "binance_bookticker" in sql
 
 
-def test_gap_query_very_long_window_uses_5s() -> None:
+def test_gap_query_very_long_window_uses_default_interval() -> None:
+    # 720m 디폴트 = 10s
     sql = gap.build_query("gate", "binance", 720)
-    assert "SAMPLE BY 5s" in sql
+    assert "SAMPLE BY 10s" in sql
 
 
 def test_spread_pair_query_has_both_sides() -> None:
@@ -61,7 +63,8 @@ def test_gate_web_gap_query_join_two_gate_tables() -> None:
 def test_gate_web_gap_query_30m_no_fill() -> None:
     sql = gate_web_gap.build_query(30)
     assert "FILL(PREV)" not in sql
-    assert "SAMPLE BY 1s" in sql
+    # 30m 디폴트 = 500T (500ms)
+    assert "SAMPLE BY 500T" in sql
 
 
 def test_price_change_query_basic() -> None:

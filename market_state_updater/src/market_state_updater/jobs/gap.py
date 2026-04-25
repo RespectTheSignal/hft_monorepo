@@ -20,6 +20,7 @@ Blob shape (Rust MarketGapState 와 호환):
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import redis
@@ -186,13 +187,19 @@ def run(
     log = logger.bind(
         job="gap", base=base_exchange, quote=quote_exchange, window=window_minutes
     )
+    t0 = time.monotonic()
     try:
         avg_mid_gap_by_symbol, avg_spread_by_symbol = fetch(
             questdb_url, base_exchange, quote_exchange, window_minutes
         )
     except Exception as e:  # noqa: BLE001
-        log.error("questdb_failed", error=str(e))
+        log.error(
+            "questdb_failed",
+            error=str(e),
+            query_ms=int((time.monotonic() - t0) * 1000),
+        )
         return False
+    query_ms = int((time.monotonic() - t0) * 1000)
     blob = {
         "base_exchange": base_exchange,
         "quote_exchange": quote_exchange,
@@ -209,7 +216,7 @@ def run(
         return False
 
     if not avg_mid_gap_by_symbol:
-        log.info("updated_empty", key=key)
+        log.info("updated_empty", key=key, query_ms=query_ms)
         return True
 
     gaps = avg_mid_gap_by_symbol
@@ -230,5 +237,6 @@ def run(
         min_gap_bp=round(min_gap * 10000, 2),
         min_gap_symbol=min_sym,
         avg_spread_bp=round(avg_spread * 10000, 2),
+        query_ms=query_ms,
     )
     return True

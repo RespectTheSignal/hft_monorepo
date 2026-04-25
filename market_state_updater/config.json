@@ -1,0 +1,63 @@
+{
+  "$comment": "market_state_updater 설정. secret (DB URL with auth, telegram token) 은 .env 에 두고 나머지 모두 여기. gitignore 안 됨 — 변경 시 커밋.",
+
+  "interval_secs": 5,
+  "window_mode": "all",
+  "alert_after_consecutive_failures": 5,
+
+  "market_gap": {
+    "redis_prefix": "gate_hft:market_gap",
+    "base_exchange": "gate",
+    "quote_exchanges": ["binance"],
+    "fill_prev_lookback_minutes": 10,
+    "$sample_interval_overrides_comment": "gap/spread_pair/gate_web_gap 의 SAMPLE BY 단위. QuestDB 문법 (100T=100ms, 1s, 1m). 비워두면 jobs/common.py:DEFAULT_SAMPLE_INTERVALS 사용.",
+    "sample_interval_overrides": {
+      "1": "100T",
+      "5": "200T",
+      "10": "200T",
+      "30": "500T",
+      "60": "1s",
+      "240": "5s",
+      "720": "10s"
+    }
+  },
+
+  "include": {
+    "gate_web": true,
+    "spread_pair": true,
+    "gate_gate_web_gap": true,
+    "price_change": true,
+    "price_change_gap_corr": true,
+    "mid_corr": true
+  },
+
+  "price_change": {
+    "redis_prefix": "gate_hft:price_change",
+    "sources": ["gate", "binance"]
+  },
+
+  "corr": {
+    "quote_exchanges": ["binance"],
+    "$return_seconds_overrides_comment": "price_change_gap_corr 의 X = N초 step return 에서 N. window별. 비워두면 jobs/common.py:DEFAULT_CORR_RETURN_SECONDS 사용.",
+    "return_seconds_overrides": {
+      "1": 1,
+      "5": 5,
+      "10": 5,
+      "30": 10,
+      "60": 60,
+      "240": 120,
+      "720": 300
+    }
+  },
+
+  "mid_corr": {
+    "$comment": "원본 update_market_mid_correlation.py 패턴. Pearson corr(base_mid, quote_mid). 한 cycle 호출이 gate, gate_web 두 base 모두 처리해서 blob 1개에 묶음.",
+    "redis_prefix": "gate_hft:market_mid_corr",
+    "quote_exchanges": ["binance"],
+    "min_samples": 30
+  },
+
+  "heartbeat": {
+    "redis_prefix": "gate_hft:_meta:market_state_updater"
+  }
+}

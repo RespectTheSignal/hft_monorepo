@@ -21,16 +21,18 @@ def test_bookticker_table_for_gap_base_gate_web() -> None:
     assert bookticker_table_for_gap_base("bybit") == "bybit_bookticker"
 
 
-def test_sample_interval_buckets() -> None:
-    # 1m -> 100ms (정밀도)
+def test_sample_interval_known_windows() -> None:
+    """알려진 윈도우는 DEFAULT_SAMPLE_INTERVALS 따라감 (test_sample_intervals.py 가 상세)."""
     assert sample_interval_for_window(1) == "100T"
-    # 5~120m -> 1s
-    assert sample_interval_for_window(5) == "1s"
+    assert sample_interval_for_window(5) == "200T"
     assert sample_interval_for_window(60) == "1s"
+    assert sample_interval_for_window(720) == "10s"
+
+
+def test_sample_interval_unknown_window_fallback() -> None:
+    # 디폴트 dict 에 없는 값은 fallback: ≤1 → 100T, ≤120 → 1s, > → 5s
     assert sample_interval_for_window(120) == "1s"
-    # >120m -> 5s (cost↓)
-    assert sample_interval_for_window(240) == "5s"
-    assert sample_interval_for_window(720) == "5s"
+    assert sample_interval_for_window(1000) == "5s"
 
 
 def test_filter_valid_gaps_drops_outliers() -> None:

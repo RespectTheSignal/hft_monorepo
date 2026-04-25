@@ -118,12 +118,57 @@ def bookticker_table_for_gap_base(base_exchange: str) -> str:
     return f"{b}_bookticker"
 
 
+# gap / spread_pair / gate_web_gap 의 SAMPLE BY 단위. QuestDB 문법 그대로
+# ("100T" = 100ms, "1s", "5s", "1m" 등). 운영 중 QuestDB 부하 보고 조정용.
+DEFAULT_SAMPLE_INTERVALS: dict[int, str] = {
+    1: "100T",
+    5: "200T",
+    10: "200T",
+    30: "500T",
+    60: "1s",
+    240: "5s",
+    720: "10s",
+}
+
+# main 에서 set_sample_interval_overrides(cfg.sample_interval_overrides) 로 주입.
+# 빈 dict 면 DEFAULT_SAMPLE_INTERVALS 만 사용.
+_SAMPLE_INTERVAL_OVERRIDES: dict[int, str] = {}
+
+
+def set_sample_interval_overrides(overrides: dict[int, str]) -> None:
+    """gap 류 job 의 SAMPLE BY 단위 override (process-wide). main 에서 1회 호출."""
+    global _SAMPLE_INTERVAL_OVERRIDES
+    _SAMPLE_INTERVAL_OVERRIDES = dict(overrides)
+
+
+def parse_sample_interval_overrides(s: str) -> dict[int, str]:
+    """env MARKET_GAP_SAMPLE_INTERVAL_OVERRIDES='1:100T,5:200T,60:1s' 파싱.
+
+    빈 문자열은 빈 dict. 잘못된 토큰은 ValueError.
+    """
+    out: dict[int, str] = {}
+    for part in s.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        k_str, _, v_str = part.partition(":")
+        if not v_str:
+            raise ValueError(f"invalid sample interval override token: {part!r}")
+        out[int(k_str.strip())] = v_str.strip()
+    return out
+
+
 def sample_interval_for_window(window_minutes: int) -> str:
     """윈도우 길이에 따른 SAMPLE BY 간격.
 
-    1m → 100T (100ms, 정밀도 ↑), 5m~120m → 1s, 그 이상 → 5s (쿼리 비용 ↓).
+    우선순위: process-wide overrides > DEFAULT_SAMPLE_INTERVALS > 코드 fallback.
+    fallback: ≤1m → 100T, ≤120m → 1s, > → 5s.
     """
     w = int(window_minutes)
+    if w in _SAMPLE_INTERVAL_OVERRIDES:
+        return _SAMPLE_INTERVAL_OVERRIDES[w]
+    if w in DEFAULT_SAMPLE_INTERVALS:
+        return DEFAULT_SAMPLE_INTERVALS[w]
     if w <= 1:
         return "100T"
     if w <= 120:

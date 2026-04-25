@@ -18,6 +18,7 @@ Blob:
 from __future__ import annotations
 
 import json
+import time
 
 import redis
 import structlog
@@ -112,11 +113,18 @@ def run(
     """source: 'gate' → gate_bookticker, 'binance' → binance_bookticker, ..."""
     log = logger.bind(job="price_change", source=source, window=window_minutes)
     table = table_for_source(source)
+    t0 = time.monotonic()
     try:
         changes = fetch(questdb_url, table, window_minutes)
     except Exception as e:  # noqa: BLE001
-        log.error("questdb_failed", error=str(e), table=table)
+        log.error(
+            "questdb_failed",
+            error=str(e),
+            table=table,
+            query_ms=int((time.monotonic() - t0) * 1000),
+        )
         return False
+    query_ms = int((time.monotonic() - t0) * 1000)
     blob = {
         "source": source,
         "window_minutes": window_minutes,
@@ -130,7 +138,7 @@ def run(
         log.error("redis_set_failed", error=str(e), key=key)
         return False
     if not changes:
-        log.info("updated_empty", key=key)
+        log.info("updated_empty", key=key, query_ms=query_ms)
         return True
     vals = list(changes.values())
     mean = sum(vals) / len(vals)
@@ -144,5 +152,6 @@ def run(
         max_symbol=max_sym,
         min_bp=round(min_v * 10000, 1),
         min_symbol=min_sym,
+        query_ms=query_ms,
     )
     return True

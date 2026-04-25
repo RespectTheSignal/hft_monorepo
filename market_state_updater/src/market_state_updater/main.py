@@ -23,6 +23,7 @@ from market_state_updater.config import AppConfig, load_config
 from market_state_updater.jobs import (
     gap,
     gate_web_gap,
+    mid_corr,
     price_change,
     price_change_gap_corr,
     spread_pair,
@@ -128,7 +129,27 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
                     )
                 )
 
-    # 5) gate_web price-change ↔ gap correlation : quote × window
+    # 5) mid level corr (gate, gate_web vs quote) : quote × window
+    if cfg.include_mid_corr:
+        for quote in cfg.mid_corr_quote_exchanges:
+            for w in gap_windows:
+                out.append(
+                    Schedule(
+                        name=f"mid_corr:{quote}:{w}m",
+                        period=WINDOW_PERIOD.get(w, 1),
+                        run=partial(
+                            mid_corr.run,
+                            cfg.questdb_url,
+                            redis_client,
+                            cfg.mid_corr_prefix,
+                            quote,
+                            w,
+                            cfg.mid_corr_min_samples,
+                        ),
+                    )
+                )
+
+    # 6) gate_web ↔ quote step-return correlation : quote × window
     if cfg.include_price_change_gap_corr:
         for quote in cfg.corr_quote_exchanges:
             for w in gap_windows:

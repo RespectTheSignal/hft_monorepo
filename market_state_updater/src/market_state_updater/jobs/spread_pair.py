@@ -15,6 +15,7 @@ Blob shape:
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import redis
@@ -157,11 +158,17 @@ def run(
     window_minutes: int,
 ) -> bool:
     log = logger.bind(job="spread_pair", window=window_minutes)
+    t0 = time.monotonic()
     try:
         gate_bt, web_bt = fetch(questdb_url, window_minutes)
     except Exception as e:  # noqa: BLE001
-        log.error("questdb_failed", error=str(e))
+        log.error(
+            "questdb_failed",
+            error=str(e),
+            query_ms=int((time.monotonic() - t0) * 1000),
+        )
         return False
+    query_ms = int((time.monotonic() - t0) * 1000)
     symbols = set(gate_bt) & set(web_bt)
     gate_by = {s: gate_bt[s] for s in symbols}
     web_by = {s: web_bt[s] for s in symbols}
@@ -179,7 +186,7 @@ def run(
         return False
 
     if not gate_by:
-        log.info("updated_empty", key=key)
+        log.info("updated_empty", key=key, query_ms=query_ms)
         return True
 
     mean_gate = sum(gate_by.values()) / len(gate_by)
@@ -189,5 +196,6 @@ def run(
         symbols=len(gate_by),
         mean_spread_gate_bp=round(mean_gate * 10000, 2),
         mean_spread_gate_web_bp=round(mean_web * 10000, 2),
+        query_ms=query_ms,
     )
     return True
