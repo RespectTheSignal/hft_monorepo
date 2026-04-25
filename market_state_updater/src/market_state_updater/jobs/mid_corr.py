@@ -73,7 +73,7 @@ WITH g AS (
            timestamp
     FROM {base_tbl}
     WHERE timestamp > dateadd('m', -{window_minutes}, now())
-    SAMPLE BY {sample}
+    SAMPLE BY {sample} FILL(PREV)
 ),
 {quote_alias} AS (
     SELECT symbol,
@@ -81,7 +81,7 @@ WITH g AS (
            timestamp
     FROM {quote_tbl}
     WHERE timestamp > dateadd('m', -{window_minutes}, now())
-    SAMPLE BY {sample}
+    SAMPLE BY {sample} FILL(PREV)
 ),
 al AS (
     SELECT g.symbol, g.base_mid, q.quote_mid
