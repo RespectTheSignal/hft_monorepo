@@ -28,7 +28,8 @@
     "gate_gate_web_gap": true,
     "price_change": true,
     "price_change_gap_corr": true,
-    "mid_corr": true
+    "mid_corr": true,
+    "return_autocorr": true
   },
 
   "price_change": {
@@ -54,6 +55,13 @@
     "$comment": "원본 update_market_mid_correlation.py 패턴. Pearson corr(base_mid, quote_mid). 한 cycle 호출이 gate, gate_web 두 base 모두 처리해서 blob 1개에 묶음.",
     "redis_prefix": "gate_hft:market_mid_corr",
     "quote_exchanges": ["binance"],
+    "min_samples": 30
+  },
+
+  "return_autocorr": {
+    "$comment": "거래소별 1-lag return autocorr (microstructure noise indicator). ρ<0 = bid-ask bounce, ρ≈0 = efficient, ρ>0 = momentum. step 단위는 corr.return_seconds_overrides 와 공유.",
+    "redis_prefix": "gate_hft:return_autocorr",
+    "exchanges": ["gate", "gate_web", "binance"],
     "min_samples": 30
   },
 

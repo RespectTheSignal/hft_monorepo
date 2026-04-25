@@ -71,6 +71,11 @@ class AppConfig:
     mid_corr_quote_exchanges: tuple[str, ...]
     mid_corr_min_samples: int
 
+    include_return_autocorr: bool
+    return_autocorr_prefix: str
+    return_autocorr_exchanges: tuple[str, ...]
+    return_autocorr_min_samples: int
+
     heartbeat_prefix: str
 
     telegram_bot_token: str | None
@@ -227,6 +232,7 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
     pc = _section(file_cfg, "price_change")
     corr = _section(file_cfg, "corr")
     mc = _section(file_cfg, "mid_corr")
+    ra = _section(file_cfg, "return_autocorr")
     hb = _section(file_cfg, "heartbeat")
 
     questdb_url = (
@@ -352,6 +358,22 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
         ),
         mid_corr_min_samples=_int_from(
             "MID_CORR_MIN_SAMPLES", mc.get("min_samples"), 30
+        ),
+        include_return_autocorr=_bool_from(
+            "MARKET_GAP_INCLUDE_RETURN_AUTOCORR", inc.get("return_autocorr"), True
+        ),
+        return_autocorr_prefix=_str_from(
+            "RETURN_AUTOCORR_REDIS_PREFIX",
+            ra.get("redis_prefix"),
+            "gate_hft:return_autocorr",
+        ),
+        return_autocorr_exchanges=_csv_or_list_from(
+            "RETURN_AUTOCORR_EXCHANGES",
+            ra.get("exchanges"),
+            ("gate", "gate_web", "binance"),
+        ),
+        return_autocorr_min_samples=_int_from(
+            "RETURN_AUTOCORR_MIN_SAMPLES", ra.get("min_samples"), 30
         ),
         heartbeat_prefix=_str_from(
             "HEARTBEAT_REDIS_PREFIX",

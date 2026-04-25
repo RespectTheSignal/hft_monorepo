@@ -26,6 +26,7 @@ from market_state_updater.jobs import (
     mid_corr,
     price_change,
     price_change_gap_corr,
+    return_autocorr,
     spread_pair,
 )
 from market_state_updater.jobs.common import (
@@ -149,7 +150,29 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
                     )
                 )
 
-    # 6) gate_web ↔ quote step-return correlation : quote × window
+    # 6) per-exchange 1-lag return autocorr : exchange × window (microstructure noise)
+    if cfg.include_return_autocorr:
+        for ex in cfg.return_autocorr_exchanges:
+            for w in gap_windows:
+                ret = corr_return_seconds(w, cfg.corr_return_seconds_overrides)
+                out.append(
+                    Schedule(
+                        name=f"return_autocorr:{ex}:{w}m:{ret}s",
+                        period=WINDOW_PERIOD.get(w, 1),
+                        run=partial(
+                            return_autocorr.run,
+                            cfg.questdb_url,
+                            redis_client,
+                            cfg.return_autocorr_prefix,
+                            ex,
+                            w,
+                            ret,
+                            cfg.return_autocorr_min_samples,
+                        ),
+                    )
+                )
+
+    # 7) gate_web ↔ quote step-return correlation : quote × window
     if cfg.include_price_change_gap_corr:
         for quote in cfg.corr_quote_exchanges:
             for w in gap_windows:
