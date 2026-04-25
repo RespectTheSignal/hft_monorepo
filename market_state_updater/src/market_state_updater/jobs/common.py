@@ -24,31 +24,56 @@ FAST_WINDOWS: tuple[int, ...] = (1, 5)
 SLOW_WINDOWS: tuple[int, ...] = (10, 30, 60, 240, 720)
 WINDOW_MINUTES: tuple[int, ...] = FAST_WINDOWS + SLOW_WINDOWS  # 모드 == "all" 일 때
 
-# 매 cycle 의 N 회마다 1번 실행. 1m=매번, 60m=30회마다, 720m=121회마다.
-WINDOW_PERIOD: dict[int, int] = {
-    1: 1,
-    5: 5,
-    10: 10,
-    30: 20,
-    60: 30,
-    240: 61,
-    720: 121,
-}
-
 # === price_change 윈도우 (분) ===
 FAST_PRICE_CHANGE_WINDOWS: tuple[int, ...] = (1, 5)
 SLOW_PRICE_CHANGE_WINDOWS: tuple[int, ...] = (15, 30, 60, 240, 1440)
 PRICE_CHANGE_WINDOWS: tuple[int, ...] = FAST_PRICE_CHANGE_WINDOWS + SLOW_PRICE_CHANGE_WINDOWS
 
-PRICE_CHANGE_PERIOD: dict[int, int] = {
-    1: 1,
-    5: 5,
-    15: 10,
-    30: 20,
-    60: 30,
-    240: 60,
-    1440: 120,
+# === 윈도우별 갱신 cadence (초) ===
+# scheduler 가 각 schedule 을 cadence_secs 마다 1번 실행. 모든 job 류 (gap/spread/corr/...)
+# 가 같은 dict 사용. PRICE_CHANGE_WINDOWS 의 별도 값 (15, 1440) 도 포함.
+# 디자인 원칙: window 길이의 1/12 ~ 1/20 정도 — 너무 dense 하면 cycle 비용 ↑,
+# 너무 sparse 하면 metric 갱신이 윈도우보다 늦어짐.
+DEFAULT_CADENCE_SECS: dict[int, float] = {
+    1: 5,
+    5: 25,
+    10: 60,
+    15: 90,
+    30: 180,
+    60: 300,
+    240: 1200,
+    720: 3600,
+    1440: 7200,
 }
+
+
+def parse_cadence_overrides(s: str) -> dict[int, float]:
+    """env CADENCE_OVERRIDES_SECS='1:5,5:25,60:120' → {1:5, 5:25, 60:120}.
+
+    빈 문자열은 빈 dict. 잘못된 토큰은 ValueError. cadence_secs 는 float 허용.
+    """
+    out: dict[int, float] = {}
+    for part in s.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        k_str, _, v_str = part.partition(":")
+        if not v_str:
+            raise ValueError(f"invalid cadence override token: {part!r}")
+        out[int(k_str.strip())] = float(v_str.strip())
+    return out
+
+
+def cadence_for_window(
+    window_minutes: int, overrides: dict[int, float] | None = None
+) -> float:
+    """window → cadence (초). overrides 우선. 매핑 없으면 max(1, window_min*60/12) fallback."""
+    table = dict(DEFAULT_CADENCE_SECS)
+    if overrides:
+        table.update(overrides)
+    if window_minutes in table:
+        return table[window_minutes]
+    return max(1.0, window_minutes * 60 / 12)
 
 # === price_change_gap_corr: window 별 X return 의 sample 간격 (초) ===
 # X = gate_web mid 의 1-step return, Y = gate_web↔binance mid gap.

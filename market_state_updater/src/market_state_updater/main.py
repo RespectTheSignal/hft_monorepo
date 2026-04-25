@@ -2,9 +2,13 @@
 
 사용:
   uv run market-state-updater                                  # all + 직렬
-  uv run market-state-updater --windows fast --interval 30     # 빠른 데몬
-  uv run market-state-updater --windows slow --interval 600    # 느린 데몬
+  uv run market-state-updater --windows fast --interval 1      # 빠른 데몬 (1s tick)
+  uv run market-state-updater --windows slow                   # 느린 데몬
   uv run market-state-updater --once                           # CI / 검증
+
+Scheduler 모델: schedule 마다 절대 cadence_secs (jobs.common.DEFAULT_CADENCE_SECS).
+main loop 가 짧게 (interval_secs, default 1s) tick 하면서 due 한 schedule 만 실행.
+1m window 는 5s, 60m window 는 300s 마다 — 윈도우 길이에 비례.
 """
 
 from __future__ import annotations
@@ -30,14 +34,13 @@ from market_state_updater.jobs import (
     spread_pair,
 )
 from market_state_updater.jobs.common import (
-    PRICE_CHANGE_PERIOD,
-    WINDOW_PERIOD,
+    cadence_for_window,
     corr_return_seconds,
     now_ms,
     windows_for_mode,
 )
 from market_state_updater.notifier import TelegramNotifier
-from market_state_updater.scheduler import Schedule, run_cycle
+from market_state_updater.scheduler import Schedule, tick
 
 logger = structlog.get_logger(__name__)
 
@@ -57,6 +60,9 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
     gap_windows, pc_windows = windows_for_mode(cfg.window_mode)
     out: list[Schedule] = []
 
+    def cad(w: int) -> float:
+        return cadence_for_window(w, cfg.cadence_overrides)
+
     # 1) gap : base × quote × window
     for base in cfg.gap_bases:
         for quote in cfg.quote_exchanges:
@@ -64,7 +70,7 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
                 out.append(
                     Schedule(
                         name=f"gap:{base}:{quote}:{w}m",
-                        period=WINDOW_PERIOD.get(w, 1),
+                        cadence_secs=cad(w),
                         run=partial(
                             gap.run,
                             cfg.questdb_url,
@@ -83,7 +89,7 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
             out.append(
                 Schedule(
                     name=f"spread_pair:{w}m",
-                    period=WINDOW_PERIOD.get(w, 1),
+                    cadence_secs=cad(w),
                     run=partial(
                         spread_pair.run,
                         cfg.questdb_url,
@@ -100,7 +106,7 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
             out.append(
                 Schedule(
                     name=f"gate_web_gap:{w}m",
-                    period=WINDOW_PERIOD.get(w, 1),
+                    cadence_secs=cad(w),
                     run=partial(
                         gate_web_gap.run,
                         cfg.questdb_url,
@@ -118,7 +124,7 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
                 out.append(
                     Schedule(
                         name=f"price_change:{src}:{w}m",
-                        period=PRICE_CHANGE_PERIOD.get(w, 1),
+                        cadence_secs=cad(w),
                         run=partial(
                             price_change.run,
                             cfg.questdb_url,
@@ -137,7 +143,7 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
                 out.append(
                     Schedule(
                         name=f"mid_corr:{quote}:{w}m",
-                        period=WINDOW_PERIOD.get(w, 1),
+                        cadence_secs=cad(w),
                         run=partial(
                             mid_corr.run,
                             cfg.questdb_url,
@@ -150,7 +156,7 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
                     )
                 )
 
-    # 6) per-exchange 1-lag return autocorr : exchange × window (microstructure noise)
+    # 6) per-exchange 1-lag return autocorr : exchange × window
     if cfg.include_return_autocorr:
         for ex in cfg.return_autocorr_exchanges:
             for w in gap_windows:
@@ -158,7 +164,7 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
                 out.append(
                     Schedule(
                         name=f"return_autocorr:{ex}:{w}m:{ret}s",
-                        period=WINDOW_PERIOD.get(w, 1),
+                        cadence_secs=cad(w),
                         run=partial(
                             return_autocorr.run,
                             cfg.questdb_url,
@@ -180,7 +186,7 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
                 out.append(
                     Schedule(
                         name=f"corr:gate_web:{quote}:{w}m:{ret}s",
-                        period=WINDOW_PERIOD.get(w, 1),
+                        cadence_secs=cad(w),
                         run=partial(
                             price_change_gap_corr.run,
                             cfg.questdb_url,
@@ -200,19 +206,20 @@ def _write_heartbeat(
     redis_client: redis.Redis,
     cfg: AppConfig,
     *,
-    run_count: int,
-    due: int,
-    ok: int,
-    duration_ms: int,
+    schedules_total: int,
+    last_run_at: dict[str, float],
+    last_tick_due: int,
+    last_tick_ok: int,
 ) -> None:
-    """{heartbeat_prefix}:{mode} 키에 cycle 결과 JSON SET. 외부 watchdog 용."""
+    """{heartbeat_prefix}:{mode} 키에 tick 결과 + schedule 별 last_run JSON SET."""
     blob = {
         "mode": cfg.window_mode,
-        "run_count": run_count,
-        "last_cycle_ms": now_ms(),
-        "due": due,
-        "ok": ok,
-        "duration_ms": duration_ms,
+        "last_tick_ms": now_ms(),
+        "schedules_total": schedules_total,
+        "last_tick_due": last_tick_due,
+        "last_tick_ok": last_tick_ok,
+        # last_run_at 은 monotonic 기반이라 wall-clock 으로 직접 변환 불가 — 상대적 staleness 만.
+        "schedules_with_last_run": len(last_run_at),
     }
     key = f"{cfg.heartbeat_prefix}:{cfg.window_mode}"
     try:
@@ -221,10 +228,8 @@ def _write_heartbeat(
         logger.error("heartbeat_write_failed", error=str(e), key=key)
 
 
-def _is_cycle_failure(due: int, ok: int) -> bool:
-    """cycle 자체를 '실패' 로 칠지: due > 0 인데 ok == 0 일 때만.
-    부분 실패는 여기서 카운트 안 함 (개별 schedule 의 structlog 에 이미 찍힘).
-    """
+def _is_failure(due: int, ok: int) -> bool:
+    """due > 0 인데 ok == 0 일 때만 cycle failure 로 간주 (부분 실패는 X)."""
     return due > 0 and ok == 0
 
 
@@ -245,73 +250,85 @@ def main() -> int:
     schedules = build_schedules(cfg, r)
     host = socket.gethostname()
 
+    cadence_summary = sorted({s.cadence_secs for s in schedules})
     logger.info(
         "starting",
         mode=cfg.window_mode,
         schedules=len(schedules),
         gap_bases=list(cfg.gap_bases),
         quote_exchanges=list(cfg.quote_exchanges),
-        include_spread_pair=cfg.include_spread_pair,
-        include_gate_gate_web_gap=cfg.include_gate_gate_web_gap,
-        include_price_change=cfg.include_price_change,
-        interval_secs=cfg.interval_secs,
+        cadence_secs_distinct=cadence_summary,
+        tick_interval_secs=cfg.interval_secs,
         telegram_enabled=notifier.enabled,
         host=host,
     )
 
-    run_count = -1
+    last_run_at: dict[str, float] = {}
     consecutive_failures = 0
-    alert_sent = False  # streak 당 1회만 알림 → recovery 시 reset
+    alert_sent = False
     restart_delay_secs = 1
+
+    if cfg.once:
+        # --once 는 첫 tick 에서 모든 schedule 강제 실행 (cadence 무시)
+        forced_now = time.monotonic() + 1e9  # 매우 큰 값 → 모두 due
+        result = tick(schedules, forced_now, last_run_at)
+        logger.info("once_done", due=result.due, ok=result.ok)
+        _write_heartbeat(
+            r,
+            cfg,
+            schedules_total=len(schedules),
+            last_run_at=last_run_at,
+            last_tick_due=result.due,
+            last_tick_ok=result.ok,
+        )
+        return 0
 
     while True:
         try:
-            run_count += 1
             t0 = time.monotonic()
-            result = run_cycle(schedules, run_count)
+            result = tick(schedules, t0, last_run_at)
             duration_ms = int((time.monotonic() - t0) * 1000)
+
+            if result.due > 0:
+                logger.info(
+                    "tick_done",
+                    due=result.due,
+                    ok=result.ok,
+                    duration_ms=duration_ms,
+                )
 
             _write_heartbeat(
                 r,
                 cfg,
-                run_count=run_count,
-                due=result.due,
-                ok=result.ok,
-                duration_ms=duration_ms,
+                schedules_total=len(schedules),
+                last_run_at=last_run_at,
+                last_tick_due=result.due,
+                last_tick_ok=result.ok,
             )
 
-            if result.due > 0:
-                logger.info(
-                    "cycle_done",
-                    run=run_count,
-                    ok=result.ok,
-                    due=result.due,
-                    duration_ms=duration_ms,
-                )
-
-            if _is_cycle_failure(result.due, result.ok):
+            if _is_failure(result.due, result.ok):
                 consecutive_failures += 1
                 logger.warning(
-                    "cycle_failure",
+                    "tick_failure",
                     consecutive=consecutive_failures,
                     threshold=cfg.alert_after_consecutive_failures,
                 )
                 if (
                     not alert_sent
-                    and consecutive_failures >= cfg.alert_after_consecutive_failures
+                    and consecutive_failures
+                    >= cfg.alert_after_consecutive_failures
                 ):
                     text = (
                         f"🔴 <b>market_state_updater[{cfg.window_mode}] 연속 실패</b>\n"
                         f"host: <code>{host}</code>\n"
                         f"consecutive: <code>{consecutive_failures}</code>\n"
-                        f"last cycle due={result.due} ok={result.ok}\n"
-                        f"run_count: <code>{run_count}</code>"
+                        f"last tick due={result.due} ok={result.ok}"
                     )
                     if notifier.send(text):
                         alert_sent = True
                         logger.info("alert_sent", consecutive=consecutive_failures)
-            else:
-                if alert_sent and result.due > 0:
+            elif result.due > 0:  # 성공 (부분 또는 전체)
+                if alert_sent:
                     notifier.send(
                         f"✅ <b>market_state_updater[{cfg.window_mode}] 복구</b>\n"
                         f"host: <code>{host}</code>\n"
@@ -321,8 +338,6 @@ def main() -> int:
                 consecutive_failures = 0
                 alert_sent = False
 
-            if cfg.once or cfg.interval_secs <= 0:
-                return 0
             time.sleep(cfg.interval_secs)
         except KeyboardInterrupt:
             logger.info("interrupted")
@@ -330,7 +345,7 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             consecutive_failures += 1
             logger.error(
-                "cycle_exception",
+                "tick_exception",
                 error=str(e),
                 consecutive=consecutive_failures,
                 restart_in_secs=restart_delay_secs,

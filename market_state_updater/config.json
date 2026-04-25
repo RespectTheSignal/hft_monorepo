@@ -1,9 +1,15 @@
 {
   "$comment": "market_state_updater 설정. secret (DB URL with auth, telegram token) 은 .env 에 두고 나머지 모두 여기. gitignore 안 됨 — 변경 시 커밋.",
 
-  "interval_secs": 5,
+  "interval_secs": 1,
   "window_mode": "all",
   "alert_after_consecutive_failures": 5,
+
+  "scheduler": {
+    "$cadence_overrides_comment": "윈도우별 갱신 cadence (초). 비워두면 jobs/common.py:DEFAULT_CADENCE_SECS 사용 (1m=5s, 5m=25s, 10m=60s, 30m=180s, 60m=300s, 240m=1200s, 720m=3600s, 1440m=7200s).",
+    "cadence_overrides": {}
+  },
+
 
   "market_gap": {
     "redis_prefix": "gate_hft:market_gap",

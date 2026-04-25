@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from market_state_updater.jobs.common import (
+    parse_cadence_overrides,
     parse_corr_return_seconds_overrides,
     parse_sample_interval_overrides,
     set_sample_interval_overrides,
@@ -27,7 +28,9 @@ DEFAULT_QUESTDB_URL = "http://localhost:9000"
 DEFAULT_REDIS_URL = "redis://localhost:6379"
 DEFAULT_HEARTBEAT_PREFIX = "gate_hft:_meta:market_state_updater"
 DEFAULT_ALERT_AFTER_CONSECUTIVE_FAILURES = 5
-DEFAULT_UPDATE_INTERVAL_SECS = 10
+# tick poll interval. cycle 자체가 아니라 schedule 별 cadence_secs 가 절대 시각.
+# 1s 정도면 cadence 정밀도 충분 (cadence 가 1s 이하인 schedule 거의 없음).
+DEFAULT_UPDATE_INTERVAL_SECS = 1
 
 WindowMode = Literal["fast", "slow", "all"]
 
@@ -44,10 +47,11 @@ def _split_csv(s: str) -> tuple[str, ...]:
 class AppConfig:
     questdb_url: str
     redis_url: str
-    interval_secs: int
+    interval_secs: int   # tick poll interval (default 1s)
     once: bool
 
     window_mode: WindowMode
+    cadence_overrides: dict[int, float]   # window → cadence_secs override
 
     market_gap_prefix: str
     base_exchange: str
@@ -185,6 +189,17 @@ def _sample_interval_overrides_from(
     return default
 
 
+def _cadence_overrides_from(
+    env_key: str, file_val: Any, default: dict[int, float]
+) -> dict[int, float]:
+    v = os.environ.get(env_key)
+    if v is not None:
+        return parse_cadence_overrides(v)
+    if isinstance(file_val, dict):
+        return {int(k): float(v) for k, v in file_val.items()}
+    return default
+
+
 # ---------- argparse ----------
 
 
@@ -302,12 +317,18 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
     # process-wide setter 즉시 호출 — gap/spread_pair/gate_web_gap 가 자동 반영.
     set_sample_interval_overrides(sample_interval_overrides)
 
+    sched_section = _section(file_cfg, "scheduler")
+    cadence_overrides = _cadence_overrides_from(
+        "CADENCE_OVERRIDES_SECS", sched_section.get("cadence_overrides"), {}
+    )
+
     return AppConfig(
         questdb_url=questdb_url,
         redis_url=redis_url,
         interval_secs=interval_secs,
         once=args.once,
         window_mode=window_mode,
+        cadence_overrides=cadence_overrides,
         market_gap_prefix=market_gap_prefix,
         base_exchange=base_exchange,
         quote_exchanges=quote_exchanges,

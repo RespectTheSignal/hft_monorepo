@@ -23,6 +23,7 @@ def _cfg(window_mode: str, *, include_corr: bool = True) -> AppConfig:
         interval_secs=10,
         once=False,
         window_mode=window_mode,  # type: ignore[arg-type]
+        cadence_overrides={},
         market_gap_prefix="p",
         base_exchange="gate",
         quote_exchanges=("binance",),
@@ -92,6 +93,15 @@ def test_build_schedules_names_unique() -> None:
     schedules = build_schedules(_cfg("all"), MagicMock())
     names = [s.name for s in schedules]
     assert len(names) == len(set(names))
+
+
+def test_build_schedules_cadence_matches_window() -> None:
+    """1m schedule 은 cadence 5s, 60m 는 300s — DEFAULT_CADENCE_SECS 따라감."""
+    schedules = build_schedules(_cfg("all"), MagicMock())
+    by_name = {s.name: s.cadence_secs for s in schedules}
+    # gap:gate:binance:1m / gap:gate:binance:60m 둘 다 있어야
+    assert by_name.get("gap:gate:binance:1m") == 5
+    assert by_name.get("gap:gate:binance:60m") == 300
 
 
 def test_fast_includes_only_fast_windows_in_names() -> None:
