@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "market-state-updater"
+version = "0.1.0"
+description = "QuestDB → Redis market gap/spread/price-change 상태 업데이터 (gate_hft 전략용)."
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+    "redis>=5.0",
+    "python-dotenv>=1.0",
+    "structlog>=24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+market-state-updater = "market_state_updater.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/market_state_updater"]
+
+[tool.mypy]
+strict = false
+python_version = "3.10"
