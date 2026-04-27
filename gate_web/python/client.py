@@ -201,6 +201,37 @@ class GateClient:
             "elapsed_ms": round(elapsed_ms, 1),
         }
 
+    def cancel_order(self, order_id: str) -> dict:
+        """Cancel an open order via DELETE /orders/{id}.
+
+        Returns dict with ok/status/data fields like place_order."""
+        if self._session is None:
+            raise RuntimeError("Call login_done() first")
+        url = f"{API_BASE}/apiw/v2/futures/usdt/orders/{order_id}"
+        t0 = time.time()
+        resp = self._session.delete(url, timeout=10)
+        elapsed_ms = (time.time() - t0) * 1000
+        try:
+            data = resp.json()
+        except Exception:
+            return {"ok": False, "status": resp.status_code, "text": resp.text[:200]}
+        is_success = resp.status_code == 200 and data.get("message") == "success"
+        return {"ok": is_success, "status": resp.status_code, "data": data,
+                "elapsed_ms": round(elapsed_ms, 1)}
+
+    def get_order(self, order_id: str) -> dict:
+        """Fetch order status via GET /orders/{id}."""
+        if self._session is None:
+            raise RuntimeError("Call login_done() first")
+        url = f"{API_BASE}/apiw/v2/futures/usdt/orders/{order_id}"
+        try:
+            resp = self._session.get(url, timeout=10)
+            data = resp.json()
+        except Exception as e:
+            return {"ok": False, "err": str(e)}
+        return {"ok": resp.status_code == 200 and data.get("message") == "success",
+                "status": resp.status_code, "data": data}
+
     def raw_request(self, body: dict) -> dict:
         """Send a raw JSON body to the order endpoint (for debugging)."""
         if self._session is None:

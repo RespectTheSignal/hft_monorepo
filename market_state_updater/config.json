@@ -1,24 +1,22 @@
 {
   "$comment": "market_state_updater 설정. secret (DB URL with auth, telegram token) 은 .env 에 두고 나머지 모두 여기. gitignore 안 됨 — 변경 시 커밋.",
-
   "interval_secs": 1,
   "window_mode": "all",
   "alert_after_consecutive_failures": 5,
-
   "scheduler": {
     "$cadence_overrides_comment": "윈도우별 갱신 cadence (초). 비워두면 jobs/common.py:DEFAULT_CADENCE_SECS 사용 (1m=5s, 5m=25s, 10m=60s, 30m=180s, 60m=300s, 240m=1200s, 720m=3600s, 1440m=7200s).",
     "cadence_overrides": {},
     "$stagger_step_secs_comment": "첫 tick burst 회피 — schedule i 의 첫 실행을 i × stagger_step_secs 만큼 지연 (cadence/2 cap). 0 으로 두면 비활성 (모든 schedule 즉시 실행).",
-    "stagger_step_secs": 0.5,
+    "stagger_step_secs": 1.5,
     "$max_workers_comment": "ThreadPoolExecutor 동시성. I/O 바운드 (QuestDB HTTP) 라 GIL 영향 적음. 너무 크면 QuestDB 부하 ↑.",
-    "max_workers": 8
+    "max_workers": 4
   },
-
-
   "market_gap": {
     "redis_prefix": "gate_hft:market_gap",
     "base_exchange": "gate",
-    "quote_exchanges": ["binance"],
+    "quote_exchanges": [
+      "binance"
+    ],
     "fill_prev_lookback_minutes": 10,
     "$sample_interval_overrides_comment": "gap/spread_pair/gate_web_gap 의 SAMPLE BY 단위. QuestDB 문법 (100T=100ms, 1s, 1m). 비워두면 jobs/common.py:DEFAULT_SAMPLE_INTERVALS 사용.",
     "sample_interval_overrides": {
@@ -32,26 +30,28 @@
       "720": "10s"
     }
   },
-
   "include": {
     "gate_web": true,
     "spread_pair": true,
     "gate_gate_web_gap": true,
     "price_change": true,
-    "price_change_gap_corr": true,
+    "price_change_gap_corr": false,
     "mid_corr": true,
     "return_autocorr": true,
     "variance_ratio": true,
     "market_dangerous": true
   },
-
   "price_change": {
     "redis_prefix": "gate_hft:price_change",
-    "sources": ["gate", "binance"]
+    "sources": [
+      "gate",
+      "binance"
+    ]
   },
-
   "corr": {
-    "quote_exchanges": ["binance"],
+    "quote_exchanges": [
+      "binance"
+    ],
     "$return_seconds_overrides_comment": "price_change_gap_corr 의 X = N초 step return 에서 N. window별. 비워두면 jobs/common.py:DEFAULT_CORR_RETURN_SECONDS 사용.",
     "return_seconds_overrides": {
       "1": 1,
@@ -64,30 +64,40 @@
       "720": 300
     }
   },
-
   "mid_corr": {
     "$comment": "원본 update_market_mid_correlation.py 패턴. Pearson corr(base_mid, quote_mid). 한 cycle 호출이 gate, gate_web 두 base 모두 처리해서 blob 1개에 묶음.",
     "redis_prefix": "gate_hft:market_mid_corr",
-    "quote_exchanges": ["binance"],
+    "quote_exchanges": [
+      "binance"
+    ],
     "min_samples": 30
   },
-
   "return_autocorr": {
     "$comment": "거래소별 1-lag return autocorr (microstructure noise indicator). ρ<0 = bid-ask bounce, ρ≈0 = efficient, ρ>0 = momentum. step 단위는 corr.return_seconds_overrides 와 공유.",
     "redis_prefix": "gate_hft:return_autocorr",
-    "exchanges": ["gate", "gate_web", "binance"],
+    "exchanges": [
+      "gate",
+      "gate_web",
+      "binance"
+    ],
     "min_samples": 30
   },
-
   "variance_ratio": {
     "$comment": "Lo-MacKinlay VR(k) = Var(r_k)/[k·Var(r_1)] per exchange × window × k. VR<1 mean revert, ≈1 random walk, >1 trending. base step 은 corr.return_seconds_overrides 재사용 (override 가능). k 별로 별도 SQL 호출 후 한 blob 에 nested merge.",
     "redis_prefix": "gate_hft:variance_ratio",
-    "exchanges": ["gate", "gate_web", "binance"],
-    "k_values": [2, 5, 10],
+    "exchanges": [
+      "gate",
+      "gate_web",
+      "binance"
+    ],
+    "k_values": [
+      2,
+      5,
+      10
+    ],
     "min_samples": 30,
     "base_seconds_overrides": {}
   },
-
   "market_dangerous": {
     "$comment": "전체 마켓 message rate 모니터. 두 rule OR: (1) primary count > compare count, (2) primary count > absolute_threshold. sliding sticky 600s. 진입 시 Telegram (sticky 안에선 dedup).",
     "redis_key": "gate_hft:market_dangerous",
@@ -98,7 +108,6 @@
     "sticky_secs": 600,
     "cadence_secs": 5
   },
-
   "heartbeat": {
     "redis_prefix": "gate_hft:_meta:market_state_updater"
   }

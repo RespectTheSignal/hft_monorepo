@@ -100,6 +100,35 @@ impl FlipsterClient {
         Self::new(config)
     }
 
+    /// Build a client by loading every cookie in `cookies` into the jar
+    /// verbatim. Use this when feeding the raw CDP-extracted cookie map
+    /// (e.g. via `dump_cookies.py`) — the legacy `from_cookies` only
+    /// picks a hardcoded subset.
+    pub fn from_all_cookies(cookies: &HashMap<String, String>) -> Self {
+        let cf_bm = cookies.get("__cf_bm").cloned().unwrap_or_default();
+        let jar = Arc::new(Jar::default());
+        let api_url: Url = API_BASE.parse().unwrap();
+        for (name, value) in cookies {
+            jar.add_cookie_str(
+                &format!("{name}={value}; Domain=api.flipster.io; Path=/"),
+                &api_url,
+            );
+        }
+
+        let builder = reqwest::Client::builder()
+            .cookie_provider(jar.clone())
+            .default_headers(Self::default_headers())
+            .gzip(true)
+            .https_only(true);
+
+        FlipsterClient {
+            http: builder.build().expect("failed to build HTTP client"),
+            jar,
+            cf_bm: Arc::new(RwLock::new(cf_bm)),
+            dry_run: false,
+        }
+    }
+
     /// Reload all cookies from a HashMap (e.g. after refresh_cookies).
     pub fn reload_cookies(&self, cookies: &HashMap<String, String>) {
         let api_url: Url = API_BASE.parse().unwrap();
@@ -249,6 +278,113 @@ impl FlipsterClient {
         let parsed: serde_json::Value =
             serde_json::from_str(&text).unwrap_or(serde_json::Value::String(text));
         Ok(OrderResponse { raw: parsed })
+    }
+
+    /// One-way mode order placement. Mirrors the Python
+    /// `flipster_oneway_order` helper. POSTs to
+    /// `/api/v2/trade/one-way/order/{symbol}` with the legacy v2 body shape
+    /// (no TIF/expire — only `postOnly` controls maker behavior).
+    ///
+    /// `side` accepts case-insensitive "long"/"short". `order_type`
+    /// expects the API string (e.g. "ORDER_TYPE_MARKET", "ORDER_TYPE_LIMIT").
+    /// `ref_price` is sent as the `price` field — for MARKET it's used as
+    /// a slippage hint; for LIMIT it's the actual limit price.
+    pub async fn place_order_oneway(
+        &self,
+        symbol: &str,
+        side: &str,
+        amount_usd: f64,
+        ref_price: f64,
+        leverage: u32,
+        reduce_only: bool,
+        order_type: &str,
+        post_only: bool,
+    ) -> Result<serde_json::Value, FlipsterError> {
+        let now_ns = chrono::Utc::now()
+            .timestamp_nanos_opt()
+            .expect("timestamp_nanos overflow")
+            .to_string();
+        let side_str = if side.eq_ignore_ascii_case("long") {
+            "Long"
+        } else {
+            "Short"
+        };
+        let body = serde_json::json!({
+            "side": side_str,
+            "requestId": uuid::Uuid::new_v4().to_string(),
+            "timestamp": now_ns,
+            "refServerTimestamp": now_ns,
+            "refClientTimestamp": now_ns,
+            "reduceOnly": reduce_only,
+            "leverage": leverage,
+            "price": ref_price.to_string(),
+            "amount": format!("{:.4}", amount_usd),
+            "marginType": "Cross",
+            "orderType": order_type,
+            "postOnly": post_only,
+        });
+
+        let url = format!("{API_BASE}/api/v2/trade/one-way/order/{symbol}");
+
+        if self.dry_run {
+            return Ok(serde_json::json!({"dry_run": true, "body": body}));
+        }
+
+        let resp = self.http.post(&url).json(&body).send().await?;
+        let status = resp.status().as_u16();
+        if status == 401 || status == 403 {
+            return Err(FlipsterError::Auth);
+        }
+        let text = resp.text().await?;
+        if status >= 400 {
+            return Err(FlipsterError::Api { status, message: text });
+        }
+        serde_json::from_str(&text).map_err(|e| FlipsterError::Api {
+            status,
+            message: format!("non-JSON response: {e}: {}", text.chars().take(200).collect::<String>()),
+        })
+    }
+
+    /// Cancel an order in one-way mode. Mirrors the Python
+    /// `cancel_order(symbol, order_id)` — DELETE on
+    /// `/api/v2/trade/orders/{symbol}/{order_id}` with a JSON body of
+    /// `{requestId, timestamp}`.
+    ///
+    /// IMPORTANT: the Python flipster client originally sent DELETE with
+    /// no body, which Flipster silently ignored — orders stayed open and
+    /// orphans accumulated. The body is required.
+    pub async fn cancel_order(
+        &self,
+        symbol: &str,
+        order_id: &str,
+    ) -> Result<serde_json::Value, FlipsterError> {
+        let now_ns = chrono::Utc::now()
+            .timestamp_nanos_opt()
+            .expect("timestamp_nanos overflow")
+            .to_string();
+        let body = serde_json::json!({
+            "requestId": uuid::Uuid::new_v4().to_string(),
+            "timestamp": now_ns,
+        });
+        let url = format!("{API_BASE}/api/v2/trade/orders/{symbol}/{order_id}");
+
+        if self.dry_run {
+            return Ok(serde_json::json!({"dry_run": true, "body": body}));
+        }
+
+        let resp = self.http.delete(&url).json(&body).send().await?;
+        let status = resp.status().as_u16();
+        if status == 401 || status == 403 {
+            return Err(FlipsterError::Auth);
+        }
+        let text = resp.text().await?;
+        if status >= 400 {
+            return Err(FlipsterError::Api { status, message: text });
+        }
+        serde_json::from_str(&text).map_err(|_| FlipsterError::Api {
+            status,
+            message: text.chars().take(200).collect(),
+        })
     }
 
     /// Send a raw JSON body to the order endpoint for debugging.

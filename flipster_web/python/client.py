@@ -156,13 +156,20 @@ class FlipsterClient:
     def cancel_order(self, symbol: str, order_id: str) -> dict | None:
         """Cancel a pending limit order.
 
-        DELETE /api/v2/trade/orders/{symbol}/{orderId}
+        DELETE /api/v2/trade/orders/{symbol}/{orderId}  with JSON body
+        {requestId, timestamp}. Body is required — without it the API
+        silently rejects.
         Returns parsed JSON on success, raises on auth/server errors.
         """
         if self._session is None:
             raise RuntimeError("Call login_done() first")
+        import time as _time, uuid as _uuid
         url = f"{API_BASE}/api/v2/trade/orders/{symbol}/{order_id}"
-        resp = self._session.delete(url, proxies=self._next_proxy())
+        body = {
+            "requestId": str(_uuid.uuid4()),
+            "timestamp": str(_time.time_ns()),
+        }
+        resp = self._session.delete(url, json=body, proxies=self._next_proxy())
         if resp.status_code in (401, 403):
             raise PermissionError(f"Auth failed ({resp.status_code})")
         try:
