@@ -36,14 +36,13 @@ PRICE_CHANGE_WINDOWS: tuple[int, ...] = FAST_PRICE_CHANGE_WINDOWS + SLOW_PRICE_C
 # 너무 sparse 하면 metric 갱신이 윈도우보다 늦어짐.
 DEFAULT_CADENCE_SECS: dict[int, float] = {
     1: 5,
-    5: 25,
-    10: 60,
-    15: 90,
-    30: 180,
-    60: 300,
-    240: 1200,
-    720: 3600,
-    1440: 7200,
+    5: 10,
+    10: 20,
+    15: 30,
+    30: 60,
+    60: 120,
+    240: 600,
+    720: 1800,
 }
 
 
