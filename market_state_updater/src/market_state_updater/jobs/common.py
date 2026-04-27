@@ -43,6 +43,7 @@ DEFAULT_CADENCE_SECS: dict[int, float] = {
     60: 120,
     240: 600,
     720: 1800,
+    1440: 3600,
 }
 
 
@@ -86,6 +87,7 @@ DEFAULT_CORR_RETURN_SECONDS: dict[int, int] = {
     60: 30,   # 120
     240: 60,  # 240
     720: 300, # 144
+    1440: 600, # 720
 }
 
 
@@ -154,6 +156,7 @@ DEFAULT_SAMPLE_INTERVALS: dict[int, str] = {
     60: "1s",
     240: "5s",
     720: "10s",
+    1440: "20s",
 }
 
 # main 에서 set_sample_interval_overrides(cfg.sample_interval_overrides) 로 주입.
