@@ -89,6 +89,15 @@ class AppConfig:
     # vr 의 r_1 step. 비어있으면 corr_return_seconds_overrides 사용 (재사용).
     variance_ratio_base_seconds_overrides: dict[int, int]
 
+    include_market_dangerous: bool
+    market_dangerous_redis_key: str
+    market_dangerous_primary_table: str
+    market_dangerous_compare_table: str
+    market_dangerous_absolute_threshold: int
+    market_dangerous_window_secs: int
+    market_dangerous_sticky_secs: int
+    market_dangerous_cadence_secs: float
+
     heartbeat_prefix: str
 
     telegram_bot_token: str | None
@@ -258,6 +267,7 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
     mc = _section(file_cfg, "mid_corr")
     ra = _section(file_cfg, "return_autocorr")
     vr = _section(file_cfg, "variance_ratio")
+    md = _section(file_cfg, "market_dangerous")
     hb = _section(file_cfg, "heartbeat")
 
     questdb_url = (
@@ -436,6 +446,41 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
             "VARIANCE_RATIO_BASE_SECONDS_OVERRIDES",
             vr.get("base_seconds_overrides"),
             {},
+        ),
+        include_market_dangerous=_bool_from(
+            "MARKET_GAP_INCLUDE_MARKET_DANGEROUS", inc.get("market_dangerous"), True
+        ),
+        market_dangerous_redis_key=_str_from(
+            "MARKET_DANGEROUS_REDIS_KEY",
+            md.get("redis_key"),
+            "gate_hft:market_dangerous",
+        ),
+        market_dangerous_primary_table=_str_from(
+            "MARKET_DANGEROUS_PRIMARY_TABLE",
+            md.get("primary_table"),
+            "gate_bookticker",
+        ),
+        market_dangerous_compare_table=_str_from(
+            "MARKET_DANGEROUS_COMPARE_TABLE",
+            md.get("compare_table"),
+            "binance_bookticker",
+        ),
+        market_dangerous_absolute_threshold=_int_from(
+            "MARKET_DANGEROUS_ABSOLUTE_THRESHOLD",
+            md.get("absolute_threshold"),
+            150000,
+        ),
+        market_dangerous_window_secs=_int_from(
+            "MARKET_DANGEROUS_WINDOW_SECS", md.get("window_secs"), 60
+        ),
+        market_dangerous_sticky_secs=_int_from(
+            "MARKET_DANGEROUS_STICKY_SECS", md.get("sticky_secs"), 600
+        ),
+        market_dangerous_cadence_secs=float(
+            os.environ.get(
+                "MARKET_DANGEROUS_CADENCE_SECS",
+                md.get("cadence_secs", 5),
+            )
         ),
         heartbeat_prefix=_str_from(
             "HEARTBEAT_REDIS_PREFIX",

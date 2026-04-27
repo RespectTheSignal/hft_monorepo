@@ -27,6 +27,7 @@ from market_state_updater.config import AppConfig, load_config
 from market_state_updater.jobs import (
     gap,
     gate_web_gap,
+    market_dangerous,
     mid_corr,
     price_change,
     price_change_gap_corr,
@@ -40,7 +41,7 @@ from market_state_updater.jobs.common import (
     now_ms,
     windows_for_mode,
 )
-from market_state_updater.notifier import TelegramNotifier
+from market_state_updater.notifier import TelegramNotifier  # noqa: F401  (TYPE_CHECKING used in build_schedules)
 from market_state_updater.scheduler import Schedule, stagger_initial_runs, tick
 
 logger = structlog.get_logger(__name__)
@@ -56,7 +57,11 @@ def _configure_logging() -> None:
     )
 
 
-def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]:
+def build_schedules(
+    cfg: AppConfig,
+    redis_client: redis.Redis,
+    notifier: "TelegramNotifier | None" = None,
+) -> list[Schedule]:
     """활성 job × 윈도우 × 거래소를 평면화해서 list[Schedule]."""
     gap_windows, pc_windows = windows_for_mode(cfg.window_mode)
     out: list[Schedule] = []
@@ -208,7 +213,26 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
                     )
                 )
 
-    # 8) gate_web ↔ quote step-return correlation : quote × window
+    # 8) market dangerous (전체 마켓 message rate 임계 + sticky)
+    if cfg.include_market_dangerous:
+        md_job = market_dangerous.MarketDangerousJob(
+            primary_table=cfg.market_dangerous_primary_table,
+            compare_table=cfg.market_dangerous_compare_table,
+            absolute_threshold=cfg.market_dangerous_absolute_threshold,
+            window_secs=cfg.market_dangerous_window_secs,
+            sticky_secs=cfg.market_dangerous_sticky_secs,
+            redis_key=cfg.market_dangerous_redis_key,
+            notifier=notifier,
+        )
+        out.append(
+            Schedule(
+                name="market_dangerous",
+                cadence_secs=cfg.market_dangerous_cadence_secs,
+                run=partial(md_job.run, cfg.questdb_url, redis_client),
+            )
+        )
+
+    # 9) gate_web ↔ quote step-return correlation : quote × window
     if cfg.include_price_change_gap_corr:
         for quote in cfg.corr_quote_exchanges:
             for w in gap_windows:
@@ -277,7 +301,7 @@ def main() -> int:
         return 1
 
     notifier = TelegramNotifier(cfg.telegram_bot_token, cfg.telegram_chat_id)
-    schedules = build_schedules(cfg, r)
+    schedules = build_schedules(cfg, r, notifier=notifier)
     host = socket.gethostname()
 
     cadence_summary = sorted({s.cadence_secs for s in schedules})

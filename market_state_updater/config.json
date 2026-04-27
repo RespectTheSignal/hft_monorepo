@@ -39,7 +39,8 @@
     "price_change_gap_corr": true,
     "mid_corr": true,
     "return_autocorr": true,
-    "variance_ratio": true
+    "variance_ratio": true,
+    "market_dangerous": true
   },
 
   "price_change": {
@@ -83,6 +84,17 @@
     "k_values": [2, 5, 10],
     "min_samples": 30,
     "base_seconds_overrides": {}
+  },
+
+  "market_dangerous": {
+    "$comment": "전체 마켓 message rate 모니터. 두 rule OR: (1) primary count > compare count, (2) primary count > absolute_threshold. sliding sticky 600s. 진입 시 Telegram (sticky 안에선 dedup).",
+    "redis_key": "gate_hft:market_dangerous",
+    "primary_table": "gate_bookticker",
+    "compare_table": "binance_bookticker",
+    "absolute_threshold": 150000,
+    "window_secs": 60,
+    "sticky_secs": 600,
+    "cadence_secs": 5
   },
 
   "heartbeat": {
