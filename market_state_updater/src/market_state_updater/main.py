@@ -32,6 +32,7 @@ from market_state_updater.jobs import (
     price_change_gap_corr,
     return_autocorr,
     spread_pair,
+    variance_ratio,
 )
 from market_state_updater.jobs.common import (
     cadence_for_window,
@@ -178,7 +179,36 @@ def build_schedules(cfg: AppConfig, redis_client: redis.Redis) -> list[Schedule]
                     )
                 )
 
-    # 7) gate_web ↔ quote step-return correlation : quote × window
+    # 7) per-exchange Variance Ratio : exchange × window (multi-k in one schedule)
+    if cfg.include_variance_ratio:
+        for ex in cfg.variance_ratio_exchanges:
+            for w in gap_windows:
+                # base_seconds: variance_ratio 전용 override 우선, 없으면 corr_return_seconds 재사용
+                if w in cfg.variance_ratio_base_seconds_overrides:
+                    base_secs = cfg.variance_ratio_base_seconds_overrides[w]
+                else:
+                    base_secs = corr_return_seconds(
+                        w, cfg.corr_return_seconds_overrides
+                    )
+                out.append(
+                    Schedule(
+                        name=f"variance_ratio:{ex}:{w}m:base{base_secs}s",
+                        cadence_secs=cad(w),
+                        run=partial(
+                            variance_ratio.run,
+                            cfg.questdb_url,
+                            redis_client,
+                            cfg.variance_ratio_prefix,
+                            ex,
+                            w,
+                            base_secs,
+                            cfg.variance_ratio_k_values,
+                            cfg.variance_ratio_min_samples,
+                        ),
+                    )
+                )
+
+    # 8) gate_web ↔ quote step-return correlation : quote × window
     if cfg.include_price_change_gap_corr:
         for quote in cfg.corr_quote_exchanges:
             for w in gap_windows:

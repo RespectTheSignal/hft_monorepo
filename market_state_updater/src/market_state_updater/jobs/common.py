@@ -21,7 +21,7 @@ FILL_PREV_LOOKBACK_MINUTES = int(os.getenv("MARKET_GAP_FILL_PREV_LOOKBACK_MINUTE
 
 # === gap / spread_pair / gate_web_gap 윈도우 (분) ===
 FAST_WINDOWS: tuple[int, ...] = (1, 5)
-SLOW_WINDOWS: tuple[int, ...] = (10, 30, 60, 240, 720)
+SLOW_WINDOWS: tuple[int, ...] = (10, 15, 30, 60, 240, 720)
 WINDOW_MINUTES: tuple[int, ...] = FAST_WINDOWS + SLOW_WINDOWS  # 모드 == "all" 일 때
 
 # === price_change 윈도우 (분) ===
@@ -82,6 +82,7 @@ DEFAULT_CORR_RETURN_SECONDS: dict[int, int] = {
     1: 1,     # 60 samples
     5: 5,     # 60
     10: 5,    # 120
+    15: 10,   # 90
     30: 10,   # 180
     60: 30,   # 120
     240: 60,  # 240
@@ -149,6 +150,7 @@ DEFAULT_SAMPLE_INTERVALS: dict[int, str] = {
     1: "100T",
     5: "200T",
     10: "200T",
+    15: "200T",
     30: "500T",
     60: "1s",
     240: "5s",

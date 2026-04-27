@@ -25,6 +25,7 @@ def test_default_intervals_match_user_spec() -> None:
         1: "100T",
         5: "200T",
         10: "200T",
+        15: "200T",
         30: "500T",
         60: "1s",
         240: "5s",

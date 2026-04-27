@@ -81,6 +81,14 @@ class AppConfig:
     return_autocorr_exchanges: tuple[str, ...]
     return_autocorr_min_samples: int
 
+    include_variance_ratio: bool
+    variance_ratio_prefix: str
+    variance_ratio_exchanges: tuple[str, ...]
+    variance_ratio_k_values: tuple[int, ...]
+    variance_ratio_min_samples: int
+    # vr 의 r_1 step. 비어있으면 corr_return_seconds_overrides 사용 (재사용).
+    variance_ratio_base_seconds_overrides: dict[int, int]
+
     heartbeat_prefix: str
 
     telegram_bot_token: str | None
@@ -249,6 +257,7 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
     corr = _section(file_cfg, "corr")
     mc = _section(file_cfg, "mid_corr")
     ra = _section(file_cfg, "return_autocorr")
+    vr = _section(file_cfg, "variance_ratio")
     hb = _section(file_cfg, "heartbeat")
 
     questdb_url = (
@@ -403,6 +412,30 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
         ),
         return_autocorr_min_samples=_int_from(
             "RETURN_AUTOCORR_MIN_SAMPLES", ra.get("min_samples"), 30
+        ),
+        include_variance_ratio=_bool_from(
+            "MARKET_GAP_INCLUDE_VARIANCE_RATIO", inc.get("variance_ratio"), True
+        ),
+        variance_ratio_prefix=_str_from(
+            "VARIANCE_RATIO_REDIS_PREFIX",
+            vr.get("redis_prefix"),
+            "gate_hft:variance_ratio",
+        ),
+        variance_ratio_exchanges=_csv_or_list_from(
+            "VARIANCE_RATIO_EXCHANGES",
+            vr.get("exchanges"),
+            ("gate", "gate_web", "binance"),
+        ),
+        variance_ratio_k_values=tuple(
+            int(x) for x in (vr.get("k_values") or [2, 5, 10])
+        ),
+        variance_ratio_min_samples=_int_from(
+            "VARIANCE_RATIO_MIN_SAMPLES", vr.get("min_samples"), 30
+        ),
+        variance_ratio_base_seconds_overrides=_corr_overrides_from(
+            "VARIANCE_RATIO_BASE_SECONDS_OVERRIDES",
+            vr.get("base_seconds_overrides"),
+            {},
         ),
         heartbeat_prefix=_str_from(
             "HEARTBEAT_REDIS_PREFIX",
