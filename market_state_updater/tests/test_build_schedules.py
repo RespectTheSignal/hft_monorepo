@@ -25,6 +25,7 @@ def _cfg(window_mode: str, *, include_corr: bool = True) -> AppConfig:
         window_mode=window_mode,  # type: ignore[arg-type]
         cadence_overrides={},
         stagger_step_secs=0.0,
+        tick_max_workers=4,
         market_gap_prefix="p",
         base_exchange="gate",
         quote_exchanges=("binance",),

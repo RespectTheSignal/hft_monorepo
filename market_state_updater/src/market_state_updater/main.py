@@ -17,6 +17,7 @@ import json
 import socket
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
 import redis
@@ -314,6 +315,7 @@ def main() -> int:
         cadence_secs_distinct=cadence_summary,
         tick_interval_secs=cfg.interval_secs,
         stagger_step_secs=cfg.stagger_step_secs,
+        max_workers=cfg.tick_max_workers,
         telegram_enabled=notifier.enabled,
         host=host,
     )
@@ -330,7 +332,10 @@ def main() -> int:
     if cfg.once:
         # --once 는 첫 tick 에서 모든 schedule 강제 실행 (cadence 무시)
         forced_now = time.monotonic() + 1e9  # 매우 큰 값 → 모두 due
-        result = tick(schedules, forced_now, last_run_at)
+        with ThreadPoolExecutor(
+            max_workers=cfg.tick_max_workers, thread_name_prefix="msu"
+        ) as ex:
+            result = tick(schedules, forced_now, last_run_at, executor=ex)
         logger.info("once_done", due=result.due, ok=result.ok)
         _write_heartbeat(
             r,
@@ -342,10 +347,13 @@ def main() -> int:
         )
         return 0
 
+    executor = ThreadPoolExecutor(
+        max_workers=cfg.tick_max_workers, thread_name_prefix="msu"
+    )
     while True:
         try:
             t0 = time.monotonic()
-            result = tick(schedules, t0, last_run_at)
+            result = tick(schedules, t0, last_run_at, executor=executor)
             duration_ms = int((time.monotonic() - t0) * 1000)
 
             if result.due > 0:
@@ -400,6 +408,7 @@ def main() -> int:
             time.sleep(cfg.interval_secs)
         except KeyboardInterrupt:
             logger.info("interrupted")
+            executor.shutdown(wait=False, cancel_futures=True)
             return 0
         except Exception as e:  # noqa: BLE001
             consecutive_failures += 1

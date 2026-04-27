@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 from market_state_updater.scheduler import Schedule, stagger_initial_runs, tick
 
 
@@ -116,3 +119,47 @@ def test_stagger_first_tick_only_first_schedule_due() -> None:
     # t = start + 1.0: c 도 due
     r = tick(schedules, now=start + 1.0, last_run_at=last_run)
     assert r.due == 1
+
+
+# ---- ThreadPoolExecutor parallel tick ----
+
+
+def test_tick_parallel_runs_all_due() -> None:
+    """executor 주면 due 들 병렬 실행 — 같은 결과."""
+    schedules = [_make(f"s{i}", 1) for i in range(8)]
+    last_run: dict[str, float] = {}
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        r = tick(schedules, now=100.0, last_run_at=last_run, executor=ex)
+    assert r.due == 8
+    assert r.ok == 8
+
+
+def test_tick_parallel_actually_concurrent() -> None:
+    """sleep 0.1s 인 schedule 4개를 max_workers=4 로 → wall time < 0.4s (병렬 증명)."""
+    def slow_run() -> bool:
+        time.sleep(0.1)
+        return True
+
+    schedules = [
+        Schedule(name=f"slow{i}", cadence_secs=1, run=slow_run) for i in range(4)
+    ]
+    last_run: dict[str, float] = {}
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        t0 = time.monotonic()
+        tick(schedules, now=100.0, last_run_at=last_run, executor=ex)
+        elapsed = time.monotonic() - t0
+    # 직렬이면 ~0.4s, 병렬 (4 workers) 면 ~0.1s. 0.25 이하면 병렬 확인.
+    assert elapsed < 0.25, f"expected parallel (~0.1s), got {elapsed:.3f}s"
+
+
+def test_tick_parallel_last_run_at_updated_before_submit() -> None:
+    """submit 전에 last_run_at 갱신 → 같은 schedule 중복 submit 안 됨."""
+    schedules = [_make("a", 5)]
+    last_run: dict[str, float] = {}
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        # 첫 tick 에 1번 실행 + last_run=100 으로 갱신
+        r1 = tick(schedules, now=100.0, last_run_at=last_run, executor=ex)
+        assert r1.due == 1
+        # 같은 시점에 다시 tick → 이미 last_run=100 이라 due 0
+        r2 = tick(schedules, now=100.0, last_run_at=last_run, executor=ex)
+        assert r2.due == 0

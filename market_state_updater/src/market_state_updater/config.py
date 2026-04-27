@@ -53,6 +53,7 @@ class AppConfig:
     window_mode: WindowMode
     cadence_overrides: dict[int, float]   # window → cadence_secs override
     stagger_step_secs: float              # 첫 tick burst 회피 (0 = off)
+    tick_max_workers: int                 # ThreadPoolExecutor max_workers
 
     market_gap_prefix: str
     base_exchange: str
@@ -347,6 +348,12 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
             sched_section.get("stagger_step_secs", 0.5),
         )
     )
+    tick_max_workers = int(
+        os.environ.get(
+            "TICK_MAX_WORKERS",
+            sched_section.get("max_workers", 8),
+        )
+    )
 
     return AppConfig(
         questdb_url=questdb_url,
@@ -356,6 +363,7 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
         window_mode=window_mode,
         cadence_overrides=cadence_overrides,
         stagger_step_secs=stagger_step_secs,
+        tick_max_workers=tick_max_workers,
         market_gap_prefix=market_gap_prefix,
         base_exchange=base_exchange,
         quote_exchanges=quote_exchanges,

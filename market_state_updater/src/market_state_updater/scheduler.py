@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from concurrent.futures import Executor
 from dataclasses import dataclass
 
 
@@ -55,23 +56,32 @@ def tick(
     schedules: list[Schedule],
     now: float,
     last_run_at: dict[str, float],
+    executor: Executor | None = None,
 ) -> TickResult:
-    """now 시점에 due 한 schedule 들 직렬 실행. last_run_at 은 호출자가 관리 (mutable).
+    """now 시점에 due 한 schedule 들 실행. last_run_at 은 호출자가 관리 (mutable).
 
-    schedule 마다 (now - last_run_at[name]) >= cadence_secs 면 due.
+    executor 가 주어지면 due schedule 들을 병렬 실행 (I/O 바운드 — QuestDB HTTP).
+    None 이면 직렬 (test/once 모드).
+
+    last_run_at 은 submit 전에 갱신 — 같은 schedule 가 동시에 두 번 trigger 되지 않게.
     """
-    due = 0
-    ok = 0
+    due_list: list[Schedule] = []
     for s in schedules:
         if s.cadence_secs <= 0:
             continue
-        # 처음 보는 schedule (last_run 없음) 은 즉시 due — 데몬 시작 직후
-        # 모든 metric 1번 채우게 (이후엔 cadence 따라).
         last = last_run_at.get(s.name, -math.inf)
         if now - last < s.cadence_secs:
             continue
-        due += 1
-        if s.run():
-            ok += 1
-        last_run_at[s.name] = now
-    return TickResult(due=due, ok=ok)
+        due_list.append(s)
+        last_run_at[s.name] = now  # submit 전에 갱신 → 다음 tick 에서 재실행 방지
+
+    if not due_list:
+        return TickResult(due=0, ok=0)
+
+    if executor is None:
+        ok = sum(1 for s in due_list if s.run())
+        return TickResult(due=len(due_list), ok=ok)
+
+    futures = [executor.submit(s.run) for s in due_list]
+    ok = sum(1 for f in futures if f.result())
+    return TickResult(due=len(due_list), ok=ok)
