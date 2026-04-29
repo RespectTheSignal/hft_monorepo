@@ -39,6 +39,12 @@ async fn main() -> Result<()> {
         tracing::warn!(error = %e, "signal_publisher init failed — falling back to QuestDB-only");
     }
 
+    // ZMQ SUB for executor → collector feedback (fills + aborts). Phase 2:
+    // logs every event; future phases (coordinator, ILP merge) hang on the
+    // returned broadcast Sender. Non-fatal: connect happens lazily so the
+    // channel is created even when the executor is offline.
+    let _fill_events_tx = collector::fill_subscriber::spawn();
+
     // Broadcast bus for downstream consumers (e.g. latency calculator, paper bot).
     // 1M slots absorbs the replay producer's burst rate without lagging the
     // slower paper-bot subscribers during a backtest. In live mode the extra
@@ -332,6 +338,22 @@ async fn main() -> Result<()> {
             );
             tokio::spawn(async move {
                 collector::gate_lead::run(writer_g, rx_g, gl_params).await;
+            });
+        }
+
+        // Spread-reversion strategy (Binance↔Flipster mid-gap mean revert).
+        // Off by default — enable via SPREAD_REVERT=1. Independent of
+        // gate_lead; uses strategy='spread_revert' tag in position_log.
+        if std::env::var("SPREAD_REVERT").unwrap_or_else(|_| "0".into()) != "0" {
+            let writer_sr = writer.clone();
+            let rx_sr = tx.subscribe();
+            let sr_params = collector::spread_revert::SpreadRevertParams::from_env();
+            tracing::info!(
+                account_id = %sr_params.account_id,
+                "spread_revert strategy enabled"
+            );
+            tokio::spawn(async move {
+                collector::spread_revert::run(writer_sr, rx_sr, sr_params).await;
             });
         }
 

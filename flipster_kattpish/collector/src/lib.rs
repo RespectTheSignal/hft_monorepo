@@ -9,5 +9,7 @@ pub mod reconnect;
 pub mod exchanges;
 pub mod strategies;
 pub mod gate_lead;
+pub mod spread_revert;
+pub mod fill_subscriber;
 
 pub use model::{BookTick, ExchangeName};

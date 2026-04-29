@@ -19,6 +19,7 @@ use gate_client::GateClient;
 mod config;
 mod cookies;
 mod executor;
+mod fill_publisher;
 mod flipster_helpers;
 mod flipster_ws;
 mod gate_contracts;
@@ -90,6 +91,13 @@ async fn main() -> anyhow::Result<()> {
         dry_run = cli.dry_run,
         "starting executor"
     );
+
+    // Bring up the fill_publisher PUB socket so the collector's coordinator
+    // (Phase 3+) can see live fills/aborts in real time. Non-fatal: if the
+    // bind fails, executor continues and `publish_*` are silent no-ops.
+    if let Err(e) = fill_publisher::init() {
+        tracing::warn!(error = %e, "fill_publisher init failed (continuing without)");
+    }
 
     let cookies_path = cookies::expand_tilde(&cli.cookies_file);
     let bundle = cookies::load(&cookies_path)?;

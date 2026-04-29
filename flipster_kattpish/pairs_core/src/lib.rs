@@ -21,4 +21,6 @@ pub mod signal;
 pub use tick::{base_of, BookTick, ExchangeName, Quote};
 pub use window::RollingWindow;
 pub use position::{flipster_entry_price, flipster_exit_price, pair_pnl_bp, single_leg_pnl_bp};
-pub use signal::{SignalAction, SignalSide, TradeSignal};
+pub use signal::{
+    AbortReport, ExecutorEvent, FillReport, SignalAction, SignalSide, TradeSignal,
+};

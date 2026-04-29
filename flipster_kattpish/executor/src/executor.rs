@@ -590,6 +590,22 @@ impl Executor {
                 "  [TRACK] flipster_entry={} size={} (single-leg)",
                 f_pre_avg, f_pre_size
             );
+            crate::fill_publisher::publish_fill(
+                &self.variant,
+                ev.position_id,
+                &ev.base,
+                "entry",
+                &ev.side,
+                size,
+                f_pre_avg,
+                0.0,
+                f_entry_slip,
+                0.0,
+                ev.flipster_price,
+                ev.gate_price,
+                signal_lag_ms as i64,
+                chrono::Utc::now(),
+            );
             return Ok(());
         }
 
@@ -745,6 +761,22 @@ impl Executor {
         tracing::info!(
             "  [TRACK] flipster_entry={} size={} slot={} | gate_entry={} contracts={} | entry_sprd={:+.1}bp",
             f_avg, f_size, f_slot.unwrap_or(0), g_fill_price, g_filled_size, entry_sprd_bp
+        );
+        crate::fill_publisher::publish_fill(
+            &self.variant,
+            ev.position_id,
+            &ev.base,
+            "entry",
+            &ev.side,
+            size,
+            f_avg,
+            g_fill_price,
+            f_entry_slip,
+            g_entry_slip,
+            ev.flipster_price,
+            ev.gate_price,
+            signal_lag_ms as i64,
+            chrono::Utc::now(),
         );
         Ok(())
     }
@@ -1092,6 +1124,22 @@ impl Executor {
         if let Err(e) = self.trade_log.append(&rec).await {
             tracing::warn!(error = %e, "  [TRACK] log write failed");
         }
+        crate::fill_publisher::publish_fill(
+            &self.variant,
+            pos.position_id,
+            &pos.base,
+            "exit",
+            &pos.flipster_side,
+            pos.size_usd,
+            f_close_avg,
+            g_close_avg,
+            f_exit_slip,
+            g_exit_slip,
+            ev.flipster_price,
+            ev.gate_price,
+            0,
+            chrono::Utc::now(),
+        );
         Ok(())
     }
 
