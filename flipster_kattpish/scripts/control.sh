@@ -13,6 +13,11 @@
 #   - Grafana on :3001
 #
 # Paper bot is NOT started by default; use: ./control.sh paper-start
+#
+# Live executor instances (subscribe to collector signals on IPC and
+# place real Flipster orders):
+#   ./control.sh gl-start  / gl-stop   — gate_lead (BINANCE_LEAD_v1)
+#   ./control.sh sr-start  / sr-stop   — spread_revert (SR_LIVE_v1)
 set -euo pipefail
 
 PROJECT="/home/gate1/projects/quant/hft_monorepo/flipster_kattpish"
@@ -107,6 +112,57 @@ stop_one() {
   rm -f "$pidfile"
 }
 
+# ---------------------------------------------------------------------------
+# Live executor instances. Each one is a `target/release/executor` process
+# subscribed to the collector via IPC and authorised to place real Flipster
+# orders. Multiple executors can run side-by-side as long as their fill
+# publisher socket paths don't collide.
+# ---------------------------------------------------------------------------
+
+start_gl() {
+  if is_running "$RUN/executor_gl.pid"; then echo "[executor-gl] already running"; return 0; fi
+  if [[ ! -x "$PROJECT/target/release/executor" ]]; then
+    echo "[executor-gl] binary missing — run \`cargo build --release -p executor\`" >&2
+    return 1
+  fi
+  # gate_lead live: BINANCE_LEAD_v1, $80, single-leg Flipster.
+  # Default fill PUB on tcp://127.0.0.1:7501 (legacy) — collector's
+  # fill_subscriber is on ipc:///tmp/flipster_kattpish_fill.sock, so set
+  # FILL_PUB_ADDR to match unless overridden.
+  : "${GL_SIZE_USD:=80}"
+  RUST_LOG=info FILL_PUB_ADDR="${FILL_PUB_ADDR:-ipc:///tmp/flipster_kattpish_fill.sock}" \
+    nohup "$PROJECT/target/release/executor" \
+      --variant BINANCE_LEAD_v1 \
+      --size-usd "$GL_SIZE_USD" \
+      --flipster-only \
+      --trade-log "$LOGS/binance_lead_live_v44.jsonl" \
+      >"$LOGS/executor_v44.log" 2>&1 &
+  echo $! > "$RUN/executor_gl.pid"
+  echo "[executor-gl] pid=$! variant=BINANCE_LEAD_v1 size=\$$GL_SIZE_USD"
+}
+
+start_sr() {
+  if is_running "$RUN/executor_sr.pid"; then echo "[executor-sr] already running"; return 0; fi
+  if [[ ! -x "$PROJECT/target/release/executor" ]]; then
+    echo "[executor-sr] binary missing — run \`cargo build --release -p executor\`" >&2
+    return 1
+  fi
+  # spread_revert live: SR_LIVE_v1, $5, Isolated margin, MULTIPLE_POSITIONS.
+  # Distinct fill_publisher socket so it doesn't bind-collide with gl.
+  : "${SR_LIVE_SIZE_USD:=5}"
+  RUST_LOG=info FILL_PUB_ADDR="ipc:///tmp/flipster_kattpish_fill_sr.sock" \
+    nohup "$PROJECT/target/release/executor" \
+      --variant SR_LIVE_v1 \
+      --size-usd "$SR_LIVE_SIZE_USD" \
+      --flipster-only \
+      --margin Isolated \
+      --trade-mode MULTIPLE_POSITIONS \
+      --trade-log "$LOGS/spread_revert_live_v1.jsonl" \
+      >"$LOGS/executor_sr_v1.log" 2>&1 &
+  echo $! > "$RUN/executor_sr.pid"
+  echo "[executor-sr] pid=$! variant=SR_LIVE_v1 size=\$$SR_LIVE_SIZE_USD margin=Isolated multi=on"
+}
+
 case "${1:-status}" in
   start)
     start_qdb
@@ -117,7 +173,21 @@ case "${1:-status}" in
   paper-start)
     start_paper
     ;;
+  gl-start)
+    start_gl
+    ;;
+  gl-stop)
+    stop_one executor-gl "$RUN/executor_gl.pid"
+    ;;
+  sr-start)
+    start_sr
+    ;;
+  sr-stop)
+    stop_one executor-sr "$RUN/executor_sr.pid"
+    ;;
   stop)
+    stop_one executor-sr     "$RUN/executor_sr.pid"
+    stop_one executor-gl     "$RUN/executor_gl.pid"
     stop_one paper_bot       "$RUN/paper.pid"
     stop_one collector       "$RUN/collector.pid"
     stop_one funding_poller  "$RUN/funding.pid"
@@ -139,5 +209,5 @@ case "${1:-status}" in
     done
     ;;
   *)
-    echo "usage: $0 {start|stop|restart|status|paper-start}"; exit 1 ;;
+    echo "usage: $0 {start|stop|restart|status|paper-start|gl-start|gl-stop|sr-start|sr-stop}"; exit 1 ;;
 esac
