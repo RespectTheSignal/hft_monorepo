@@ -343,9 +343,14 @@ async fn main() -> Result<()> {
         if std::env::var("GATE_LEAD").unwrap_or_else(|_| "1".into()) != "0" {
             let writer_g = writer.clone();
             let rx_g = tx.subscribe();
-            let gl_params = collector::gate_lead::GateLeadParams::from_env();
+            let mut gl_params = collector::gate_lead::GateLeadParams::from_env();
+            // Historical replay ticks have event_ts hours/days behind
+            // wall_now — the wall-clock stale gate would drop them all.
+            // Mirror what strategies.rs does for pairs.
+            gl_params.backtest_mode = is_backtest;
             tracing::info!(
                 account_id = %gl_params.account_id,
+                backtest = gl_params.backtest_mode,
                 "gate_lead strategy enabled"
             );
             tokio::spawn(async move {
@@ -359,9 +364,11 @@ async fn main() -> Result<()> {
         if std::env::var("SPREAD_REVERT").unwrap_or_else(|_| "0".into()) != "0" {
             let writer_sr = writer.clone();
             let rx_sr = tx.subscribe();
-            let sr_params = collector::spread_revert::SpreadRevertParams::from_env();
+            let mut sr_params = collector::spread_revert::SpreadRevertParams::from_env();
+            sr_params.backtest_mode = is_backtest;
             tracing::info!(
                 account_id = %sr_params.account_id,
+                backtest = sr_params.backtest_mode,
                 "spread_revert strategy enabled"
             );
             tokio::spawn(async move {

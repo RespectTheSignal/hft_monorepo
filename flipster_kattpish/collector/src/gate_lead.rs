@@ -58,6 +58,10 @@ pub struct GateLeadParams {
     pub cooldown_s: f64,
     /// Per-leg taker fee in bp (Flipster only — single-leg paper).
     pub fee_bp_per_side: f64,
+    /// Backtest mode flag. When true, on_tick skips the wall-clock stale
+    /// check so historical replay ticks aren't all dropped (their
+    /// event_ts is hours/days behind wall_now by definition).
+    pub backtest_mode: bool,
     /// Whitelist of bases to trade (empty = all bases).
     pub whitelist: Vec<String>,
     /// Blacklist of bases to never trade. Always applied (overrides
@@ -78,6 +82,7 @@ impl Default for GateLeadParams {
             stop_bp: 8.0,
             cooldown_s: 3.0,
             fee_bp_per_side: 0.85,
+            backtest_mode: false,
             // 31 symbols screened from 418 Binance∩Flipster candidates
             // (2026-04-28). STRICT pass: n≥30, win%≥65, avg_bp≥3 with
             // best (min_bp, anchor) chosen per-symbol but global default
@@ -289,9 +294,11 @@ async fn on_tick(
     // (event_ts + hold_max_s) is already past by the time we open. After
     // this filter, event_ts ≈ wall_now, so the rest of the strategy can
     // continue using event timestamps for rolling-window math.
-    let wall_now = Utc::now();
-    if (wall_now - tick.timestamp).num_milliseconds() > 1000 {
-        return Ok(());
+    if !params.backtest_mode {
+        let wall_now = Utc::now();
+        if (wall_now - tick.timestamp).num_milliseconds() > 1000 {
+            return Ok(());
+        }
     }
     let now = tick.timestamp;
 

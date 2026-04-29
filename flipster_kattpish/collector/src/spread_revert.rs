@@ -84,6 +84,9 @@ pub struct SpreadRevertParams {
     pub entry_cooldown_ms: i64,
     /// Per-side Flipster taker fee (bp) used in the entry edge calc.
     pub flipster_fee_bp: f64,
+    /// Backtest mode flag. When true, on_tick skips the wall-clock stale
+    /// check so historical replay ticks aren't all dropped.
+    pub backtest_mode: bool,
     /// Whitelist of bases. Empty = allow all (filtered by blacklist).
     pub whitelist: Vec<String>,
     pub blacklist: Vec<String>,
@@ -106,6 +109,7 @@ impl Default for SpreadRevertParams {
             max_hold_s: 300.0,
             entry_cooldown_ms: 500,
             flipster_fee_bp: 0.425,
+            backtest_mode: false,
             whitelist: Vec::new(),
             blacklist: vec![
                 "M".into(),
@@ -312,9 +316,11 @@ async fn on_tick(
     if params.blacklist.contains(&base) {
         return Ok(());
     }
-    let wall_now = Utc::now();
-    if (wall_now - tick.timestamp).num_milliseconds() > 1000 {
-        return Ok(());
+    if !params.backtest_mode {
+        let wall_now = Utc::now();
+        if (wall_now - tick.timestamp).num_milliseconds() > 1000 {
+            return Ok(());
+        }
     }
     let now = tick.timestamp;
 
