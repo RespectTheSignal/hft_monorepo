@@ -25,9 +25,9 @@
 //!
 //! Exit (per Jay's spec):
 //!   (a) stop-loss: gap moved `stop_bp` adversely from entry
-//!   (b) max-hold safety net (default 24 h). Logged as "stop" — anything
-//!       still open after a full day is treated as a forced stop-loss,
-//!       not a benign timeout.
+//!       (default 20 bp).
+//!   (b) timeout: position has been open longer than `max_hold_s`
+//!       (default 24 h). Logged as "timeout", separate from "stop".
 //! Take-profit happens implicitly: as the gap converges toward
 //! `bf_avg_gap`, the entry condition no longer fires — and an opposite-
 //! side entry signal closes the position before opening the new one.
@@ -77,10 +77,10 @@ pub struct SpreadRevertParams {
     /// Extra bp required on top of measured costs to trigger entry.
     pub entry_threshold_bp: f64,
     /// Stop-loss: close when the gap moves `stop_bp` adversely from entry.
+    /// Default 20 bp.
     pub stop_bp: f64,
-    /// Hard max hold (seconds) — safety net. Default 24 h. Anything still
-    /// open after this is forced-closed and tagged "stop" (not "timeout"),
-    /// because the strategy's premise has clearly failed by then.
+    /// Hard max hold (seconds). Default 24 h. Past this the position is
+    /// closed with reason="timeout", separate from price-stop.
     pub max_hold_s: f64,
     /// Per-base cooldown after entry (ms). Blocks a same-symbol entry
     /// from firing again within this window — implements the "500 ms
@@ -109,7 +109,7 @@ impl Default for SpreadRevertParams {
             // (= 5 minutes of history) before trading.
             min_window_samples: 60,
             entry_threshold_bp: 2.0,
-            stop_bp: 10.0,
+            stop_bp: 20.0,
             max_hold_s: 86_400.0, // 24 h
 
             entry_cooldown_ms: 500,
@@ -446,13 +446,12 @@ async fn on_tick(
                 let exit_px = if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask };
                 exit_pick = Some(("stop", exit_px));
             }
-            // Past the safety deadline (default 24h) → stop. Logged as
-            // "stop" so it lumps in with the price-stop bucket; the
-            // distinction (which one tripped) is not interesting once
-            // the position is this stale.
+            // Past max_hold_s (default 24 h) → timeout. Distinct from
+            // "stop" so dashboards can show how often the deadline path
+            // fires vs the price-loss path.
             if exit_pick.is_none() && now >= pos.deadline {
                 let exit_px = if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask };
-                exit_pick = Some(("stop", exit_px));
+                exit_pick = Some(("timeout", exit_px));
             }
             if let Some((reason, exit_price)) = exit_pick {
                 entry.open = None;
@@ -643,9 +642,7 @@ async fn sweep_exits(
                 exit_price,
                 exit_gap_bp: gap_bp,
                 avg_gap_bp: pos_avg_or(&entry.history),
-                // Sweep tick: same logic as the in-tick deadline branch
-                // — past max_hold_s gets force-closed and tagged "stop".
-                reason: "stop",
+                reason: "timeout",
                 exit_ts: now,
             });
         }
