@@ -20,6 +20,7 @@ mod config;
 mod cookies;
 mod executor;
 mod fill_publisher;
+mod flipster_account;
 mod flipster_helpers;
 mod flipster_ws;
 mod gate_contracts;
@@ -157,6 +158,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Spawn Flipster private WS in the background.
     let flip_state = flipster_ws::spawn(bundle.flipster.clone());
+
+    // Spawn the v1-API account sync (REST poll + WS subscribe). Runs in
+    // parallel with the v2 cookie WS above. Reads FLIPSTER_API_KEY /
+    // FLIPSTER_API_SECRET from env; if unset, the helper logs a warning
+    // and the returned state stays at default (no failure).
+    let _account_state = flipster_account::spawn();
 
     // Build Executor.
     let blacklist: HashSet<String> = cli
