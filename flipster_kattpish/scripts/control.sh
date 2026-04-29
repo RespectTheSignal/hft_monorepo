@@ -18,6 +18,11 @@
 # place real Flipster orders):
 #   ./control.sh gl-start  / gl-stop   — gate_lead (BINANCE_LEAD_v1)
 #   ./control.sh sr-start  / sr-stop   — spread_revert (SR_LIVE_v1)
+#
+# Auth (one-time per machine):
+#   ./control.sh vnc-start             — start Xvfb + x11vnc on :5901
+#   ./control.sh chrome-start          — Flipster + Gate Chromes with CDP
+#   then: VNC viewer → :5901 → log into both sites manually
 set -euo pipefail
 
 PROJECT="/home/gate1/projects/quant/hft_monorepo/flipster_kattpish"
@@ -141,6 +146,64 @@ start_gl() {
   echo "[executor-gl] pid=$! variant=BINANCE_LEAD_v1 size=\$$GL_SIZE_USD"
 }
 
+# ---------------------------------------------------------------------------
+# Browser session (one per host). Runs an Xvfb display + x11vnc so the
+# operator can connect a VNC viewer once, manually log into Flipster +
+# Gate, and walk away. Sessions persist in user-data-dir across reboots.
+# ---------------------------------------------------------------------------
+
+VNC_DISPLAY=:1
+VNC_PORT=5901
+
+start_vnc() {
+  if pgrep -f "Xvfb $VNC_DISPLAY" >/dev/null; then
+    echo "[vnc] Xvfb $VNC_DISPLAY already running"
+  else
+    Xvfb "$VNC_DISPLAY" -screen 0 1920x1080x24 >/dev/null 2>&1 &
+    echo "[vnc] Xvfb started on $VNC_DISPLAY"
+  fi
+  if pgrep -f "x11vnc.*-rfbport $VNC_PORT" >/dev/null; then
+    echo "[vnc] x11vnc already on :$VNC_PORT"
+  else
+    if [[ ! -f "$HOME/.vnc/passwd" ]]; then
+      echo "[vnc] no password yet — run: x11vnc -storepasswd"; exit 1
+    fi
+    x11vnc -display "$VNC_DISPLAY" -rfbauth "$HOME/.vnc/passwd" \
+      -forever -bg -rfbport "$VNC_PORT" -quiet >/dev/null
+    echo "[vnc] x11vnc bound to :$VNC_PORT (connect with VNC viewer)"
+  fi
+}
+
+start_chrome() {
+  start_vnc
+  for spec in "flipster:9230:https://flipster.io/trade/perpetual/BTCUSDT.PERP" \
+              "gate:9231:https://www.gate.com/futures/USDT/BTC_USDT"; do
+    name="${spec%%:*}"; rest="${spec#*:}"
+    port="${rest%%:*}"; url="${rest#*:}"
+    if curl -fs "http://localhost:$port/json/version" >/dev/null 2>&1; then
+      echo "[chrome-$name] CDP already alive on :$port"
+      continue
+    fi
+    DISPLAY="$VNC_DISPLAY" google-chrome \
+      --no-sandbox --disable-gpu \
+      --remote-debugging-port="$port" \
+      --remote-debugging-address=0.0.0.0 \
+      --user-data-dir="/tmp/chrome-$name" \
+      --window-size=1920,1080 "$url" \
+      >/dev/null 2>&1 &
+    echo "[chrome-$name] launched (CDP :$port, user-data-dir=/tmp/chrome-$name)"
+  done
+  echo
+  echo "VNC: connect to <this-host>:$VNC_PORT, then log into Flipster + Gate."
+  echo "After login, cookies refresh via the cron registered by setup.sh."
+}
+
+stop_chrome() {
+  pkill -f "remote-debugging-port=9230" 2>/dev/null || true
+  pkill -f "remote-debugging-port=9231" 2>/dev/null || true
+  echo "[chrome] killed flipster + gate sessions (Xvfb left running)"
+}
+
 start_sr() {
   if is_running "$RUN/executor_sr.pid"; then echo "[executor-sr] already running"; return 0; fi
   if [[ ! -x "$PROJECT/target/release/executor" ]]; then
@@ -185,6 +248,18 @@ case "${1:-status}" in
   sr-stop)
     stop_one executor-sr "$RUN/executor_sr.pid"
     ;;
+  vnc-start)
+    start_vnc
+    ;;
+  chrome-start)
+    start_chrome
+    ;;
+  chrome-stop)
+    stop_chrome
+    ;;
+  cookies-now)
+    python3 "$PROJECT/scripts/dump_cookies.py" || exit $?
+    ;;
   stop)
     stop_one executor-sr     "$RUN/executor_sr.pid"
     stop_one executor-gl     "$RUN/executor_gl.pid"
@@ -209,5 +284,5 @@ case "${1:-status}" in
     done
     ;;
   *)
-    echo "usage: $0 {start|stop|restart|status|paper-start|gl-start|gl-stop|sr-start|sr-stop}"; exit 1 ;;
+    echo "usage: $0 {start|stop|restart|status|paper-start|gl-start|gl-stop|sr-start|sr-stop|vnc-start|chrome-start|chrome-stop|cookies-now}"; exit 1 ;;
 esac
