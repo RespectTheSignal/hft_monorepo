@@ -1075,11 +1075,27 @@ async fn try_enter_pairs(
     );
     // Emit entry signal for live executor sidecar.
     let side_s = if dir > 0 { "long" } else { "short" };
+    // Carry the freshest BBO so the executor doesn't re-fetch from
+    // QuestDB. `bq` is whichever venue is the hedge leg (binance or gate).
+    let mut quotes = crate::signal_publisher::SignalQuotes::default();
+    quotes.flipster_bid = Some(fq.bid);
+    quotes.flipster_ask = Some(fq.ask);
+    match params.hedge_venue {
+        ExchangeName::Binance => {
+            quotes.binance_bid = Some(bq.bid);
+            quotes.binance_ask = Some(bq.ask);
+        }
+        ExchangeName::Gate => {
+            quotes.gate_bid = Some(bq.bid);
+            quotes.gate_ask = Some(bq.ask);
+        }
+        _ => {}
+    }
     // ZMQ PUB first (non-blocking, <1ms) so live executor sees it with minimal lag.
     crate::coordinator::route_signal(
         &params.account_id, base, "entry", side_s,
         size_usd, f_entry, b_entry, pos_id, now,
-        Some(fq.spread_bp()),
+        quotes,
     );
     if let Err(e) = _writer
         .write_trade_signal(
@@ -1524,12 +1540,13 @@ async fn sweep_exits(book: &Arc<Mutex<PaperBook>>, writer: &IlpWriter, params: &
         // Emit exit signal for live executor sidecar.
         if matches!(pos.strategy, Strategy::Pairs) {
             let exit_side = if pos.flipster_side > 0 { "long" } else { "short" };
-            // ZMQ PUB first. Exits never go through coordinator filtering;
-            // spread_bp is informational only here.
+            // ZMQ PUB first. Exits never go through coordinator filtering.
+            // BBO is left empty: the executor closes via reduce-only and
+            // doesn't need a pre-pricing reference for exits.
             crate::coordinator::route_signal(
                 &params.account_id, &pos.base, "exit", exit_side,
                 pos.size_usd, f_exit, b_exit, pos.id, now,
-                None,
+                crate::signal_publisher::SignalQuotes::default(),
             );
             if let Err(e) = writer
                 .write_trade_signal(

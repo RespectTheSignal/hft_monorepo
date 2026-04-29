@@ -251,7 +251,14 @@ struct OpenAction {
     size_usd: f64,
     ref_mid: f64,
     gate_mid: f64,
-    flipster_spread_bp: Option<f64>,
+    flipster_bid: Option<f64>,
+    flipster_ask: Option<f64>,
+    /// Anchor venue (Binance) BBO at decision time. `Option` because the
+    /// strategy fires from a Binance mid event, not a BBO snapshot — bid/
+    /// ask are what we have stored in BaseState, which may have been
+    /// updated independently from the trigger tick.
+    binance_bid: Option<f64>,
+    binance_ask: Option<f64>,
     ts: DateTime<Utc>,
 }
 
@@ -390,19 +397,10 @@ async fn on_tick(
             );
             // Defer the write_trade_signal + publish to AFTER we drop the
             // lock — async I/O in here would starve other tick handlers.
-            // Flipster spread (when known) lets the coordinator's
-            // wide-spread filter kick in even though gate_lead trades are
-            // triggered by the Binance leader, not the Flipster quote.
-            let f_spread_bp = if entry.flipster_bid > 0.0 && entry.flipster_ask > 0.0 {
-                let m = 0.5 * (entry.flipster_bid + entry.flipster_ask);
-                if m > 0.0 {
-                    Some(((entry.flipster_ask - entry.flipster_bid) / m) * 1e4)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            // BBO snapshot for the executor: Flipster comes from
+            // BaseState (known fresh — we just gated on staleness above);
+            // Binance comes from the trigger tick we're currently
+            // dispatching, which is the latest BBO by definition.
             open_act = Some(OpenAction {
                 base: base.clone(),
                 pos_id,
@@ -410,7 +408,10 @@ async fn on_tick(
                 size_usd: params.size_usd,
                 ref_mid,
                 gate_mid: mid,
-                flipster_spread_bp: f_spread_bp,
+                flipster_bid: Some(entry.flipster_bid),
+                flipster_ask: Some(entry.flipster_ask),
+                binance_bid: Some(bid),
+                binance_ask: Some(ask),
                 ts: now,
             });
         }
@@ -467,7 +468,13 @@ async fn on_tick(
             o.gate_mid,
             o.pos_id,
             o.ts,
-            o.flipster_spread_bp,
+            crate::signal_publisher::SignalQuotes {
+                flipster_bid: o.flipster_bid,
+                flipster_ask: o.flipster_ask,
+                binance_bid: o.binance_bid,
+                binance_ask: o.binance_ask,
+                ..Default::default()
+            },
         );
         if let Err(e) = writer
             .write_trade_signal(
@@ -597,7 +604,7 @@ async fn log_close(
         c.exit_price,
         c.pos.id,
         c.exit_ts,
-        None,
+        crate::signal_publisher::SignalQuotes::default(),
     );
     if let Err(e) = writer
         .write_trade_signal(

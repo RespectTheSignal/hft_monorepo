@@ -194,7 +194,10 @@ struct OpenAction {
     size_usd: f64,
     entry_price: f64,
     binance_mid: f64,
-    flipster_spread_bp: f64,
+    flipster_bid: f64,
+    flipster_ask: f64,
+    binance_bid: f64,
+    binance_ask: f64,
     ts: DateTime<Utc>,
 }
 
@@ -438,9 +441,13 @@ async fn on_tick(
                             size_usd: params.entry_size_usd,
                             entry_price,
                             binance_mid: bin_mid,
-                            flipster_spread_bp: fli_spread_bp,
+                            flipster_bid: entry.flipster_bid,
+                            flipster_ask: entry.flipster_ask,
+                            binance_bid: entry.binance_bid,
+                            binance_ask: entry.binance_ask,
                             ts: now,
                         });
+                        let _ = fli_spread_bp; // no longer used (coordinator derives from BBO)
                     }
                 }
             }
@@ -448,6 +455,11 @@ async fn on_tick(
     }
 
     if let Some(o) = open_act {
+        let mut quotes = crate::signal_publisher::SignalQuotes::default();
+        quotes.flipster_bid = Some(o.flipster_bid);
+        quotes.flipster_ask = Some(o.flipster_ask);
+        quotes.binance_bid = Some(o.binance_bid);
+        quotes.binance_ask = Some(o.binance_ask);
         crate::coordinator::route_signal(
             &params.account_id,
             &o.base,
@@ -458,7 +470,7 @@ async fn on_tick(
             o.binance_mid,
             o.pos_id,
             o.ts,
-            Some(o.flipster_spread_bp),
+            quotes,
         );
         if let Err(e) = writer
             .write_trade_signal(
@@ -598,7 +610,7 @@ async fn log_close(
         c.exit_price,
         c.pos.id,
         c.exit_ts,
-        None,
+        crate::signal_publisher::SignalQuotes::default(),
     );
     if let Err(e) = writer
         .write_trade_signal(

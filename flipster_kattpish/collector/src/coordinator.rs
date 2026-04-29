@@ -1,32 +1,36 @@
-//! Cross-strategy signal router.
+//! Cross-strategy signal router — sole owner of every per-entry
+//! decision rule.
 //!
-//! Phase 4 introduced this as a pass-through chokepoint. Phase 3b makes it
-//! the sole owner of the per-trade decision filters that used to live in
-//! the executor:
+//! Filters applied (in order, all on entries; exits forward as-is):
 //!
-//! - **chop_detect**: drop entries whose base traded the opposite side
-//!   within `CHOP_WINDOW_MS`. Cross-strategy by design — keyed by base
-//!   only — so e.g. pairs short BTC + 3 s later gate_lead long BTC are
-//!   recognised as the zigzag they are.
+//! - **chop_detect**: drop if the same base just fired the opposite side
+//!   within `CHOP_WINDOW_MS`. Cross-strategy on purpose — pairs short
+//!   BTC + 3 s later gate_lead long BTC is the zigzag we want to catch.
+//! - **min_spread**: drop if the publish-time `|flipster - gate|` cross-
+//!   venue spread is smaller than `MIN_ENTRY_SIGNAL_SPREAD_BP`. Was
+//!   `MIN_ENTRY_SIGNAL_SPREAD_BP` in the executor.
 //! - **dyn_filter**: `pairs_core::SymbolStatsStore::check_entry` — wide
-//!   spread / negative recent PnL cooldown / weak paper signal.
-//! - **adjusted_size**: `SymbolStatsStore::adjusted_size` — multiplicative
-//!   scale based on observed slippage and PnL.
+//!   own-spread / negative recent PnL cooldown / weak paper signal.
+//! - **adjusted_size**: `SymbolStatsStore::adjusted_size` — slippage- and
+//!   PnL-aware multiplicative scaling on the strategy's requested size.
 //!
-//! Exits never block (we cannot refuse to close an open position).
+//! Freshness — i.e. "did the signal sit in queue too long, did the mid
+//! drift adversely between publish and order placement" — is the
+//! executor's job (it knows network/queue lag); coordinator does not
+//! gate on freshness.
 //!
-//! Freshness gates that *should not* live here — `stale_signal_age` and
-//! the executor-side mid recheck — remain in the executor because they
-//! depend on network/queue lag between publish and order placement, not
-//! on strategy state.
+//! `route_signal` takes a `SignalQuotes` carrying the freshest BBO at
+//! decision time. The forwarded `TradeSignal` includes those bid/ask
+//! values so the executor places LIMIT orders without an extra QuestDB
+//! round-trip (~50–200 ms saved per entry).
 //!
-//! Env knobs (failsafes for rollout, both default to "filters on at the
-//! collector / off at the executor"):
+//! Env knobs (rollout failsafes):
 //!
-//! - `COORDINATOR_FILTERS=0` → coordinator becomes pure pass-through. Use
-//!   if a regression slips through and you want to fall back to the old
-//!   executor-decides world quickly.
-//! - `CHOP_WINDOW_MS=<ms>` → override the chop window (default 15000 ms).
+//! - `COORDINATOR_FILTERS=0` → pure pass-through (no chop, no dyn, no
+//!   sizing, no min_spread).
+//! - `CHOP_WINDOW_MS=<ms>` → override the chop window (default 15000).
+//! - `MIN_ENTRY_SIGNAL_SPREAD_BP=<bp>` → override min cross-venue spread
+//!   (default 0.0 = off, matches the executor's previous default).
 
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -35,11 +39,12 @@ use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use tracing::{debug, info, trace};
 
-use crate::signal_publisher;
+use crate::signal_publisher::{self, SignalQuotes};
 use pairs_core::symbol_stats::{FilterDecision, SymbolStatsStore};
 use std::sync::Arc;
 
 const CHOP_WINDOW_MS_DEFAULT: u64 = 15_000;
+const MIN_ENTRY_SPREAD_BP_DEFAULT: f64 = 0.0;
 
 struct Coordinator {
     sym_stats: Arc<SymbolStatsStore>,
@@ -47,6 +52,7 @@ struct Coordinator {
     last_entry: DashMap<String, (i32, Instant)>,
     enabled: bool,
     chop_window_ms: u64,
+    min_entry_spread_bp: f64,
 }
 
 static COORDINATOR: OnceLock<Coordinator> = OnceLock::new();
@@ -64,9 +70,14 @@ pub fn init(sym_stats: Arc<SymbolStatsStore>) {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(CHOP_WINDOW_MS_DEFAULT);
+    let min_entry_spread_bp = std::env::var("MIN_ENTRY_SIGNAL_SPREAD_BP")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(MIN_ENTRY_SPREAD_BP_DEFAULT);
     info!(
         enabled,
         chop_window_ms,
+        min_entry_spread_bp,
         "coordinator: initialised"
     );
     let _ = COORDINATOR.set(Coordinator {
@@ -74,6 +85,7 @@ pub fn init(sym_stats: Arc<SymbolStatsStore>) {
         last_entry: DashMap::new(),
         enabled,
         chop_window_ms,
+        min_entry_spread_bp,
     });
 }
 
@@ -82,10 +94,11 @@ pub fn init(sym_stats: Arc<SymbolStatsStore>) {
 /// know whether the signal was forwarded or filtered (the coordinator
 /// logs the outcome for visibility).
 ///
-/// `flipster_spread_bp` is the live Flipster bid-ask spread (bp) at
-/// decision time. Pass `None` if the strategy genuinely can't compute it
-/// — the wide-spread filter is the only one that depends on it and
-/// `None` makes that branch a no-op.
+/// `quotes` carries the freshest BBO the strategy observed at decision
+/// time. They feed two places:
+///   - the `min_entry_spread_bp` filter (uses |flipster_mid − gate_mid|),
+///   - the published `TradeSignal` itself, so the executor doesn't need
+///     to re-fetch BBO from QuestDB before sending a LIMIT order.
 #[allow(clippy::too_many_arguments)]
 pub fn route_signal(
     account_id: &str,
@@ -97,7 +110,7 @@ pub fn route_signal(
     gate_price: f64,
     position_id: u64,
     ts: DateTime<Utc>,
-    flipster_spread_bp: Option<f64>,
+    quotes: SignalQuotes,
 ) {
     let coord = COORDINATOR.get();
     let Some(coord) = coord else {
@@ -112,6 +125,7 @@ pub fn route_signal(
             gate_price,
             position_id,
             ts,
+            quotes,
         );
         return;
     };
@@ -129,6 +143,7 @@ pub fn route_signal(
             gate_price,
             position_id,
             ts,
+            quotes,
         );
         return;
     }
@@ -154,8 +169,38 @@ pub fn route_signal(
         }
     }
 
-    // 2. Symbol-stats filter: wide spread / negative cooldown / weak paper.
-    match coord.sym_stats.check_entry(base, flipster_spread_bp) {
+    // 2. Min cross-venue spread filter (was MIN_ENTRY_SIGNAL_SPREAD_BP in
+    //    executor.rs). Skip if |flipster_mid - gate_mid| / gate_mid is
+    //    smaller than the configured threshold.
+    if coord.min_entry_spread_bp > 0.0 && gate_price > 0.0 && flipster_price > 0.0 {
+        let sig_sprd_bp = (flipster_price - gate_price).abs() / gate_price * 1e4;
+        if sig_sprd_bp < coord.min_entry_spread_bp {
+            info!(
+                account_id,
+                base,
+                sig_sprd_bp = format!("{:.2}", sig_sprd_bp),
+                threshold = coord.min_entry_spread_bp,
+                "[coord] skip weak signal (cross-venue spread)"
+            );
+            return;
+        }
+    }
+
+    // 3. Symbol-stats filter: wide own-spread / negative cooldown /
+    //    weak paper. Derive Flipster's own bid-ask spread from BBO when
+    //    available (None makes the wide-spread sub-filter a no-op).
+    let own_spread_bp = match (quotes.flipster_bid, quotes.flipster_ask) {
+        (Some(bid), Some(ask)) if bid > 0.0 && ask > 0.0 && ask >= bid => {
+            let mid = 0.5 * (bid + ask);
+            if mid > 0.0 {
+                Some((ask - bid) / mid * 1e4)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    match coord.sym_stats.check_entry(base, own_spread_bp) {
         FilterDecision::Skip(reason) => {
             info!(
                 account_id,
@@ -171,7 +216,7 @@ pub fn route_signal(
         FilterDecision::Pass => {}
     }
 
-    // 3. Adjusted size — clamp to [SCALE_MIN, SCALE_MAX] of caller's size.
+    // 4. Adjusted size — clamp to [SCALE_MIN, SCALE_MAX] of caller's size.
     let adj_size = coord.sym_stats.adjusted_size(base, size_usd);
     if (adj_size - size_usd).abs() > 1e-9 {
         debug!(
@@ -183,7 +228,7 @@ pub fn route_signal(
         );
     }
 
-    // 4. Record entry side for future chop checks.
+    // 5. Record entry side for future chop checks.
     coord
         .last_entry
         .insert(base.to_string(), (side_int, now_inst));
@@ -198,5 +243,6 @@ pub fn route_signal(
         gate_price,
         position_id,
         ts,
+        quotes,
     );
 }

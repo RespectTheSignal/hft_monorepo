@@ -24,7 +24,6 @@ use crate::flipster_helpers::{extract_fill as flip_extract_fill, limit_ioc_entry
 use crate::flipster_ws::SharedState as FlipsterWsState;
 use crate::gate_contracts::{self, ContractMap};
 use crate::gate_helpers::{extract_fill as gate_extract_fill, extract_order_id, extract_status};
-use crate::questdb;
 use crate::trade_log::{TradeLog, TradeRecord};
 use crate::zmq_sub::TradeSignal;
 
@@ -238,50 +237,30 @@ impl Executor {
             return Ok(());
         }
 
-        // Min-spread filter (currently 0 → effectively off).
-        if ev.gate_price > 0.0 && ev.flipster_price > 0.0 {
-            let sig_sprd_bp =
-                (ev.flipster_price - ev.gate_price) / ev.gate_price * 1e4;
-            if sig_sprd_bp.abs() < MIN_ENTRY_SIGNAL_SPREAD_BP {
-                tracing::info!(
-                    "  [SKIP] weak signal — |entry_sprd|={:.1}bp < {}bp threshold",
-                    sig_sprd_bp.abs(), MIN_ENTRY_SIGNAL_SPREAD_BP
-                );
-                return Ok(());
-            }
-        }
+        // BBO snapshot from the signal itself — no QuestDB round-trip.
+        // Pairs of (bid, ask, spread_bp) for whichever venues the
+        // strategy filled in. Any None below means the venue wasn't
+        // attached to the signal; downstream order placement falls back
+        // to the mid (`ev.flipster_price` / `ev.gate_price`).
+        let current_bid_ask: Option<(f64, f64)> = match (ev.flipster_bid, ev.flipster_ask) {
+            (Some(b), Some(a)) if b > 0.0 && a > 0.0 && a >= b => Some((b, a)),
+            _ => None,
+        };
+        let current_spread_bp: Option<f64> = current_bid_ask.map(|(b, a)| {
+            let m = 0.5 * (b + a);
+            if m > 0.0 { (a - b) / m * 1e4 } else { 0.0 }
+        });
+        // Decision-rule filters (min_spread, edge_recheck) live in the
+        // collector's coordinator now; the signal we just received has
+        // already been gated on those. The executor only needs the BBO
+        // for LIMIT pricing, which is below.
 
-        // Edge recheck + spread + dynamic filter. All use the same fresh
-        // Flipster bid/ask snapshot.
-        let mut current_spread_bp: Option<f64> = None;
-        let mut current_bid_ask: Option<(f64, f64)> = None;
-        if let Some((bid, ask)) =
-            questdb::fetch_latest_mid(&self.qdb_http, "flipster_bookticker", &flipster_sym).await
-        {
-            if ev.flipster_price > 0.0 && bid > 0.0 && ask > 0.0 {
-                current_bid_ask = Some((bid, ask));
-                let cur_mid = (bid + ask) / 2.0;
-                current_spread_bp = Some((ask - bid) / cur_mid * 1e4);
-                let move_bp = (cur_mid - ev.flipster_price) / ev.flipster_price * 1e4;
-                let adverse_bp = if ev.side == "long" { move_bp } else { -move_bp };
-                if adverse_bp >= EDGE_RECHECK_MAX_ADVERSE_BP {
-                    tracing::info!(
-                        "  [SKIP] edge decayed — flipster mid moved {:+.1}bp (threshold {})",
-                        adverse_bp, EDGE_RECHECK_MAX_ADVERSE_BP
-                    );
-                    return Ok(());
-                }
-                tracing::info!(
-                    "  [RECHECK] flipster_mid={:.6} adverse={:+.1}bp OK spread={:.1}bp",
-                    cur_mid, adverse_bp, current_spread_bp.unwrap_or(0.0)
-                );
-            }
-        }
-
-        // Chop detector: if previous signal on this base was the OPPOSITE
-        // side within CHOP_DETECT_WINDOW_S, the symbol is zigzagging.
-        // Owned by coordinator::route_signal in Phase 3b. Restore here
-        // only when EXEC_LEGACY_FILTERS=1.
+        // Decision filters (chop_detect, sym_stats.check_entry,
+        // adjusted_size, min_spread, edge_recheck, gate slip cap) all
+        // live in collector::coordinator now. Set EXEC_LEGACY_FILTERS=1
+        // to restore the executor-side chop / dyn-filter chain as a
+        // rollback knob (kept for one rollout cycle; may be removed once
+        // coordinator parity is confirmed).
         if legacy_filters_enabled() {
             let now_inst = std::time::Instant::now();
             let entry = self.last_signal.get(&ev.base).map(|v| v.value().clone());
@@ -290,7 +269,7 @@ impl Executor {
                 if prev_side != ev.side && age_s < CHOP_DETECT_WINDOW_S {
                     tracing::info!(
                         base = %ev.base, prev_side = %prev_side, age_s = age_s,
-                        "  [CHOP-SKIP] side flipped within {}s — zigzag",
+                        "  [LEGACY] chop skip {}s",
                         CHOP_DETECT_WINDOW_S
                     );
                     self.last_signal
@@ -300,28 +279,18 @@ impl Executor {
             }
             self.last_signal
                 .insert(ev.base.clone(), (ev.side.clone(), now_inst));
-        }
 
-        // Dynamic per-symbol filter (sliding-window PnL + paper signal +
-        // current spread). Owned by coordinator::route_signal in Phase 3b.
-        // Restore here only when EXEC_LEGACY_FILTERS=1.
-        let dyn_enabled = std::env::var("GL_DYN_FILTER")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-            .map(|v| v != 0)
-            .unwrap_or(true);
-        if dyn_enabled && legacy_filters_enabled() {
             use crate::symbol_stats::FilterDecision;
             match self.sym_stats.check_entry(&ev.base, current_spread_bp) {
                 FilterDecision::Pass => {}
                 FilterDecision::Probe => {
-                    tracing::info!(base = %ev.base, "  [DYN-FILTER] probe trade (cooldown active)");
+                    tracing::info!(base = %ev.base, "  [LEGACY] dyn-filter probe");
                 }
                 FilterDecision::Skip(reason) => {
                     tracing::info!(
                         base = %ev.base,
                         reason = %reason.as_str(),
-                        "  [DYN-FILTER] skip"
+                        "  [LEGACY] dyn-filter skip"
                     );
                     return Ok(());
                 }
@@ -353,17 +322,12 @@ impl Executor {
             size = adjusted;
         }
 
-        // Flipster entry — LIMIT-IOC. Use the LATEST flipster mid from
-        // QuestDB rather than paper signal_price (which is captured at
-        // gate-move time and may be seconds stale; Flipster rejects
-        // LIMITs that look too far off market with InvalidPrice).
-        let f_limit_price = match questdb::fetch_latest_mid(
-            &self.qdb_http, "flipster_bookticker", &flipster_sym
-        ).await {
-            Some((bid, ask)) => {
-                if ev.side == "long" { ask } else { bid }
-            }
-            None => ev.flipster_price,  // fall back to signal price
+        // Flipster entry — LIMIT-IOC. Use the BBO carried on the signal:
+        // collector publishes the freshest snapshot it observed. Falls
+        // back to the signal mid if BBO is missing (legacy publisher).
+        let f_limit_price = match current_bid_ask {
+            Some((bid, ask)) => if ev.side == "long" { ask } else { bid },
+            None => ev.flipster_price,
         };
         // Hybrid entry: big lead-exchange moves use MARKET (guaranteed
         // fill), smaller moves use LIMIT-IOC (price control). The lead
@@ -626,37 +590,19 @@ impl Executor {
             return Ok(());
         }
 
-        // Gate hedge — IOC at current book bid/ask, with pre-IOC slip cap.
+        // Gate hedge — IOC at the BBO carried on the signal. The
+        // collector publishes the freshest snapshot; the slip cap that
+        // used to live here is now part of the coordinator's filter
+        // chain (or simply absent, since the signal price already
+        // reflects publish-time market state).
         let g_side = if ev.side == "long" { GSide::Short } else { GSide::Long };
         let g_size = gate_contracts::size_from_usd(&self.gate_contracts, &gate_sym, size, ev.gate_price);
-        let mut g_limit_price = ev.gate_price;
-        let mut slip_aborted = false;
-        if let Some((bid, ask)) =
-            questdb::fetch_latest_mid(&self.qdb_http, "gate_bookticker", &gate_sym).await
-        {
-            let takable = if g_side == GSide::Short { bid } else { ask };
-            g_limit_price = takable;
-            if ev.gate_price > 0.0 {
-                let slip_bp = if g_side == GSide::Short {
-                    // We will SELL into bid. Adverse = bid below paper.
-                    (ev.gate_price - bid) / ev.gate_price * 1e4
-                } else {
-                    // We will BUY from ask. Adverse = ask above paper.
-                    (ask - ev.gate_price) / ev.gate_price * 1e4
-                };
-                if slip_bp > MAX_GATE_PRE_IOC_SLIP_BP {
-                    tracing::info!(
-                        "  [GATE-SKIP] slip={:+.1}bp > {}bp — book moved away, aborting",
-                        slip_bp, MAX_GATE_PRE_IOC_SLIP_BP
-                    );
-                    slip_aborted = true;
-                }
+        let g_limit_price = match (ev.gate_bid, ev.gate_ask) {
+            (Some(b), Some(a)) if b > 0.0 && a > 0.0 && a >= b => {
+                if g_side == GSide::Short { b } else { a }
             }
-        }
-        if slip_aborted {
-            self.safety_revert_and_log(&ev, &flipster_sym, &gate_sym, &f_result, size, signal_lag_ms).await;
-            return Ok(());
-        }
+            _ => ev.gate_price,
+        };
 
         // Set leverage on first encounter of each contract.
         {

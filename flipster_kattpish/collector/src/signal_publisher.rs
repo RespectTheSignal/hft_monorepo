@@ -31,6 +31,24 @@ use tracing::{info, warn};
 
 pub use pairs_core::{SignalAction, SignalSide, TradeSignal};
 
+/// Best bid/ask snapshot the strategy observed at signal time. Carrying
+/// it on the wire lets the executor place LIMIT orders (and reason about
+/// adverse-mid drift) without an extra QuestDB round-trip.
+///
+/// All fields are Optional because a single-leg strategy may only have
+/// some of the venues fresh at decision time. Coordinator pre-publish
+/// freshness checks fill what they can, and the executor treats any
+/// `None` as "fall back to mid price" (`flipster_price` / `gate_price`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SignalQuotes {
+    pub flipster_bid: Option<f64>,
+    pub flipster_ask: Option<f64>,
+    pub gate_bid: Option<f64>,
+    pub gate_ask: Option<f64>,
+    pub binance_bid: Option<f64>,
+    pub binance_ask: Option<f64>,
+}
+
 /// Thread-safe PUB socket. Initialized on first call to `init` and reused.
 /// zmq::Socket is not Send, so we keep it in a Mutex<Option<_>> and hold it
 /// only for the duration of a single `send`.
@@ -62,6 +80,10 @@ pub fn init() -> Result<()> {
 }
 
 /// Publish a trade_signal event. Non-fatal on error (logs + returns).
+///
+/// Serialization goes through `serde_json` on a `pairs_core::TradeSignal`
+/// — single source of truth for the wire format. `None` BBO fields are
+/// elided so legacy subscribers see exactly the old payload.
 #[allow(clippy::too_many_arguments)]
 pub fn publish(
     account_id: &str,
@@ -73,16 +95,36 @@ pub fn publish(
     gate_price: f64,
     position_id: u64,
     ts: DateTime<Utc>,
+    quotes: SignalQuotes,
 ) {
     let pub_ref = match PUBLISHER.get() {
         Some(p) => p,
         None => return,
     };
-    let payload = format!(
-        "{{\"account_id\":\"{}\",\"base\":\"{}\",\"action\":\"{}\",\"side\":\"{}\",\"size_usd\":{},\"flipster_price\":{},\"gate_price\":{},\"position_id\":{},\"timestamp\":\"{}\"}}",
-        account_id, base, action, flipster_side, size_usd, flipster_price, gate_price, position_id,
-        ts.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
-    );
+    let signal = TradeSignal {
+        account_id: account_id.to_string(),
+        base: base.to_string(),
+        action: action.to_string(),
+        side: flipster_side.to_string(),
+        size_usd,
+        flipster_price,
+        gate_price,
+        position_id: position_id as i64,
+        timestamp: ts.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+        flipster_bid: quotes.flipster_bid,
+        flipster_ask: quotes.flipster_ask,
+        gate_bid: quotes.gate_bid,
+        gate_ask: quotes.gate_ask,
+        binance_bid: quotes.binance_bid,
+        binance_ask: quotes.binance_ask,
+    };
+    let payload = match serde_json::to_vec(&signal) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(error = %e, "signal_publisher: serialize failed");
+            return;
+        }
+    };
     // DONTWAIT so we never block a strategy thread if subscribers are slow.
     let guard = match pub_ref.socket.lock() {
         Ok(g) => g,
@@ -91,7 +133,7 @@ pub fn publish(
             return;
         }
     };
-    if let Err(e) = guard.send(payload.as_bytes(), zmq::DONTWAIT) {
+    if let Err(e) = guard.send(&payload, zmq::DONTWAIT) {
         warn!(error = %e, "signal_publisher: send failed");
     }
 }

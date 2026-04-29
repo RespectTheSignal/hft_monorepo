@@ -61,17 +61,39 @@ impl SignalSide {
 /// JSON in `signal_publisher::publish`) so existing Python and Rust
 /// consumers parse the same bytes. Strongly-typed callers can use
 /// [`SignalAction`] / [`SignalSide`] and convert via `.as_str()`.
+///
+/// `flipster_price` / `gate_price` are the mid prices the strategy
+/// observed when emitting the signal (kept for backward compat — older
+/// executors rely on them for slippage attribution and re-pricing).
+///
+/// The six BBO fields below (`flipster_bid` etc.) carry the freshest
+/// best-bid/best-ask at decision time so the executor can place LIMIT
+/// orders without a separate QuestDB round-trip. They are `Option<f64>`
+/// so older publishers (no BBO awareness) and older subscribers (don't
+/// know about the fields) keep interoperating.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradeSignal {
     pub account_id: String,
     pub base: String,
-    pub action: String,   // "entry" | "exit"
-    pub side: String,     // "long" | "short" — Flipster side
+    pub action: String, // "entry" | "exit"
+    pub side: String,   // "long" | "short" — Flipster side
     pub size_usd: f64,
     pub flipster_price: f64,
     pub gate_price: f64,
     pub position_id: i64,
     pub timestamp: String, // ISO8601 micros, e.g. "2026-04-24T12:34:56.789012Z"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flipster_bid: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flipster_ask: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_bid: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_ask: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binance_bid: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binance_ask: Option<f64>,
 }
 
 // -----------------------------------------------------------------------------
@@ -151,12 +173,57 @@ mod tests {
             gate_price: 12346.1,
             position_id: 12345,
             timestamp: "2026-04-24T12:34:56.789012Z".into(),
+            flipster_bid: None,
+            flipster_ask: None,
+            gate_bid: None,
+            gate_ask: None,
+            binance_bid: None,
+            binance_ask: None,
         };
         let j = serde_json::to_string(&s).unwrap();
         assert!(j.contains("\"account_id\":\"T04_es35\""));
+        // Optional BBO fields with None must NOT appear on the wire (back-compat).
+        assert!(!j.contains("flipster_bid"));
         let back: TradeSignal = serde_json::from_str(&j).unwrap();
         assert_eq!(back.base, "BTC");
         assert_eq!(back.position_id, 12345);
+        assert_eq!(back.flipster_bid, None);
+    }
+
+    #[test]
+    fn roundtrip_with_bbo() {
+        let s = TradeSignal {
+            account_id: "BINANCE_LEAD_v1".into(),
+            base: "BTC".into(),
+            action: "entry".into(),
+            side: "long".into(),
+            size_usd: 80.0,
+            flipster_price: 100.05,
+            gate_price: 100.04,
+            position_id: 42,
+            timestamp: "2026-04-29T08:00:00.000000Z".into(),
+            flipster_bid: Some(100.04),
+            flipster_ask: Some(100.06),
+            gate_bid: Some(100.03),
+            gate_ask: Some(100.05),
+            binance_bid: Some(100.02),
+            binance_ask: Some(100.04),
+        };
+        let j = serde_json::to_string(&s).unwrap();
+        assert!(j.contains("\"flipster_bid\":100.04"));
+        let back: TradeSignal = serde_json::from_str(&j).unwrap();
+        assert_eq!(back.flipster_ask, Some(100.06));
+        assert_eq!(back.binance_bid, Some(100.02));
+    }
+
+    #[test]
+    fn parse_legacy_signal_without_bbo() {
+        // Pre-bid/ask publishers: the executor must still parse cleanly
+        // and treat BBO as missing (None).
+        let legacy = r#"{"account_id":"X","base":"BTC","action":"entry","side":"long","size_usd":10,"flipster_price":1.0,"gate_price":1.0,"position_id":1,"timestamp":"2026-04-29T08:00:00.000000Z"}"#;
+        let s: TradeSignal = serde_json::from_str(legacy).unwrap();
+        assert!(s.flipster_bid.is_none());
+        assert!(s.binance_ask.is_none());
     }
 
     #[test]

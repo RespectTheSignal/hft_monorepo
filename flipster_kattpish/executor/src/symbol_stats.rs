@@ -5,9 +5,8 @@
 //! filtering semantics. Existing call sites
 //! (`use crate::symbol_stats::{...};`) keep working unchanged.
 
-pub use pairs_core::symbol_stats::{
-    FilterDecision, SkipReason, SymbolStats, SymbolStatsStore, COOLDOWN_SECS, MIN_SAMPLES,
-    MIN_SAMPLES_FOR_SCALE, PAPER_THRESHOLD_BP, PNL_DOWNSIZE_BP, PNL_THRESHOLD_BP, PNL_UPSIZE_BP,
-    PROBE_COUNT, SCALE_DOWN_FACTOR, SCALE_MAX, SCALE_MIN, SCALE_UP_FACTOR, SLIP_HIGH_BP,
-    SLIP_LOW_BP, SPREAD_THRESHOLD_BP, WINDOW,
-};
+// Only the items the executor actually references after Phase 3b's
+// filter migration. Other constants (`PNL_*`, `SCALE_*`, `WINDOW`, ...)
+// stay in `pairs_core::symbol_stats` and are reachable via the qualified
+// path if a future caller needs them.
+pub use pairs_core::symbol_stats::{FilterDecision, SymbolStatsStore};
