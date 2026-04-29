@@ -371,16 +371,18 @@ async fn main() -> Result<()> {
                 backtest = sr_params.backtest_mode,
                 "spread_revert strategy enabled"
             );
+            // Spin up the baseline aggregator first (skipped in
+            // backtest mode — replays don't query live-time tables for
+            // baselines). spread_revert holds the same handle and
+            // seeds its rolling window from it on first tick.
+            let baselines: collector::baseline_writer::SharedBaselines = if !is_backtest {
+                collector::baseline_writer::spawn()
+            } else {
+                std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()))
+            };
             tokio::spawn(async move {
-                collector::spread_revert::run(writer_sr, rx_sr, sr_params).await;
+                collector::spread_revert::run(writer_sr, rx_sr, sr_params, baselines).await;
             });
-            // Pre-aggregator that keeps `bf_baseline` fresh so the
-            // strategy can warmup-free start every restart. Skipped in
-            // backtest mode — replays should not write live-time
-            // baselines.
-            if !is_backtest {
-                collector::baseline_writer::spawn(writer.clone());
-            }
         }
 
         // If BACKTEST_START_TS + BACKTEST_END_TS are set, run historical
