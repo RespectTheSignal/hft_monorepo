@@ -207,6 +207,12 @@ The **central QuestDB stores Gate symbols as `BTC_USDT`** (with underscore), but
 
 ---
 
+## Per-strategy setup guides
+
+- **spread_revert** (Binance↔Flipster basis mean reversion) — see [`SPREAD_REVERT.md`](SPREAD_REVERT.md). Covers code map, signal flow, paper/live commands via `control.sh`, QDB queries, all `SR_*` env knobs, and gotchas.
+
+---
+
 ## Known gotchas
 
 - **Central QuestDB is multi-tenant**. Other strategies (11+ `monitoring_questdb.py` processes) share the same db. NEVER use `TRUNCATE TABLE position_log` — it wipes everyone's data. Filter by `account_id IN (...)` or time window.
