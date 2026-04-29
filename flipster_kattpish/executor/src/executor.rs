@@ -16,7 +16,10 @@ use chrono::{DateTime, Utc};
 use dashmap::{DashMap, DashSet};
 use tokio::sync::Mutex;
 
-use flipster_client::FlipsterClient;
+use flipster_client::{
+    FlipsterClient, MarginType as FMarginType, OrderParams as FOrderParams,
+    OrderType as FOrderType, Side as FSide,
+};
 use gate_client::{GateClient, OrderParams as GParams, OrderType as GType, Side as GSide, TimeInForce as GTif};
 
 use crate::config::*;
@@ -107,6 +110,12 @@ pub struct Executor {
     /// Margin mode tag forwarded to Flipster on every entry order.
     /// "Cross" or "Isolated".
     pub margin: String,
+    /// Use the multi-position endpoint (POST /api/v2/trade/positions/{symbol})
+    /// for entries instead of the one-way endpoint. Each fill returns its
+    /// own slot, so same-symbol stacking works. Account-level trade-mode
+    /// must already be MULTIPLE_POSITIONS — set via web UI or
+    /// --trade-mode CLI flag.
+    pub multiple_positions: bool,
     pub blacklist: HashSet<String>,
     pub whitelist: HashSet<String>,
 
@@ -137,6 +146,72 @@ pub struct Executor {
 }
 
 impl Executor {
+    /// Place a Flipster entry order. Routes through the multi-position
+    /// `place_order` endpoint when the executor is in MULTIPLE_POSITIONS
+    /// mode (each fill returns its own slot, allowing same-symbol stacks);
+    /// otherwise uses the legacy `place_order_oneway` endpoint that nets
+    /// into slot 0.
+    ///
+    /// The full set of arguments mirrors place_order_oneway so callers
+    /// can switch over with no other changes; reduce_only / order_type /
+    /// post_only are honored by both paths.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn flipster_place(
+        &self,
+        symbol: &str,
+        side: &str,
+        amount_usd: f64,
+        ref_price: f64,
+        leverage: u32,
+        reduce_only: bool,
+        order_type: &str,
+        post_only: bool,
+    ) -> Result<serde_json::Value, flipster_client::FlipsterError> {
+        if self.multiple_positions && !reduce_only {
+            // Multi-position entry: POST /api/v2/trade/positions/{symbol}.
+            // Flipster auto-allocates a fresh slot per call so stacking
+            // works. reduce_only entries are physically nonsense (you
+            // can only reduce an existing position) — fall through to
+            // the one-way path for those, where slot=0 is fine.
+            //
+            // post_only is not exposed on this endpoint; it's a v1
+            // limitation on the multi-position path. Pass-through hint
+            // only — callers needing strict postOnly should set
+            // multiple_positions=false.
+            let _ = post_only;
+            let f_side = if side.eq_ignore_ascii_case("long") {
+                FSide::Long
+            } else {
+                FSide::Short
+            };
+            let f_margin = if self.margin.eq_ignore_ascii_case("isolated") {
+                FMarginType::Isolated
+            } else {
+                FMarginType::Cross
+            };
+            let f_otype = match order_type {
+                "ORDER_TYPE_LIMIT" => FOrderType::Limit,
+                _ => FOrderType::Market,
+            };
+            let params = FOrderParams::builder()
+                .side(f_side)
+                .price(ref_price)
+                .amount(amount_usd)
+                .leverage(leverage)
+                .margin_type(f_margin)
+                .order_type(f_otype)
+                .build();
+            let resp = self.flipster.place_order(symbol, params).await?;
+            return Ok(resp.raw);
+        }
+        self.flipster
+            .place_order_oneway_with_margin(
+                symbol, side, amount_usd, ref_price, leverage, reduce_only,
+                order_type, post_only, &self.margin,
+            )
+            .await
+    }
+
     pub fn dispatch(self: &Arc<Self>, ev: TradeSignal) {
         let me = self.clone();
         tokio::spawn(async move {
@@ -350,7 +425,11 @@ impl Executor {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(30.0);
-        let use_market_entry = lead_move_bp > market_threshold_bp;
+        // In multi-position mode the LIMIT-IOC helper isn't slot-aware
+        // (it goes through the one-way endpoint). Until the helper is
+        // ported, force MARKET entries so each one definitely lands on
+        // its own slot via the multi-position endpoint.
+        let use_market_entry = lead_move_bp > market_threshold_bp || self.multiple_positions;
 
         let f_max_lev = self.flip_contracts.max_leverage(&flipster_sym);
         let f_t0 = Instant::now();
@@ -360,8 +439,7 @@ impl Executor {
                 lead_move_bp, market_threshold_bp, f_max_lev
             );
             match self
-                .flipster
-                .place_order_oneway_with_margin(
+                .flipster_place(
                     &flipster_sym,
                     &ev.side,
                     size,
@@ -370,7 +448,6 @@ impl Executor {
                     false,
                     "ORDER_TYPE_MARKET",
                     false,
-                    &self.margin,
                 )
                 .await
             {
@@ -511,8 +588,7 @@ impl Executor {
                 if exit_px > 0.0 {
                     let exit_side = if ev.side == "long" { "short" } else { "long" };
                     let resp = self
-                        .flipster
-                        .place_order_oneway_with_margin(
+                        .flipster_place(
                             &flipster_sym,
                             exit_side,
                             size,
@@ -521,7 +597,6 @@ impl Executor {
                             true,
                             "ORDER_TYPE_LIMIT",
                             true,
-                            &self.margin,
                         )
                         .await;
                     match resp {
@@ -574,8 +649,8 @@ impl Executor {
                 },
             );
             tracing::info!(
-                "  [TRACK] flipster_entry={} size={} (single-leg)",
-                f_pre_avg, f_pre_size
+                "  [TRACK] flipster_entry={} size={} slot={} (single-leg)",
+                f_pre_avg, f_pre_size, f_pre_slot.unwrap_or(0)
             );
             crate::fill_publisher::publish_fill(
                 &self.variant,
@@ -765,8 +840,7 @@ impl Executor {
         let mut f_close_avg = 0.0;
         let lev = self.flip_contracts.max_leverage(flipster_sym);
         match self
-            .flipster
-            .place_order_oneway_with_margin(
+            .flipster_place(
                 flipster_sym,
                 close_side,
                 size * 1.5,
@@ -775,7 +849,6 @@ impl Executor {
                 true,
                 "ORDER_TYPE_MARKET",
                 false,
-                &self.margin,
             )
             .await
         {
@@ -931,8 +1004,7 @@ impl Executor {
         if !maker_filled {
             let lev = self.flip_contracts.max_leverage(&flipster_sym);
             match self
-                .flipster
-                .place_order_oneway_with_margin(
+                .flipster_place(
                     &flipster_sym,
                     close_side,
                     pos.size_usd * 1.5,
@@ -941,7 +1013,6 @@ impl Executor {
                     true,
                     "ORDER_TYPE_MARKET",
                     false,
-                    &self.margin,
                 )
                 .await
             {

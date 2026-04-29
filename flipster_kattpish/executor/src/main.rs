@@ -81,6 +81,13 @@ struct Cli {
     /// executor sets --margin Isolated.
     #[arg(long, default_value = "Cross")]
     margin: String,
+
+    /// Account-level Flipster trade mode. Valid: "ONE_WAY" or
+    /// "MULTIPLE_POSITIONS". Default empty = leave whatever is set on
+    /// the account. SR executor passes --trade-mode MULTIPLE_POSITIONS
+    /// so each entry on the same symbol gets its own slot.
+    #[arg(long, default_value = "")]
+    trade_mode: String,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]
@@ -99,6 +106,7 @@ async fn main() -> anyhow::Result<()> {
         size_usd = cli.size_usd,
         dry_run = cli.dry_run,
         margin = %cli.margin,
+        trade_mode = %cli.trade_mode,
         legacy_filters,
         "starting executor"
     );
@@ -117,6 +125,18 @@ async fn main() -> anyhow::Result<()> {
     // bind fails, executor continues and `publish_*` are silent no-ops.
     if let Err(e) = fill_publisher::init() {
         tracing::warn!(error = %e, "fill_publisher init failed (continuing without)");
+    }
+
+    // Optionally switch the account into MULTIPLE_POSITIONS mode so the
+    // executor can stack multiple slots on the same symbol. Only applied
+    // if the operator passed --trade-mode explicitly. Failure is non-
+    // fatal — log and continue; the account stays at whatever mode it
+    // had before.
+    if !cli.trade_mode.is_empty() {
+        match flipster_account::set_trade_mode(&cli.trade_mode).await {
+            Ok(()) => tracing::info!(mode = %cli.trade_mode, "[init] flipster trade-mode applied"),
+            Err(e) => tracing::warn!(error = %e, mode = %cli.trade_mode, "[init] flipster trade-mode failed"),
+        }
     }
 
     let cookies_path = cookies::expand_tilde(&cli.cookies_file);
@@ -200,6 +220,7 @@ async fn main() -> anyhow::Result<()> {
         dry_run: cli.dry_run,
         flipster_only: cli.flipster_only,
         margin: cli.margin.clone(),
+        multiple_positions: cli.trade_mode.eq_ignore_ascii_case("MULTIPLE_POSITIONS"),
         blacklist,
         whitelist,
         flipster: flipster_client,

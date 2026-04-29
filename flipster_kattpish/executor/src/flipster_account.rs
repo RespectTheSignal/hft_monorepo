@@ -207,16 +207,69 @@ pub fn spawn() -> SharedAccountState {
     state
 }
 
+/// Set the account-level trade mode. Valid values per Flipster docs:
+/// "ONE_WAY" or "MULTIPLE_POSITIONS". Issues PUT /api/v1/account/trade-mode
+/// with HMAC auth + the same proxy used by the rest of this module.
+/// Returns Ok if the API echoes the requested mode back; Err otherwise.
+pub async fn set_trade_mode(mode: &str) -> Result<()> {
+    let api_key = std::env::var("FLIPSTER_API_KEY")
+        .map_err(|_| anyhow!("FLIPSTER_API_KEY not set"))?;
+    let api_secret = std::env::var("FLIPSTER_API_SECRET")
+        .map_err(|_| anyhow!("FLIPSTER_API_SECRET not set"))?;
+    let mut builder = reqwest::Client::builder().gzip(true).https_only(true);
+    if let Ok(proxy_url) = std::env::var("FLIPSTER_PROXY_URL") {
+        if !proxy_url.is_empty() {
+            if let Ok(p) = reqwest::Proxy::all(&proxy_url) {
+                builder = builder.proxy(p);
+            }
+        }
+    }
+    let client = builder.build()?;
+
+    let path = "/api/v1/account/trade-mode";
+    let body = serde_json::json!({ "tradeMode": mode }).to_string();
+    let expires = unix_now_secs() + 60;
+    let signature = sign_hmac(&api_secret, "PUT", path, expires, Some(body.as_bytes()));
+    let url = format!("{}{}", REST_BASE, path);
+    let resp = client
+        .put(&url)
+        .header("api-key", &api_key)
+        .header("api-expires", expires.to_string())
+        .header("api-signature", signature)
+        .header("content-type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .with_context(|| format!("PUT {}", path))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(anyhow!("PUT {} -> {}: {}", path, status, text));
+    }
+    info!(mode, response = %text, "[flip-acct] trade-mode set");
+    Ok(())
+}
+
 // -----------------------------------------------------------------------------
 // REST poll task
 // -----------------------------------------------------------------------------
 
 async fn rest_poll_loop(state: SharedAccountState, api_key: String, api_secret: String, interval_s: u64) {
-    let client = match reqwest::Client::builder()
-        .gzip(true)
-        .https_only(true)
-        .build()
-    {
+    let mut builder = reqwest::Client::builder().gzip(true).https_only(true);
+    // Same CF-bypass proxy used by flipster-client. Optional — if the env
+    // var isn't set the client goes direct.
+    if let Ok(proxy_url) = std::env::var("FLIPSTER_PROXY_URL") {
+        if !proxy_url.is_empty() {
+            match reqwest::Proxy::all(&proxy_url) {
+                Ok(p) => {
+                    builder = builder.proxy(p);
+                    info!(proxy = %proxy_url, "[flip-acct/rest] using proxy");
+                }
+                Err(e) => warn!(error = %e, "[flip-acct/rest] invalid FLIPSTER_PROXY_URL"),
+            }
+        }
+    }
+    let client = match builder.build() {
         Ok(c) => c,
         Err(e) => {
             warn!(error = %e, "[flip-acct/rest] failed to build http client");
