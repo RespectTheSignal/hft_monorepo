@@ -13,5 +13,7 @@ pub mod spread_revert;
 pub mod fill_subscriber;
 pub mod live_stats;
 pub mod coordinator;
+pub mod baseline_writer;
+pub mod baseline_loader;
 
 pub use model::{BookTick, ExchangeName};

@@ -47,6 +47,43 @@ impl IlpWriter {
         })
     }
 
+    /// Write a single per-base baseline row for the spread_revert
+    /// strategy. The row contains the moving averages it needs to enter
+    /// without an in-memory warm-up:
+    ///   - `bf_avg_gap_bp`: 30 min binance↔flipster mid gap, sampled
+    ///     at 5 s.
+    ///   - `flipster_avg_spread_bp` / `binance_avg_spread_bp`: 10 min
+    ///     per-venue avg spread.
+    /// `ts` is the moment the values were computed (used to detect
+    /// staleness on the consumer side).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn write_baseline(
+        &self,
+        base: &str,
+        ts: chrono::DateTime<chrono::Utc>,
+        bf_avg_gap_bp: f64,
+        flipster_avg_spread_bp: f64,
+        binance_avg_spread_bp: f64,
+        n_gap_samples: i64,
+        n_spread_samples: i64,
+    ) -> Result<()> {
+        let mut g = self.inner.lock().await;
+        g.buffer
+            .table("bf_baseline")?
+            .symbol("base", base)?
+            .column_f64("bf_avg_gap_bp", bf_avg_gap_bp)?
+            .column_f64("flipster_avg_spread_bp", flipster_avg_spread_bp)?
+            .column_f64("binance_avg_spread_bp", binance_avg_spread_bp)?
+            .column_i64("n_gap_samples", n_gap_samples)?
+            .column_i64("n_spread_samples", n_spread_samples)?
+            .at(TimestampNanos::new(
+                ts.timestamp_nanos_opt().unwrap_or(0),
+            ))?;
+        g.pending += 1;
+        g.maybe_flush()?;
+        Ok(())
+    }
+
     pub async fn write_tick(&self, tick: &BookTick) -> Result<()> {
         // On shared QuestDB deployments where an upstream feed already writes
         // bookticker rows (e.g. gate1's central feed), set DISABLE_TICK_WRITES=1

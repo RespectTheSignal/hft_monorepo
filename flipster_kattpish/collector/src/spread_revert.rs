@@ -285,6 +285,66 @@ pub async fn run(
     let state: Arc<Mutex<HashMap<String, BaseState>>> = Arc::new(Mutex::new(HashMap::new()));
     let open_count = Arc::new(AtomicUsize::new(0));
 
+    // Warm-up bypass: read each base's most recent bf_baseline row and
+    // seed `min_window_samples` synthetic samples set to that average,
+    // so the rolling-window mean equals the baseline value from tick 1.
+    // First strategy tick can therefore enter immediately instead of
+    // waiting `min_window_samples * sample_interval` (~5 min default).
+    //
+    // Trade-off: the rolling buffer reads a flat line for the first
+    // few minutes of live ticks, which makes the displayed std artificially
+    // small. Acceptable — the strategy doesn't gate on std, only on
+    // the price-displacement stop-loss.
+    match crate::baseline_loader::fetch_recent_per_base().await {
+        Ok(by_base) => {
+            let mut s = state.lock().await;
+            let mut seeded = 0usize;
+            let now = Utc::now();
+            for (base, points) in by_base {
+                if !params.whitelist.is_empty() && !params.whitelist.contains(&base) {
+                    continue;
+                }
+                if params.blacklist.contains(&base) {
+                    continue;
+                }
+                let Some(latest) = points.last() else { continue };
+                if !latest.bf_avg_gap_bp.is_finite() {
+                    continue;
+                }
+                // Stale-baseline guard: don't seed off a > 10 min old row.
+                let age_s = (now - latest.ts).num_seconds();
+                if age_s > 600 {
+                    continue;
+                }
+                let entry = s.entry(base).or_default();
+                let n_seed = params.min_window_samples;
+                for i in 0..n_seed {
+                    // Spread synthetic timestamps backwards at the live
+                    // sample interval so the buffer's window math is
+                    // consistent.
+                    let offset_ms = ((n_seed - i) as i64) * params.sample_interval_ms;
+                    let ts = now - Duration::milliseconds(offset_ms);
+                    entry.history.push_back(Sample {
+                        ts,
+                        gap_bp: latest.bf_avg_gap_bp,
+                        flipster_spread_bp: latest.flipster_avg_spread_bp,
+                        binance_spread_bp: latest.binance_avg_spread_bp,
+                    });
+                }
+                entry.last_sample_at = Some(now);
+                seeded += 1;
+            }
+            info!(
+                seeded_bases = seeded,
+                "[spread_revert] warmup-free start: history seeded from bf_baseline"
+            );
+        }
+        Err(e) => warn!(
+            error = %e,
+            "[spread_revert] bf_baseline seed failed — falling back to cold start (5 min warmup)"
+        ),
+    }
+
     // Background sweeper for time-based exits — fires every 200 ms.
     {
         let state = state.clone();

@@ -374,6 +374,13 @@ async fn main() -> Result<()> {
             tokio::spawn(async move {
                 collector::spread_revert::run(writer_sr, rx_sr, sr_params).await;
             });
+            // Pre-aggregator that keeps `bf_baseline` fresh so the
+            // strategy can warmup-free start every restart. Skipped in
+            // backtest mode — replays should not write live-time
+            // baselines.
+            if !is_backtest {
+                collector::baseline_writer::spawn(writer.clone());
+            }
         }
 
         // If BACKTEST_START_TS + BACKTEST_END_TS are set, run historical
