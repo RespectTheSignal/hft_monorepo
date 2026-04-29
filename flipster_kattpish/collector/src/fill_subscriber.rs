@@ -1,8 +1,9 @@
 //! Executor → Collector feedback subscriber (Phase 2).
 //!
 //! Counterpart to `executor::fill_publisher`. Connects to the executor's
-//! ZMQ PUB on `tcp://127.0.0.1:7501` (override with `FILL_SUB_ADDR`),
-//! parses `pairs_core::ExecutorEvent` frames, and re-emits them on a tokio
+//! ZMQ PUB on `ipc:///tmp/flipster_kattpish_fill.sock` (same-instance
+//! Unix domain socket, override with `FILL_SUB_ADDR`), parses
+//! `pairs_core::ExecutorEvent` frames, and re-emits them on a tokio
 //! broadcast channel so any number of in-process consumers (Phase 3+
 //! coordinator, ILP writer, dashboards) can subscribe.
 //!
@@ -16,7 +17,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-const SUB_ADDR_DEFAULT: &str = "tcp://127.0.0.1:7501";
+const SUB_ADDR_DEFAULT: &str = "ipc:///tmp/flipster_kattpish_fill.sock";
 
 /// Spawn the subscriber thread and return a broadcast receiver factory.
 ///

@@ -5,9 +5,11 @@
 //! fills (with measured slippage) and aborts that the executor decided to
 //! reject. The collector's `fill_subscriber` consumes the same envelope.
 //!
-//! Bind address defaults to `tcp://127.0.0.1:7501`; override with
-//! `FILL_PUB_ADDR`. Wire format is the JSON serialization of
-//! `pairs_core::ExecutorEvent` (tagged union: `event="fill" | "abort"`).
+//! Bind address defaults to `ipc:///tmp/flipster_kattpish_fill.sock`
+//! (same-instance traffic uses Unix domain sockets); override with
+//! `FILL_PUB_ADDR` — e.g. `tcp://0.0.0.0:7501` for cross-host runs.
+//! Wire format is the JSON serialization of `pairs_core::ExecutorEvent`
+//! (tagged union: `event="fill" | "abort"`).
 //!
 //! Non-fatal: bind failures and send errors are logged but never propagated
 //! — execution must not be blocked waiting on a slow collector.
@@ -25,7 +27,7 @@ struct Publisher {
 
 static PUBLISHER: OnceLock<Publisher> = OnceLock::new();
 
-const DEFAULT_ADDR: &str = "tcp://127.0.0.1:7501";
+const DEFAULT_ADDR: &str = "ipc:///tmp/flipster_kattpish_fill.sock";
 
 /// Initialize the global publisher. Idempotent — second call is a no-op.
 pub fn init() -> Result<()> {

@@ -13,5 +13,6 @@ pub mod spread_revert;
 pub mod fill_subscriber;
 pub mod live_stats;
 pub mod coordinator;
+pub mod flipster_ipc_reader;
 
 pub use model::{BookTick, ExchangeName};

@@ -1,8 +1,11 @@
 //! ZMQ PUB for trade_signal events so live executors can receive them
 //! in-process (<10ms) instead of polling QuestDB (1-2s ILP commit lag).
 //!
-//! Bind address defaults to `tcp://127.0.0.1:7500`; override with
-//! `SIGNAL_PUB_ADDR`. Wire format is a single-frame UTF-8 JSON object:
+//! Bind address defaults to `ipc:///tmp/flipster_kattpish_signal.sock`
+//! (same-instance traffic uses Unix domain sockets, ~5x lower latency
+//! than localhost TCP). Override with `SIGNAL_PUB_ADDR` — e.g. set to
+//! `tcp://127.0.0.1:7500` if the executor is running on a different host.
+//! Wire format is a single-frame UTF-8 JSON object:
 //!
 //! ```json
 //! {"account_id":"T04_es35","base":"BTC","action":"entry",
@@ -44,7 +47,7 @@ pub fn init() -> Result<()> {
         return Ok(());
     }
     let addr = std::env::var("SIGNAL_PUB_ADDR")
-        .unwrap_or_else(|_| "tcp://127.0.0.1:7500".to_string());
+        .unwrap_or_else(|_| "ipc:///tmp/flipster_kattpish_signal.sock".to_string());
     let ctx = zmq::Context::new();
     let socket = ctx.socket(zmq::PUB)?;
     socket.set_sndhwm(10_000)?;

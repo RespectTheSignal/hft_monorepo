@@ -455,16 +455,32 @@ async fn main() -> Result<()> {
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
     {
-        let flipster_addr = std::env::var("ZMQ_FLIPSTER")
-            .unwrap_or_else(|_| "tcp://211.181.122.104:7000".into());
+        // Flipster: local feed/data_subscriber on a Unix domain socket.
+        // Path defaults to `/tmp/flipster_data_subscriber.sock` (matches
+        // feed/data_subscriber default); override FLIPSTER_IPC_PATH.
+        // Set FLIPSTER_REMOTE=1 to fall back to the legacy remote ZMQ TCP
+        // (e.g. ZMQ_FLIPSTER=tcp://211.181.122.104:7000) — useful only on
+        // hosts where the local data_subscriber isn't deployed.
+        let flipster_remote = std::env::var("FLIPSTER_REMOTE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if flipster_remote {
+            let flipster_addr = std::env::var("ZMQ_FLIPSTER")
+                .unwrap_or_else(|_| "tcp://211.181.122.104:7000".into());
+            collector::zmq_reader::spawn(flipster_addr, ExchangeName::Flipster, tx.clone());
+        } else {
+            collector::flipster_ipc_reader::spawn(tx.clone());
+        }
         let binance_addr = std::env::var("ZMQ_BINANCE")
             .unwrap_or_else(|_| "tcp://211.181.122.24:6000".into());
         let gate_addr = std::env::var("ZMQ_GATE")
             .unwrap_or_else(|_| "tcp://211.181.122.24:5559".into());
-        collector::zmq_reader::spawn(flipster_addr, ExchangeName::Flipster, tx.clone());
         collector::zmq_reader::spawn(binance_addr, ExchangeName::Binance, tx.clone());
         collector::zmq_reader::spawn(gate_addr, ExchangeName::Gate, tx.clone());
-        tracing::info!("USE_ZMQ=1 — direct ZMQ SUB feeds active, skipping WS + QuestDB poller");
+        tracing::info!(
+            flipster_mode = if flipster_remote { "remote_zmq" } else { "local_ipc" },
+            "USE_ZMQ=1 — direct feeds active, skipping WS + QuestDB poller"
+        );
         let flush_writer = writer.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));

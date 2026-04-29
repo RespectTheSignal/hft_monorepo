@@ -17,7 +17,9 @@ use tracing::{info, warn};
 /// (executor) cannot drift on the wire format.
 pub use pairs_core::TradeSignal;
 
-const SUB_ADDR_DEFAULT: &str = "tcp://127.0.0.1:7500";
+/// Same-instance default — Unix-domain socket, matches collector's
+/// signal_publisher bind. Override SIGNAL_SUB_ADDR for cross-host runs.
+const SUB_ADDR_DEFAULT: &str = "ipc:///tmp/flipster_kattpish_signal.sock";
 
 /// Blocking subscriber loop. Intended to run on `tokio::task::spawn_blocking`.
 /// Returns only on fatal error (socket creation/bind failure).
