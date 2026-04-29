@@ -17,6 +17,7 @@ pub mod tick;
 pub mod window;
 pub mod position;
 pub mod signal;
+pub mod symbol_stats;
 
 pub use tick::{base_of, BookTick, ExchangeName, Quote};
 pub use window::RollingWindow;

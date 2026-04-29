@@ -43,7 +43,13 @@ async fn main() -> Result<()> {
     // logs every event; future phases (coordinator, ILP merge) hang on the
     // returned broadcast Sender. Non-fatal: connect happens lazily so the
     // channel is created even when the executor is offline.
-    let _fill_events_tx = collector::fill_subscriber::spawn();
+    let fill_events_tx = collector::fill_subscriber::spawn();
+
+    // Phase 3a: parallel learner. Subscribes to fill_events, pairs entry+exit
+    // by (account_id, position_id), updates a collector-side sym_stats store
+    // independent of the executor's. Used in Phase 3b to drive pre-publish
+    // filtering.
+    let _live_stats = collector::live_stats::spawn(fill_events_tx.subscribe());
 
     // Broadcast bus for downstream consumers (e.g. latency calculator, paper bot).
     // 1M slots absorbs the replay producer's burst rate without lagging the

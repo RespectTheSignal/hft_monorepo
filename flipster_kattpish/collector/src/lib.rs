@@ -11,5 +11,6 @@ pub mod strategies;
 pub mod gate_lead;
 pub mod spread_revert;
 pub mod fill_subscriber;
+pub mod live_stats;
 
 pub use model::{BookTick, ExchangeName};
