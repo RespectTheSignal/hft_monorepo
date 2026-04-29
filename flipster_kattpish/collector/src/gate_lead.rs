@@ -37,6 +37,7 @@ use tracing::{info, warn};
 
 use crate::ilp::IlpWriter;
 use crate::model::{BookTick, ExchangeName};
+use pairs_core::{base_of as pairs_core_base_of, single_leg_pnl_bp};
 
 #[derive(Clone, Debug)]
 pub struct GateLeadParams {
@@ -535,12 +536,7 @@ async fn log_close(
     writer: &IlpWriter,
     params: &GateLeadParams,
 ) {
-    let pnl_bp_raw = if c.pos.entry_price > 0.0 {
-        (c.exit_price - c.pos.entry_price) / c.pos.entry_price * 1e4
-    } else {
-        0.0
-    };
-    let pnl_bp = pnl_bp_raw * (c.pos.side as f64);
+    let pnl_bp = single_leg_pnl_bp(c.pos.entry_price, c.exit_price, c.pos.side as i32);
     let net_bp = pnl_bp - 2.0 * params.fee_bp_per_side;
 
     info!(
@@ -606,25 +602,8 @@ async fn log_close(
     }
 }
 
-/// Map exchange-specific symbol → uppercase base.
-///
-/// `Binance`/`Gate` ticks reach this strategy as either underscored
-/// (`BEAT_USDT`) or merged (`BEATUSDT`) depending on upstream. Strip the
-/// underscore + trailing "USDT" / ".PERP" suffix uniformly.
+/// Local thunk over `pairs_core::base_of`. See that function for normalization
+/// rules — handles `BEAT_USDT` / `BEATUSDT` / `BTCUSDT.PERP` consistently.
 fn base_of(exchange: ExchangeName, symbol: &str) -> Option<String> {
-    match exchange {
-        ExchangeName::Binance | ExchangeName::Gate => Some(
-            symbol
-                .replace('_', "")
-                .trim_end_matches("USDT")
-                .to_uppercase(),
-        ),
-        ExchangeName::Flipster => Some(
-            symbol
-                .trim_end_matches(".PERP")
-                .trim_end_matches("USDT")
-                .to_uppercase(),
-        ),
-        _ => None,
-    }
+    pairs_core_base_of(exchange, symbol)
 }

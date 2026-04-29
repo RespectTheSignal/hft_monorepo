@@ -9,27 +9,15 @@
 //! pushed onto an `mpsc::UnboundedSender<TradeSignal>` for the executor's
 //! tokio dispatcher.
 
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{info, warn};
 
-const SUB_ADDR_DEFAULT: &str = "tcp://127.0.0.1:7500";
+/// Re-exported for legacy `use crate::zmq_sub::TradeSignal` paths. Definition
+/// lives in `pairs_core::signal` so the publisher (collector) and subscriber
+/// (executor) cannot drift on the wire format.
+pub use pairs_core::TradeSignal;
 
-/// Paper-bot trade_signal payload. Field names match the JSON wire format
-/// emitted by `signal_publisher::publish` and consumed by the Python
-/// executor's `_dispatch_event`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TradeSignal {
-    pub account_id: String,
-    pub base: String,
-    pub action: String,   // "entry" | "exit"
-    pub side: String,     // "long" | "short" — Flipster side
-    pub size_usd: f64,
-    pub flipster_price: f64,
-    pub gate_price: f64,
-    pub position_id: i64,
-    pub timestamp: String, // ISO8601 with microseconds
-}
+const SUB_ADDR_DEFAULT: &str = "tcp://127.0.0.1:7500";
 
 /// Blocking subscriber loop. Intended to run on `tokio::task::spawn_blocking`.
 /// Returns only on fatal error (socket creation/bind failure).

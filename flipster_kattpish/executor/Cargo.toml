@@ -22,8 +22,9 @@ dashmap = { workspace = true }
 uuid = { workspace = true }
 
 # Sibling crates outside this workspace.
-flipster-client = { path = "../../hft_monorepo/flipster_web/rust" }
-gate-client = { path = "../../hft_monorepo/gate_web/rust" }
+flipster-client = { path = "../../flipster_web/rust" }
+gate-client = { path = "../../gate_web/rust" }
+pairs_core = { path = "../pairs_core" }
 
 # Async HTTP for QuestDB queries.
 reqwest = { workspace = true }

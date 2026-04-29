@@ -13,12 +13,20 @@
 //!
 //! Non-fatal if the bind fails or a send errors — paper bot must never be
 //! blocked by the publisher.
+//!
+//! The wire-format struct is `pairs_core::TradeSignal`. We keep the manual
+//! string-formatted JSON in `publish` so the bytes on the wire are
+//! byte-for-byte identical to the previous build (existing live executors
+//! parse the exact field order); the shared struct is what consumers
+//! deserialize into.
 
 use std::sync::OnceLock;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use tracing::{info, warn};
+
+pub use pairs_core::{SignalAction, SignalSide, TradeSignal};
 
 /// Thread-safe PUB socket. Initialized on first call to `init` and reused.
 /// zmq::Socket is not Send, so we keep it in a Mutex<Option<_>> and hold it

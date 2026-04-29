@@ -429,6 +429,7 @@ dependencies = [
  "hex",
  "hmac",
  "http",
+ "pairs_core",
  "questdb-rs",
  "rand 0.8.5",
  "reqwest",
@@ -843,6 +844,7 @@ dependencies = [
  "flipster-client",
  "futures-util",
  "gate-client",
+ "pairs_core",
  "reqwest",
  "serde",
  "serde_json",
@@ -1906,6 +1908,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "pairs_core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

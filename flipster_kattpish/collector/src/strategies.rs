@@ -23,6 +23,9 @@ use chrono::{DateTime, Duration, Utc};
 use crate::ilp::IlpWriter;
 use crate::market_watcher::SharedGapState;
 use crate::model::{BookTick, ExchangeName};
+use pairs_core::{
+    base_of as pairs_core_base_of, pair_pnl_bp, Quote, RollingWindow,
+};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
@@ -264,34 +267,8 @@ impl Params {
 // shared state
 // -----------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
-pub struct Quote {
-    pub bid: f64,
-    pub ask: f64,
-    pub ts: DateTime<Utc>,
-}
-
-impl Quote {
-    pub fn mid(&self) -> f64 {
-        (self.bid + self.ask) * 0.5
-    }
-    /// Price at which a buyer would actually fill (crosses the spread up).
-    pub fn buy_at(&self) -> f64 {
-        self.ask
-    }
-    /// Price at which a seller would actually fill (crosses the spread down).
-    pub fn sell_at(&self) -> f64 {
-        self.bid
-    }
-    /// Relative spread width in bp. Returns 0 for a crossed/empty book.
-    pub fn spread_bp(&self) -> f64 {
-        let m = self.mid();
-        if m <= 0.0 {
-            return 0.0;
-        }
-        ((self.ask - self.bid) / m).max(0.0) * 10_000.0
-    }
-}
+// `Quote` and `RollingWindow` now live in `pairs_core` (same shape, single
+// source of truth across collector/executor/future strategies).
 
 #[derive(Debug)]
 pub struct EwmaStats {
@@ -339,59 +316,7 @@ impl EwmaStats {
     }
 }
 
-/// Simple rolling window over (ts, bp) points. `push` evicts points older
-/// than `window_sec` and keeps running sum / sum-of-squares for O(1)
-/// mean/std. Alternative signal path to `EwmaStats` — less lagged when the
-/// spread genuinely deviates because the mean does not drift toward the
-/// outlier.
-#[derive(Debug)]
-pub struct RollingWindow {
-    pub pts: VecDeque<(DateTime<Utc>, f64)>,
-    pub window_sec: f64,
-    pub sum: f64,
-    pub sum_sq: f64,
-}
-
-impl RollingWindow {
-    pub fn new(window_sec: f64) -> Self {
-        Self {
-            pts: VecDeque::with_capacity(2048),
-            window_sec,
-            sum: 0.0,
-            sum_sq: 0.0,
-        }
-    }
-
-    pub fn push(&mut self, ts: DateTime<Utc>, x: f64) {
-        self.pts.push_back((ts, x));
-        self.sum += x;
-        self.sum_sq += x * x;
-        let cutoff_ms = (self.window_sec * 1000.0) as i64;
-        while let Some(&(t, v)) = self.pts.front() {
-            if (ts - t).num_milliseconds() > cutoff_ms {
-                self.pts.pop_front();
-                self.sum -= v;
-                self.sum_sq -= v * v;
-            } else {
-                break;
-            }
-        }
-    }
-
-    pub fn len(&self) -> usize { self.pts.len() }
-
-    pub fn mean(&self) -> Option<f64> {
-        if self.pts.is_empty() { None } else { Some(self.sum / self.pts.len() as f64) }
-    }
-
-    pub fn std(&self) -> Option<f64> {
-        let n = self.pts.len();
-        if n < 2 { return None; }
-        let m = self.sum / n as f64;
-        let var = (self.sum_sq / n as f64 - m * m).max(0.0);
-        Some(var.sqrt())
-    }
-}
+// (RollingWindow now lives in `pairs_core::window`; imported above.)
 
 #[derive(Debug)]
 pub struct BinanceWindow {
@@ -488,11 +413,13 @@ pub struct OpenPosition {
 }
 
 fn net_pnl_bp(pos: &OpenPosition, f_exit: f64, b_exit: f64, fee_bp: f64) -> f64 {
-    let f_leg = (f_exit - pos.flipster_entry) / pos.flipster_entry * 10_000.0
-        * (pos.flipster_side as f64);
-    let b_leg = (b_exit - pos.binance_entry) / pos.binance_entry * 10_000.0
-        * (-pos.flipster_side as f64);
-    f_leg + b_leg - fee_bp
+    pair_pnl_bp(
+        pos.flipster_entry,
+        f_exit,
+        pos.binance_entry,
+        b_exit,
+        pos.flipster_side,
+    ) - fee_bp
 }
 
 // -----------------------------------------------------------------------------
@@ -609,24 +536,11 @@ fn kelly_size_usd(book: &PaperBook, base: &str, params: &Params) -> f64 {
 // helpers: symbol normalization
 // -----------------------------------------------------------------------------
 
-/// Normalize a venue symbol to a common base key. Gate prefers BTC_USDT so we
-/// need to strip the underscore. Flipster uses BTCUSDT.PERP.
+/// Local thunk over `pairs_core::base_of` so existing call sites that say
+/// `base_of(ex, s)` keep working. Pairs strategies only run against
+/// Flipster/Binance/Gate ticks; non-USDT and other venues map to None.
 fn base_of(exchange: ExchangeName, symbol: &str) -> Option<String> {
-    match exchange {
-        ExchangeName::Flipster => {
-            // only plain USDT perps; skip USD1 or other quote coins
-            let s = symbol.trim_end_matches(".PERP");
-            if !s.ends_with("USDT") {
-                return None;
-            }
-            Some(s.trim_end_matches("USDT").to_string())
-        }
-        ExchangeName::Binance | ExchangeName::Gate => symbol
-            .strip_suffix("USDT")
-            .map(|s| s.to_string())
-            .filter(|s| !s.is_empty()),
-        _ => None,
-    }
+    pairs_core_base_of(exchange, symbol)
 }
 
 // -----------------------------------------------------------------------------
