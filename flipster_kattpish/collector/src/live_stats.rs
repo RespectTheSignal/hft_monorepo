@@ -26,6 +26,53 @@ use tracing::{info, warn};
 
 const PERSIST_DEFAULT: &str = "/tmp/flipster_kattpish/live_stats_collector.json";
 
+/// Default path the executor *would* persist to (see `executor::main`).
+/// On Phase 3b deployments where the executor previously had a populated
+/// sym_stats.json, copying it once into our persist path lets the
+/// coordinator's filters take effect from minute 1 instead of waiting
+/// for ~50 trades to accumulate.
+const EXECUTOR_DEFAULT_PATH: &str = "/home/teamreporter/.config/flipster_kattpish/sym_stats.json";
+
+/// One-shot bootstrap. If `our_path` is missing or empty and the
+/// configured executor file has data, copy it over. Idempotent — once
+/// `our_path` has data we never touch it again on subsequent restarts.
+fn maybe_bootstrap_from_executor(our_path: &PathBuf) {
+    if let Ok(meta) = std::fs::metadata(our_path) {
+        if meta.len() > 2 {
+            // Already has real data ({} is 2 bytes).
+            return;
+        }
+    }
+    let from = std::env::var("LIVE_STATS_BOOTSTRAP_FROM")
+        .unwrap_or_else(|_| EXECUTOR_DEFAULT_PATH.to_string());
+    let from_path = PathBuf::from(&from);
+    let bytes = match std::fs::read(&from_path) {
+        Ok(b) => b,
+        Err(_) => {
+            info!(
+                from = %from_path.display(),
+                "[live_stats] no executor sym_stats to bootstrap from — starting cold"
+            );
+            return;
+        }
+    };
+    if bytes.len() <= 2 {
+        return;
+    }
+    if let Some(parent) = our_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::write(our_path, &bytes) {
+        Ok(_) => info!(
+            from = %from_path.display(),
+            to = %our_path.display(),
+            bytes = bytes.len(),
+            "[live_stats] bootstrapped from executor sym_stats"
+        ),
+        Err(e) => warn!(error = %e, "[live_stats] bootstrap copy failed"),
+    }
+}
+
 /// Cached entry-side fill data, kept until the matching exit arrives.
 #[derive(Clone)]
 struct PendingEntry {
@@ -50,6 +97,9 @@ pub fn spawn(mut events_rx: broadcast::Receiver<ExecutorEvent>) -> Arc<SymbolSta
     if let Some(parent) = persist.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    // Try to seed from the executor's sym_stats file before constructing
+    // the store, so the constructor's load() path picks it up naturally.
+    maybe_bootstrap_from_executor(&persist);
     let store = SymbolStatsStore::new(Some(persist.clone()));
 
     // Open-position cache, keyed by (account_id, position_id). Bounded
