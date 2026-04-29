@@ -25,7 +25,7 @@
 #   then: VNC viewer → :5901 → log into both sites manually
 set -euo pipefail
 
-PROJECT="/home/gate1/projects/quant/hft_monorepo/flipster_kattpish"
+PROJECT="${FLIPSTER_KATTPISH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 RUN="$PROJECT/run"
 LOGS="$PROJECT/logs"
 QDB_HOME="$HOME/questdb/questdb-9.3.4-rt-linux-x86-64"
@@ -33,24 +33,50 @@ GRAFANA_HOME="$HOME/grafana/grafana-v12.4.2"
 
 mkdir -p "$RUN" "$LOGS"
 
-# Auto-load .env so children inherit it.
-# Parse line-by-line instead of `source`ing — values may contain
-# shell-special characters like `|`, `$`, backticks, etc.
-if [[ -f "$PROJECT/.env" ]]; then
+# Parse one env file and export its KEY=VALUE pairs. We don't `source`
+# because values may contain shell-special chars (`|`, `$`, backticks).
+load_env_file() {
+  local path=$1
+  [[ -f "$path" ]] || return 0
   while IFS= read -r _line || [[ -n "$_line" ]]; do
-    # skip blanks and comments
     [[ -z "$_line" || "$_line" =~ ^[[:space:]]*# ]] && continue
     if [[ "$_line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
       _k="${BASH_REMATCH[1]}"
       _v="${BASH_REMATCH[2]}"
-      # strip optional surrounding quotes
       if   [[ "$_v" =~ ^\"(.*)\"$ ]]; then _v="${BASH_REMATCH[1]}"
       elif [[ "$_v" =~ ^\'(.*)\'$ ]]; then _v="${BASH_REMATCH[1]}"
       fi
       export "$_k=$_v"
     fi
-  done < "$PROJECT/.env"
+  done < "$path"
   unset _line _k _v
+  echo "[env] loaded $path"
+}
+
+# Layered .env loading. Each layer overrides the previous (last write
+# wins), so put project defaults in .env, gitignored secrets/overrides
+# in .env.local, strategy-specific overlays via ENV_FILE.
+#
+# Order:
+#   1. $PROJECT/.env                     — project defaults (committed shape)
+#   2. $PROJECT/.env.local               — local-only overrides (gitignored)
+#   3. $PWD/.env                         — current-folder overrides if invoked
+#                                          from outside $PROJECT
+#   4. $ENV_FILE (env var)               — explicit overlay path. Useful for
+#                                          per-strategy variants:
+#                                            ENV_FILE=$PROJECT/.env.spread_revert \
+#                                              ./control.sh paper-start
+load_env_file "$PROJECT/.env"
+load_env_file "$PROJECT/.env.local"
+if [[ -f "$PWD/.env" && "$(realpath "$PWD" 2>/dev/null)" != "$(realpath "$PROJECT" 2>/dev/null)" ]]; then
+  load_env_file "$PWD/.env"
+fi
+if [[ -n "${ENV_FILE:-}" ]]; then
+  if [[ -f "$ENV_FILE" ]]; then
+    load_env_file "$ENV_FILE"
+  else
+    echo "[env] WARN: ENV_FILE=$ENV_FILE not found" >&2
+  fi
 fi
 
 is_running() { [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
@@ -152,8 +178,8 @@ start_gl() {
 # Gate, and walk away. Sessions persist in user-data-dir across reboots.
 # ---------------------------------------------------------------------------
 
-VNC_DISPLAY=:1
-VNC_PORT=5901
+VNC_DISPLAY="${VNC_DISPLAY:-:1}"
+VNC_PORT="${VNC_PORT:-5901}"
 
 start_vnc() {
   if pgrep -f "Xvfb $VNC_DISPLAY" >/dev/null; then
@@ -186,6 +212,9 @@ start_chrome() {
     fi
     DISPLAY="$VNC_DISPLAY" google-chrome \
       --no-sandbox --disable-gpu \
+      --no-first-run --no-default-browser-check \
+      --start-maximized \
+      --disable-features=TranslateUI \
       --remote-debugging-port="$port" \
       --remote-debugging-address=0.0.0.0 \
       --user-data-dir="/tmp/chrome-$name" \
