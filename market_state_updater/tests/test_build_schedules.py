@@ -155,11 +155,11 @@ def test_flipster_gap_schedule_name_format() -> None:
     fp_names = [s.name for s in schedules if s.name.startswith("flipster_gap:")]
     assert len(fp_names) == len(FAST_WINDOWS)
     for n in fp_names:
-        # name: flipster_gap:binance:flipster:{w}m
+        # name: flipster_gap:flipster:binance:{w}m
         parts = n.split(":")
         assert parts[0] == "flipster_gap"
-        assert parts[1] == "binance"
-        assert parts[2] == "flipster"
+        assert parts[1] == "flipster"
+        assert parts[2] == "binance"
         assert int(parts[3].rstrip("m")) in FAST_WINDOWS
 
 

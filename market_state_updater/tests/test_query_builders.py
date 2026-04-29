@@ -83,8 +83,12 @@ def test_flipster_gap_query_short_window() -> None:
     assert "SAMPLE BY 100T" not in sql
     # flipster 심볼 정규화 ('.PERP' 제거 + USDT → _USDT)
     assert "replace(replace(symbol, '.PERP', ''), 'USDT', '_USDT')" in sql
+    # base = flipster, quote = binance — 기준 spread 컬럼 + binance 추가 컬럼
     assert "avg_mid_gap" in sql
-    assert "avg_spread_flipster" in sql
+    assert "avg_spread_binance" in sql
+    # JOIN 방향: flipster b JOIN binance q
+    assert "FROM flipster b" in sql
+    assert "JOIN binance q" in sql
 
 
 def test_flipster_gap_query_long_window_no_fill() -> None:

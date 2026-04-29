@@ -125,12 +125,12 @@ def build_schedules(
                 )
             )
 
-    # 3b) binance vs flipster gap (flipster 심볼 정규화 포함)
+    # 3b) flipster vs binance gap (flipster 심볼 정규화 포함)
     if cfg.include_flipster_gap:
         for w in gap_windows:
             out.append(
                 Schedule(
-                    name=f"flipster_gap:binance:flipster:{w}m",
+                    name=f"flipster_gap:flipster:binance:{w}m",
                     cadence_secs=cad(w),
                     run=partial(
                         flipster_gap.run,

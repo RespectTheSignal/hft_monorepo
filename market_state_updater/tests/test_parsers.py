@@ -127,23 +127,24 @@ def test_gate_web_gap_parse_no_avg_mid_gap_returns_empty() -> None:
 
 
 def test_flipster_gap_parse_full_payload() -> None:
+    """parse 반환 순서: (gaps, flipster_spreads, binance_spreads). base=flipster."""
     payload = {
         "columns": [
             {"name": "symbol"},
             {"name": "avg_mid_gap"},
-            {"name": "avg_spread"},
-            {"name": "avg_spread_flipster"},
+            {"name": "avg_spread"},          # base = flipster
+            {"name": "avg_spread_binance"},  # quote = binance
         ],
         "dataset": [
-            ["BTC_USDT", 0.0012, 0.00015, 0.00010],
-            ["ETH_USDT", -0.0008, 0.00025, None],  # None → 0.0
-            ["SOL_USDT", None, 0.0003, 0.0002],    # gap None → 0.0
+            ["BTC_USDT", 0.0012, 0.00010, 0.00015],
+            ["ETH_USDT", -0.0008, None, 0.00025],  # None → 0.0
+            ["SOL_USDT", None, 0.0002, 0.0003],    # gap None → 0.0
         ],
     }
-    gaps, b_sp, f_sp = flipster_gap.parse_dataset(payload)
+    gaps, f_sp, b_sp = flipster_gap.parse_dataset(payload)
     assert gaps == {"BTC_USDT": 0.0012, "ETH_USDT": -0.0008, "SOL_USDT": 0.0}
-    assert b_sp == {"BTC_USDT": 0.00015, "ETH_USDT": 0.00025, "SOL_USDT": 0.0003}
     assert f_sp == {"BTC_USDT": 0.00010, "ETH_USDT": 0.0, "SOL_USDT": 0.0002}
+    assert b_sp == {"BTC_USDT": 0.00015, "ETH_USDT": 0.00025, "SOL_USDT": 0.0003}
 
 
 def test_flipster_gap_parse_missing_avg_mid_gap_raises() -> None:
@@ -151,7 +152,7 @@ def test_flipster_gap_parse_missing_avg_mid_gap_raises() -> None:
         "columns": [
             {"name": "symbol"},
             {"name": "avg_spread"},
-            {"name": "avg_spread_flipster"},
+            {"name": "avg_spread_binance"},
         ],
         "dataset": [["BTC_USDT", 0.0001, 0.0001]],
     }
@@ -165,11 +166,11 @@ def test_flipster_gap_parse_empty_dataset() -> None:
             {"name": "symbol"},
             {"name": "avg_mid_gap"},
             {"name": "avg_spread"},
-            {"name": "avg_spread_flipster"},
+            {"name": "avg_spread_binance"},
         ],
         "dataset": [],
     }
-    gaps, b_sp, f_sp = flipster_gap.parse_dataset(payload)
+    gaps, f_sp, b_sp = flipster_gap.parse_dataset(payload)
     assert gaps == {}
-    assert b_sp == {}
     assert f_sp == {}
+    assert b_sp == {}
