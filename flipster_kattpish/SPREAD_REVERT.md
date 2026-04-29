@@ -126,6 +126,7 @@ Filter paper vs live with `account_id IN (...)` or pair with `mode='paper'`.
 | `SR_ENTRY_BP` | 2.0 | extra bp on top of costs to fire entry |
 | `SR_STOP_BP` | 20 | adverse single-leg move that triggers stop |
 | `SR_MAX_HOLD_S` | 86400 | hard timeout (24 h) |
+| `SR_MIN_HOLD_MS` | 0 | minimum hold — blocks stop / reverse exits before this elapses |
 | `SR_ENTRY_COOLDOWN_MS` | 500 | per-base re-entry block |
 | `SR_FEE_BP` | 0.425 | per-side flipster taker fee |
 | `SR_WHITELIST` | (empty = all) | comma-sep bases, uppercase |

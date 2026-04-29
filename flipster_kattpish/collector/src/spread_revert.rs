@@ -64,6 +64,11 @@ pub struct SpreadRevertParams {
     /// Hard max hold (seconds). Past this the position closes with
     /// reason="timeout", separate from price-stop.
     pub max_hold_s: f64,
+    /// Minimum hold time after entry (ms). Voluntary exits (stop /
+    /// reverse) are blocked until this window passes — prevents an
+    /// instant flap-out on tick-noise right after entry. Default 0
+    /// (no minimum). `timeout` is unaffected (max_hold ≫ min_hold).
+    pub min_hold_ms: i64,
     /// Per-base cooldown after entry (ms). Blocks a same-symbol entry
     /// from firing again within this window.
     pub entry_cooldown_ms: i64,
@@ -87,6 +92,7 @@ impl Default for SpreadRevertParams {
             entry_threshold_bp: 2.0,
             stop_bp: 20.0,
             max_hold_s: 86_400.0, // 24 h
+            min_hold_ms: 0,
             entry_cooldown_ms: 500,
             flipster_fee_bp: 0.425,
             backtest_mode: false,
@@ -137,6 +143,12 @@ impl SpreadRevertParams {
             .and_then(|s| s.parse().ok())
         {
             p.max_hold_s = v;
+        }
+        if let Some(v) = std::env::var("SR_MIN_HOLD_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            p.min_hold_ms = v;
         }
         if let Some(v) = std::env::var("SR_ENTRY_COOLDOWN_MS")
             .ok()
@@ -366,16 +378,25 @@ async fn on_tick(
         // (stop / timeout). Reverse-close handled below.
         let mut keep: Vec<OpenPos> = Vec::with_capacity(entry.open.len());
         for pos in entry.open.drain(..) {
+            let held_ms = (now - pos.entry_ts).num_milliseconds();
+            let min_hold_passed = held_ms >= params.min_hold_ms;
             let mut exit_pick: Option<(&'static str, f64)> = None;
-            let loss = (pos.entry_price - fli_mid) * (pos.side as f64) / pos.entry_price * 1e4;
-            if loss > params.stop_bp {
-                let exit_px = if pos.side == 1 {
-                    entry.flipster_bid
-                } else {
-                    entry.flipster_ask
-                };
-                exit_pick = Some(("stop", exit_px));
+            // Stop-loss only fires after the minimum hold window —
+            // protects against tick-noise flap-out right after entry.
+            if min_hold_passed {
+                let loss =
+                    (pos.entry_price - fli_mid) * (pos.side as f64) / pos.entry_price * 1e4;
+                if loss > params.stop_bp {
+                    let exit_px = if pos.side == 1 {
+                        entry.flipster_bid
+                    } else {
+                        entry.flipster_ask
+                    };
+                    exit_pick = Some(("stop", exit_px));
+                }
             }
+            // Timeout is the safety net — never gated by min_hold
+            // (max_hold_s ≫ min_hold_ms by design).
             if exit_pick.is_none() && now >= pos.deadline {
                 let exit_px = if pos.side == 1 {
                     entry.flipster_bid
@@ -445,11 +466,13 @@ async fn on_tick(
         };
 
         // Reverse-close: opposite-side signal closes existing positions
-        // on this base. Same-side stacks instead.
+        // on this base, but only after the per-position min_hold window.
+        // Same-side stacks instead.
         if let Some(want) = want_side {
             let mut keep: Vec<OpenPos> = Vec::with_capacity(entry.open.len());
             for pos in entry.open.drain(..) {
-                if pos.side != want {
+                let held_ms = (now - pos.entry_ts).num_milliseconds();
+                if pos.side != want && held_ms >= params.min_hold_ms {
                     let exit_px = if pos.side == 1 {
                         entry.flipster_bid
                     } else {
