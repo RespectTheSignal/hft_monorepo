@@ -1078,7 +1078,7 @@ async fn try_enter_pairs(
     // Emit entry signal for live executor sidecar.
     let side_s = if dir > 0 { "long" } else { "short" };
     // ZMQ PUB first (non-blocking, <1ms) so live executor sees it with minimal lag.
-    crate::signal_publisher::publish(
+    crate::coordinator::route_signal(
         &params.account_id, base, "entry", side_s,
         size_usd, f_entry, b_entry, pos_id, now,
     );
@@ -1527,7 +1527,7 @@ async fn sweep_exits(book: &Arc<Mutex<PaperBook>>, writer: &IlpWriter, params: &
         if matches!(pos.strategy, Strategy::Pairs) {
             let exit_side = if pos.flipster_side > 0 { "long" } else { "short" };
             // ZMQ PUB first.
-            crate::signal_publisher::publish(
+            crate::coordinator::route_signal(
                 &params.account_id, &pos.base, "exit", exit_side,
                 pos.size_usd, f_exit, b_exit, pos.id, now,
             );

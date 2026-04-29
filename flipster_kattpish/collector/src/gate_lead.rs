@@ -444,7 +444,7 @@ async fn on_tick(
     } // release state mutex before any async I/O
 
     if let Some(o) = open_act {
-        crate::signal_publisher::publish(
+        crate::coordinator::route_signal(
             &params.account_id,
             &o.base,
             "entry",
@@ -573,7 +573,7 @@ async fn log_close(
         warn!(error = %e, "[gate_lead] position_log write failed");
     }
 
-    crate::signal_publisher::publish(
+    crate::coordinator::route_signal(
         &params.account_id,
         &c.base,
         "exit",

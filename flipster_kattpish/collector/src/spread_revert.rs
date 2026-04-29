@@ -448,7 +448,7 @@ async fn on_tick(
     }
 
     if let Some(o) = open_act {
-        crate::signal_publisher::publish(
+        crate::coordinator::route_signal(
             &params.account_id,
             &o.base,
             "entry",
@@ -587,7 +587,7 @@ async fn log_close(
         warn!(error = %e, "[spread_revert] position_log write failed");
     }
 
-    crate::signal_publisher::publish(
+    crate::coordinator::route_signal(
         &params.account_id,
         &c.base,
         "exit",
