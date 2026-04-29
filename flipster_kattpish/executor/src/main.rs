@@ -74,6 +74,13 @@ struct Cli {
     /// a Gate move — we already see Gate's move (no need to hedge it).
     #[arg(long, default_value_t = false)]
     flipster_only: bool,
+
+    /// Flipster margin mode for new orders. "Cross" or "Isolated"
+    /// (case-sensitive — Flipster's API expects exactly those tokens).
+    /// Default Cross to preserve gate_lead executor behavior; SR
+    /// executor sets --margin Isolated.
+    #[arg(long, default_value = "Cross")]
+    margin: String,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]
@@ -91,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
         variant = %cli.variant,
         size_usd = cli.size_usd,
         dry_run = cli.dry_run,
+        margin = %cli.margin,
         legacy_filters,
         "starting executor"
     );
@@ -191,6 +199,7 @@ async fn main() -> anyhow::Result<()> {
         size_usd: cli.size_usd,
         dry_run: cli.dry_run,
         flipster_only: cli.flipster_only,
+        margin: cli.margin.clone(),
         blacklist,
         whitelist,
         flipster: flipster_client,

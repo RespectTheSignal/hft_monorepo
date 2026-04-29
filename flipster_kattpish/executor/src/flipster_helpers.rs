@@ -67,13 +67,14 @@ pub async fn limit_ioc_entry(
     signal_price: f64,
     leverage: u32,
     wait_s: f64,
+    margin: &str,
 ) -> anyhow::Result<(Option<Value>, Option<String>)> {
     // Flipster validates LIMIT prices tightly against current market
     // ("InvalidPrice" if too far off). Pass the signal price as-is —
     // pipeline lag is small, and crossing happens via the order's TIF.
     let limit_price = signal_price;
     let resp = fc
-        .place_order_oneway(
+        .place_order_oneway_with_margin(
             symbol,
             side,
             amount_usd,
@@ -82,6 +83,7 @@ pub async fn limit_ioc_entry(
             false,
             "ORDER_TYPE_LIMIT",
             false, // postOnly: NO — we want IOC-like behavior (cross if possible).
+            margin,
         )
         .await?;
 

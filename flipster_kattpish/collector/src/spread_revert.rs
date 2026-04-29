@@ -62,7 +62,14 @@ pub struct SpreadRevertParams {
     /// USD notional per entry order (fixed-size).
     pub entry_size_usd: f64,
     /// Maximum cumulative concurrent positions (across all bases).
+    /// Default 50 — per-base cap (`max_positions_per_base`) is the
+    /// tighter constraint in practice; this is a safety ceiling so a
+    /// runaway loop can't open hundreds of positions.
     pub max_open_positions: usize,
+    /// Maximum simultaneous positions on the same base. Default 5 —
+    /// allows stacking signals on volatile symbols while bounding the
+    /// per-symbol exposure. Different bases stack independently.
+    pub max_positions_per_base: usize,
     /// Long-window length for `bf_avg_gap_bp` (seconds). Default 30 min.
     pub gap_window_s: f64,
     /// Short-window length for the per-venue avg spread (seconds).
@@ -101,7 +108,8 @@ impl Default for SpreadRevertParams {
         Self {
             account_id: "SPREAD_REVERT_v1".to_string(),
             entry_size_usd: 10.0,
-            max_open_positions: 5,
+            max_open_positions: 50,
+            max_positions_per_base: 5,
             gap_window_s: 30.0 * 60.0,
             spread_window_s: 10.0 * 60.0,
             sample_interval_ms: 5_000,
@@ -135,6 +143,9 @@ impl SpreadRevertParams {
         }
         if let Some(v) = std::env::var("SR_MAX_POSITIONS").ok().and_then(|s| s.parse().ok()) {
             p.max_open_positions = v;
+        }
+        if let Some(v) = std::env::var("SR_MAX_POSITIONS_PER_BASE").ok().and_then(|s| s.parse().ok()) {
+            p.max_positions_per_base = v;
         }
         if let Some(v) = std::env::var("SR_GAP_WINDOW_S").ok().and_then(|s| s.parse().ok()) {
             p.gap_window_s = v;
@@ -210,7 +221,10 @@ struct BaseState {
     /// for `entry_cooldown_ms` after firing, even after the position
     /// closed (handles the "500 ms per-symbol dedup" requirement).
     last_entry_at: Option<DateTime<Utc>>,
-    open: Option<OpenPos>,
+    /// Open positions on this base. Bounded by
+    /// `params.max_positions_per_base`. Stacked entries are independent
+    /// — each has its own entry_gap, deadline, and exit decision.
+    open: Vec<OpenPos>,
 }
 
 #[derive(Debug, Clone)]
@@ -256,6 +270,7 @@ pub async fn run(
         account_id = %params.account_id,
         size_usd = params.entry_size_usd,
         max_pos = params.max_open_positions,
+        max_per_base = params.max_positions_per_base,
         gap_window_s = params.gap_window_s,
         spread_window_s = params.spread_window_s,
         sample_interval_ms = params.sample_interval_ms,
@@ -329,8 +344,8 @@ async fn on_tick(
     }
     let now = tick.timestamp;
 
-    let mut open_act: Option<OpenAction> = None;
-    let mut close_act: Option<CloseAction> = None;
+    let mut open_acts: Vec<OpenAction> = Vec::new();
+    let mut close_acts: Vec<CloseAction> = Vec::new();
     {
         let mut s = state.lock().await;
         let entry = s.entry(base.clone()).or_default();
@@ -431,71 +446,64 @@ async fn on_tick(
         let avg_fs = sum_fs / n_short as f64;
         let avg_bs = sum_bs / n_short as f64;
 
-        // Exit check first (open position) — stop-loss + timeout only.
-        // Convergent take-profit happens implicitly via the entry path:
-        // once the gap returns to bf_avg_gap, the entry condition no
-        // longer fires; an opposite-side entry signal would close this
-        // position via the `reverse close` branch below before opening
-        // a fresh one.
-        if let Some(pos) = entry.open.clone() {
+        // Exit check — every open position on this base evaluated
+        // independently. stop-loss (price displacement) + timeout
+        // (deadline). Reverse close handled in the entry branch below.
+        let mut keep: Vec<OpenPos> = Vec::with_capacity(entry.open.len());
+        for pos in entry.open.drain(..) {
             let mut exit_pick: Option<(&'static str, f64)> = None;
-            // Unified: displacement = (gap - entry_gap) * side. Positive
-            // = favorable. Stop fires at displacement ≤ -stop_bp.
-            let displacement_from_entry = (gap_bp - pos.entry_gap_bp) * (pos.side as f64);
-            if displacement_from_entry <= -params.stop_bp {
+            let displacement = (gap_bp - pos.entry_gap_bp) * (pos.side as f64);
+            if displacement <= -params.stop_bp {
                 let exit_px = if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask };
                 exit_pick = Some(("stop", exit_px));
             }
-            // Past max_hold_s (default 24 h) → timeout. Distinct from
-            // "stop" so dashboards can show how often the deadline path
-            // fires vs the price-loss path.
             if exit_pick.is_none() && now >= pos.deadline {
                 let exit_px = if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask };
                 exit_pick = Some(("timeout", exit_px));
             }
-            if let Some((reason, exit_price)) = exit_pick {
-                entry.open = None;
-                close_act = Some(CloseAction {
-                    base: base.clone(),
-                    pos,
-                    exit_price,
-                    exit_gap_bp: gap_bp,
-                    avg_gap_bp: avg_gap,
-                    reason,
-                    exit_ts: now,
-                });
+            match exit_pick {
+                Some((reason, exit_price)) => {
+                    close_acts.push(CloseAction {
+                        base: base.clone(),
+                        pos,
+                        exit_price,
+                        exit_gap_bp: gap_bp,
+                        avg_gap_bp: avg_gap,
+                        reason,
+                        exit_ts: now,
+                    });
+                }
+                None => keep.push(pos),
             }
         }
+        entry.open = keep;
 
-        // Entry check.
-        // The cap check uses `cur_open` snapshot; the actual reservation
-        // is a fetch_add CAS below.
-        if close_act.is_none() {
-            let cur_open = open_count.load(Ordering::Relaxed);
-            // Per-base re-entry cooldown (Jay: same-symbol 500 ms dedup).
-            let in_cooldown = entry
-                .last_entry_at
-                .map(|t| (now - t).num_milliseconds() < params.entry_cooldown_ms)
-                .unwrap_or(false);
-            let costs = avg_fs + avg_bs / 2.0 + params.flipster_fee_bp;
-            let edge_short = (gap_bp - avg_gap) - costs - params.entry_threshold_bp;
-            let edge_long = (avg_gap - gap_bp) - costs - params.entry_threshold_bp;
-            let want_side: Option<i8> = if edge_short > 0.0 {
-                Some(-1)
-            } else if edge_long > 0.0 {
-                Some(1)
-            } else {
-                None
-            };
+        // Entry / reverse-close decision.
+        let cur_open_global = open_count.load(Ordering::Relaxed);
+        let in_cooldown = entry
+            .last_entry_at
+            .map(|t| (now - t).num_milliseconds() < params.entry_cooldown_ms)
+            .unwrap_or(false);
+        let costs = avg_fs + avg_bs / 2.0 + params.flipster_fee_bp;
+        let edge_short = (gap_bp - avg_gap) - costs - params.entry_threshold_bp;
+        let edge_long = (avg_gap - gap_bp) - costs - params.entry_threshold_bp;
+        let want_side: Option<i8> = if edge_short > 0.0 {
+            Some(-1)
+        } else if edge_long > 0.0 {
+            Some(1)
+        } else {
+            None
+        };
 
-            // Reverse-side close: if a position is open and the entry
-            // signal flipped to the opposite side, close it (this is the
-            // implicit take-profit per Jay's spec).
-            if let (Some(pos), Some(want)) = (entry.open.clone(), want_side) {
+        // Reverse-side close: opposite-side entry signal closes every
+        // existing position on this base (implicit take-profit per Jay's
+        // spec). Equivalent-side signals stack instead of closing.
+        if let Some(want) = want_side {
+            let mut keep: Vec<OpenPos> = Vec::with_capacity(entry.open.len());
+            for pos in entry.open.drain(..) {
                 if pos.side != want {
                     let exit_px = if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask };
-                    entry.open = None;
-                    close_act = Some(CloseAction {
+                    close_acts.push(CloseAction {
                         base: base.clone(),
                         pos,
                         exit_price: exit_px,
@@ -504,64 +512,70 @@ async fn on_tick(
                         reason: "reverse",
                         exit_ts: now,
                     });
+                } else {
+                    keep.push(pos);
                 }
             }
+            entry.open = keep;
+        }
 
-            if entry.open.is_none() && cur_open < params.max_open_positions && !in_cooldown {
-                if let Some(side) = want_side {
-                    let prev = open_count.fetch_add(1, Ordering::Relaxed);
-                    if prev >= params.max_open_positions {
-                        open_count.fetch_sub(1, Ordering::Relaxed);
+        let per_base_room = entry.open.len() < params.max_positions_per_base;
+        let global_room = cur_open_global < params.max_open_positions;
+        if per_base_room && global_room && !in_cooldown {
+            if let Some(side) = want_side {
+                let prev = open_count.fetch_add(1, Ordering::Relaxed);
+                if prev >= params.max_open_positions {
+                    open_count.fetch_sub(1, Ordering::Relaxed);
+                } else {
+                    let entry_price = if side == 1 {
+                        entry.flipster_ask
                     } else {
-                        let entry_price = if side == 1 {
-                            entry.flipster_ask
-                        } else {
-                            entry.flipster_bid
-                        };
-                        let pos_id = pairs_core::pos_id::global().next();
-                        let pos = OpenPos {
-                            id: pos_id,
-                            side,
-                            entry_ts: now,
-                            entry_price,
-                            entry_gap_bp: gap_bp,
-                            deadline: now + Duration::milliseconds((params.max_hold_s * 1000.0) as i64),
-                        };
-                        entry.open = Some(pos);
-                        entry.last_entry_at = Some(now);
-                        info!(
-                            base = %base,
-                            side = if side == 1 { "long" } else { "short" },
-                            gap_bp = format!("{:+.2}", gap_bp),
-                            avg_gap_bp = format!("{:+.2}", avg_gap),
-                            edge_bp = format!("{:+.2}", if side == 1 { edge_long } else { edge_short }),
-                            costs_bp = format!("{:.2}", costs),
-                            n_long = entry.history.len(),
-                            n_short = n_short,
-                            f_entry = entry_price,
-                            pos_id,
-                            "[spread_revert] OPEN"
-                        );
-                        open_act = Some(OpenAction {
-                            base: base.clone(),
-                            pos_id,
-                            side_s: if side == 1 { "long" } else { "short" },
-                            size_usd: params.entry_size_usd,
-                            entry_price,
-                            binance_mid: bin_mid,
-                            flipster_bid: entry.flipster_bid,
-                            flipster_ask: entry.flipster_ask,
-                            binance_bid: entry.binance_bid,
-                            binance_ask: entry.binance_ask,
-                            ts: now,
-                        });
-                    }
+                        entry.flipster_bid
+                    };
+                    let pos_id = pairs_core::pos_id::global().next();
+                    let pos = OpenPos {
+                        id: pos_id,
+                        side,
+                        entry_ts: now,
+                        entry_price,
+                        entry_gap_bp: gap_bp,
+                        deadline: now + Duration::milliseconds((params.max_hold_s * 1000.0) as i64),
+                    };
+                    entry.open.push(pos);
+                    entry.last_entry_at = Some(now);
+                    info!(
+                        base = %base,
+                        side = if side == 1 { "long" } else { "short" },
+                        gap_bp = format!("{:+.2}", gap_bp),
+                        avg_gap_bp = format!("{:+.2}", avg_gap),
+                        edge_bp = format!("{:+.2}", if side == 1 { edge_long } else { edge_short }),
+                        costs_bp = format!("{:.2}", costs),
+                        n_long = entry.history.len(),
+                        n_short = n_short,
+                        per_base_n = entry.open.len(),
+                        f_entry = entry_price,
+                        pos_id,
+                        "[spread_revert] OPEN"
+                    );
+                    open_acts.push(OpenAction {
+                        base: base.clone(),
+                        pos_id,
+                        side_s: if side == 1 { "long" } else { "short" },
+                        size_usd: params.entry_size_usd,
+                        entry_price,
+                        binance_mid: bin_mid,
+                        flipster_bid: entry.flipster_bid,
+                        flipster_ask: entry.flipster_ask,
+                        binance_bid: entry.binance_bid,
+                        binance_ask: entry.binance_ask,
+                        ts: now,
+                    });
                 }
             }
         }
     }
 
-    if let Some(o) = open_act {
+    for o in open_acts {
         let mut quotes = crate::signal_publisher::SignalQuotes::default();
         quotes.flipster_bid = Some(o.flipster_bid);
         quotes.flipster_ask = Some(o.flipster_ask);
@@ -596,7 +610,7 @@ async fn on_tick(
             warn!(error = %e, "[spread_revert] entry signal write failed");
         }
     }
-    if let Some(c) = close_act {
+    for c in close_acts {
         log_close(c, writer, params, open_count).await;
     }
     Ok(())
@@ -612,39 +626,58 @@ async fn sweep_exits(
     let mut closes: Vec<CloseAction> = Vec::new();
     {
         let mut s = state.lock().await;
+        // Find bases that have at least one position past its deadline.
         let bases: Vec<String> = s
             .iter()
             .filter_map(|(k, v)| {
-                v.open
-                    .as_ref()
-                    .and_then(|p| if p.deadline <= now { Some(k.clone()) } else { None })
+                if v.open.iter().any(|p| p.deadline <= now) {
+                    Some(k.clone())
+                } else {
+                    None
+                }
             })
             .collect();
         for base in bases {
             let Some(entry) = s.get_mut(&base) else { continue };
-            let Some(pos) = entry.open.clone() else { continue };
-            let exit_price = if entry.flipster_bid > 0.0 && entry.flipster_ask > 0.0 {
-                if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask }
+            let bin_mid = if entry.binance_bid > 0.0 && entry.binance_ask > 0.0 {
+                (entry.binance_bid + entry.binance_ask) * 0.5
             } else {
-                pos.entry_price
+                0.0
             };
-            let gap_bp = if entry.binance_bid > 0.0 && entry.flipster_bid > 0.0 {
-                let bin_mid = (entry.binance_bid + entry.binance_ask) * 0.5;
-                let fli_mid = (entry.flipster_bid + entry.flipster_ask) * 0.5;
-                if bin_mid > 0.0 { (fli_mid - bin_mid) / bin_mid * 1e4 } else { pos.entry_gap_bp }
+            let fli_mid = if entry.flipster_bid > 0.0 && entry.flipster_ask > 0.0 {
+                (entry.flipster_bid + entry.flipster_ask) * 0.5
             } else {
-                pos.entry_gap_bp
+                0.0
             };
-            entry.open = None;
-            closes.push(CloseAction {
-                base,
-                pos,
-                exit_price,
-                exit_gap_bp: gap_bp,
-                avg_gap_bp: pos_avg_or(&entry.history),
-                reason: "timeout",
-                exit_ts: now,
-            });
+            let gap_bp = if bin_mid > 0.0 && fli_mid > 0.0 {
+                Some((fli_mid - bin_mid) / bin_mid * 1e4)
+            } else {
+                None
+            };
+            // Drop expired positions only; keep the rest.
+            let mut keep: Vec<OpenPos> = Vec::with_capacity(entry.open.len());
+            for pos in entry.open.drain(..) {
+                if pos.deadline > now {
+                    keep.push(pos);
+                    continue;
+                }
+                let exit_price = if entry.flipster_bid > 0.0 && entry.flipster_ask > 0.0 {
+                    if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask }
+                } else {
+                    pos.entry_price
+                };
+                let exit_gap_bp = gap_bp.unwrap_or(pos.entry_gap_bp);
+                closes.push(CloseAction {
+                    base: base.clone(),
+                    pos,
+                    exit_price,
+                    exit_gap_bp,
+                    avg_gap_bp: pos_avg_or(&entry.history),
+                    reason: "timeout",
+                    exit_ts: now,
+                });
+            }
+            entry.open = keep;
         }
     }
     for c in closes {

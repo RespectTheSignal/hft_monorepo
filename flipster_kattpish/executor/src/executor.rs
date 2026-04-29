@@ -104,6 +104,9 @@ pub struct Executor {
     pub size_usd: f64,
     pub dry_run: bool,
     pub flipster_only: bool,
+    /// Margin mode tag forwarded to Flipster on every entry order.
+    /// "Cross" or "Isolated".
+    pub margin: String,
     pub blacklist: HashSet<String>,
     pub whitelist: HashSet<String>,
 
@@ -358,7 +361,7 @@ impl Executor {
             );
             match self
                 .flipster
-                .place_order_oneway(
+                .place_order_oneway_with_margin(
                     &flipster_sym,
                     &ev.side,
                     size,
@@ -367,6 +370,7 @@ impl Executor {
                     false,
                     "ORDER_TYPE_MARKET",
                     false,
+                    &self.margin,
                 )
                 .await
             {
@@ -406,6 +410,7 @@ impl Executor {
                 f_limit_price,
                 f_max_lev,
                 FLIP_LIMIT_WAIT_S,
+                &self.margin,
             )
             .await
             {
@@ -507,7 +512,7 @@ impl Executor {
                     let exit_side = if ev.side == "long" { "short" } else { "long" };
                     let resp = self
                         .flipster
-                        .place_order_oneway(
+                        .place_order_oneway_with_margin(
                             &flipster_sym,
                             exit_side,
                             size,
@@ -516,6 +521,7 @@ impl Executor {
                             true,
                             "ORDER_TYPE_LIMIT",
                             true,
+                            &self.margin,
                         )
                         .await;
                     match resp {
@@ -760,7 +766,7 @@ impl Executor {
         let lev = self.flip_contracts.max_leverage(flipster_sym);
         match self
             .flipster
-            .place_order_oneway(
+            .place_order_oneway_with_margin(
                 flipster_sym,
                 close_side,
                 size * 1.5,
@@ -769,6 +775,7 @@ impl Executor {
                 true,
                 "ORDER_TYPE_MARKET",
                 false,
+                &self.margin,
             )
             .await
         {
@@ -925,7 +932,7 @@ impl Executor {
             let lev = self.flip_contracts.max_leverage(&flipster_sym);
             match self
                 .flipster
-                .place_order_oneway(
+                .place_order_oneway_with_margin(
                     &flipster_sym,
                     close_side,
                     pos.size_usd * 1.5,
@@ -934,6 +941,7 @@ impl Executor {
                     true,
                     "ORDER_TYPE_MARKET",
                     false,
+                    &self.margin,
                 )
                 .await
             {
@@ -1273,6 +1281,7 @@ impl Executor {
                 let flipster = self.flipster.clone();
                 let sym_clone = sym.clone();
                 let side_clone = close_side.to_string();
+                let margin_mode = self.margin.clone();
                 // Notional in USD = size * mid_px. Pass 1.5x as overshoot;
                 // reduceOnly caps at current position. Without a sane
                 // reference price Flipster rejects MARKET with InvalidPrice.
@@ -1281,9 +1290,9 @@ impl Executor {
                 let lev = self.flip_contracts.max_leverage(&sym);
                 tokio::spawn(async move {
                     match flipster
-                        .place_order_oneway(
+                        .place_order_oneway_with_margin(
                             &sym_clone, &side_clone, notional_usd, ref_px, lev,
-                            true, "ORDER_TYPE_MARKET", false,
+                            true, "ORDER_TYPE_MARKET", false, &margin_mode,
                         )
                         .await
                     {
@@ -1359,7 +1368,7 @@ impl Executor {
         let lev = self.flip_contracts.max_leverage(&flipster_sym);
         match self
             .flipster
-            .place_order_oneway(
+            .place_order_oneway_with_margin(
                 &flipster_sym,
                 close_side,
                 pos.size_usd * 1.5,
@@ -1368,6 +1377,7 @@ impl Executor {
                 true,
                 "ORDER_TYPE_MARKET",
                 false,
+                &self.margin,
             )
             .await
         {

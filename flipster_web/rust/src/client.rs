@@ -311,6 +311,31 @@ impl FlipsterClient {
         order_type: &str,
         post_only: bool,
     ) -> Result<serde_json::Value, FlipsterError> {
+        // Back-compat shim: defaults to Cross margin for callers that
+        // haven't been updated. Prefer `place_order_oneway_with_margin`
+        // for new code.
+        self.place_order_oneway_with_margin(
+            symbol, side, amount_usd, ref_price, leverage, reduce_only,
+            order_type, post_only, "Cross",
+        ).await
+    }
+
+    /// Same as `place_order_oneway` but allows the caller to pick the
+    /// margin mode. `margin_type` accepts "Cross" or "Isolated"
+    /// (case-sensitive — Flipster's API expects exactly those tokens).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn place_order_oneway_with_margin(
+        &self,
+        symbol: &str,
+        side: &str,
+        amount_usd: f64,
+        ref_price: f64,
+        leverage: u32,
+        reduce_only: bool,
+        order_type: &str,
+        post_only: bool,
+        margin_type: &str,
+    ) -> Result<serde_json::Value, FlipsterError> {
         let now_ns = chrono::Utc::now()
             .timestamp_nanos_opt()
             .expect("timestamp_nanos overflow")
@@ -330,7 +355,7 @@ impl FlipsterClient {
             "leverage": leverage,
             "price": ref_price.to_string(),
             "amount": format!("{:.4}", amount_usd),
-            "marginType": "Cross",
+            "marginType": margin_type,
             "orderType": order_type,
             "postOnly": post_only,
         });
