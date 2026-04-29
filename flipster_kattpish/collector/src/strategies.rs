@@ -433,7 +433,8 @@ pub struct PaperBook {
     pub pair_stats: HashMap<String, EwmaStats>,
     pub binance_win: HashMap<String, BinanceWindow>,
     pub positions: Vec<OpenPosition>,
-    pub next_id: u64,
+    // Position IDs come from pairs_core::pos_id::global(); no per-PaperBook
+    // counter is needed any longer (the global gen is process-monotonic).
     // cooldowns[(strategy, base)] = next allowed entry time
     pub cooldowns: HashMap<(&'static str, String), DateTime<Utc>>,
 
@@ -793,9 +794,8 @@ async fn try_enter_latency(
     // short → sell flipster bid and buy binance ask. Hedge leg is opposite.
     let f_entry = if dir > 0 { fq.buy_at() } else { fq.sell_at() };
     let b_entry = if dir > 0 { bq.sell_at() } else { bq.buy_at() };
-    b.next_id += 1;
     let pos = OpenPosition {
-        id: b.next_id,
+        id: pairs_core::pos_id::global().next(),
         strategy: Strategy::Latency,
         base: base.to_string(),
         flipster_side: dir,
@@ -1023,8 +1023,6 @@ async fn try_enter_pairs(
     } else {
         None
     };
-    b.next_id += 1;
-
     // Stop-loss level: in slow-avg mode use an absolute bp offset so stop
     // semantics are consistent with entry; in EWMA mode keep the
     // sigma-based calculation.
@@ -1037,7 +1035,7 @@ async fn try_enter_pairs(
     };
 
     let pos = OpenPosition {
-        id: b.next_id,
+        id: pairs_core::pos_id::global().next(),
         strategy: Strategy::Pairs,
         base: base.to_string(),
         flipster_side: dir,
@@ -1209,9 +1207,8 @@ async fn funding_scan(
             // too close to settlement or already past
             continue;
         }
-        b.next_id += 1;
         let pos = OpenPosition {
-            id: b.next_id,
+            id: pairs_core::pos_id::global().next(),
             strategy: Strategy::Funding,
             base: base.to_string(),
             flipster_side: dir,

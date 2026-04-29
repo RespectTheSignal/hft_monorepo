@@ -170,7 +170,6 @@ struct BaseState {
     flipster_ts: Option<DateTime<Utc>>,
     cooldown_until: Option<DateTime<Utc>>,
     open: Option<OpenPos>,
-    next_id: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -367,8 +366,7 @@ async fn on_tick(
                 entry.flipster_bid
             };
             let ref_mid = (entry.flipster_bid + entry.flipster_ask) * 0.5;
-            entry.next_id += 1;
-            let pos_id = entry.next_id;
+            let pos_id = pairs_core::pos_id::global().next();
             let pos = OpenPos {
                 id: pos_id,
                 side,

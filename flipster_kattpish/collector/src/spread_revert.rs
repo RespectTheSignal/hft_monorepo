@@ -165,7 +165,6 @@ struct BaseState {
     /// Rolling samples of (gap, flipster_spread_bp, binance_spread_bp).
     history: VecDeque<Sample>,
     open: Option<OpenPos>,
-    next_id: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -411,8 +410,7 @@ async fn on_tick(
                         } else {
                             entry.flipster_bid
                         };
-                        entry.next_id += 1;
-                        let pos_id = entry.next_id;
+                        let pos_id = pairs_core::pos_id::global().next();
                         let pos = OpenPos {
                             id: pos_id,
                             side,
