@@ -1003,15 +1003,31 @@ impl Executor {
 
         if !maker_filled {
             let lev = self.flip_contracts.max_leverage(&flipster_sym);
+            // For multi-position executors (SR), close as a crossing
+            // LIMIT (reduceOnly) — same fill characteristics as IOC but
+            // priced at the BBO so we don't blow through depth.
+            // close_side="short" when we're long → cross at bid;
+            // close_side="long" when we're short → cross at ask.
+            let (close_order_type, close_price) = if self.multiple_positions {
+                let lim_px = match (ev.flipster_bid, ev.flipster_ask) {
+                    (Some(b), Some(a)) if b > 0.0 && a > 0.0 => {
+                        if close_side == "short" { b } else { a }
+                    }
+                    _ => ref_px,
+                };
+                ("ORDER_TYPE_LIMIT", lim_px)
+            } else {
+                ("ORDER_TYPE_MARKET", ref_px)
+            };
             match self
                 .flipster_place(
                     &flipster_sym,
                     close_side,
                     pos.size_usd * 1.5,
-                    ref_px,
+                    close_price,
                     lev,
                     true,
-                    "ORDER_TYPE_MARKET",
+                    close_order_type,
                     false,
                 )
                 .await
@@ -1019,7 +1035,10 @@ impl Executor {
                 Ok(r) => {
                     let (avg, _, _) = flip_extract_fill(&r);
                     f_close_avg = avg;
-                    tracing::info!("  [FLIPSTER CLOSE] OK @ {}", f_close_avg);
+                    tracing::info!(
+                        "  [FLIPSTER CLOSE] OK type={} @ {}",
+                        close_order_type, f_close_avg
+                    );
                 }
                 Err(e) => tracing::error!(
                     error = %e,

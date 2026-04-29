@@ -36,7 +36,7 @@ use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::Sha256;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 use tokio_tungstenite::tungstenite::Message;
@@ -101,7 +101,7 @@ pub struct MarginInfo {
     pub init_position_margin: String,
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Position {
     pub symbol: String,
@@ -133,14 +133,38 @@ pub struct Position {
     pub liquidation_price: Option<String>,
 }
 
+/// Tells the position-change subscriber what just happened so the
+/// caller doesn't have to diff. Carried in the broadcast channel
+/// alongside the new state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PositionChangeKind {
+    /// First time we see this (symbol, slot).
+    Open,
+    /// Existing slot's fields updated (size/entry/PnL etc.).
+    Update,
+    /// Slot disappeared (closed) — listed by symbol/slot only.
+    Close,
+}
+
+#[derive(Debug, Clone)]
+pub struct PositionChange {
+    pub symbol: String,
+    pub slot: u32,
+    pub kind: PositionChangeKind,
+    /// `None` for `Close` (the row is gone).
+    pub position: Option<Position>,
+}
+
 #[derive(Default, Debug)]
 pub struct AccountState {
     pub account: Option<AccountInfo>,
     /// Keyed by asset (e.g. "USDT", "BTC").
     pub balances: HashMap<String, Balance>,
-    /// Keyed by `"{symbol}/{slot}"` to match the v2 path key shape used
-    /// elsewhere in the executor.
-    pub positions: HashMap<String, Position>,
+    /// Keyed by symbol → slot → Position. Multi-position trade-mode
+    /// stacks several slots on one symbol; this nested shape lets
+    /// callers iterate a base's stack cheaply (`positions[sym].values()`)
+    /// without scanning a flat map.
+    pub positions: HashMap<String, HashMap<u32, Position>>,
     /// Keyed by currency (e.g. "USDT").
     pub margins: HashMap<String, MarginInfo>,
     pub last_rest_at_ms: i64,
@@ -150,7 +174,12 @@ pub struct AccountState {
 
 impl AccountState {
     pub fn position_for(&self, symbol: &str, slot: u32) -> Option<&Position> {
-        self.positions.get(&format!("{symbol}/{slot}"))
+        self.positions.get(symbol).and_then(|m| m.get(&slot))
+    }
+
+    /// All open positions on a given symbol, regardless of slot.
+    pub fn positions_for_symbol(&self, symbol: &str) -> Option<&HashMap<u32, Position>> {
+        self.positions.get(symbol)
     }
 
     pub fn parse_f64<F>(opt: Option<&str>, default: F) -> f64
@@ -168,14 +197,24 @@ pub type SharedAccountState = Arc<RwLock<AccountState>>;
 /// API key is missing — the caller can still hold the handle and the
 /// state stays at its default until creds are configured.
 pub fn spawn() -> SharedAccountState {
+    spawn_with_changes().0
+}
+
+/// Same as `spawn` but also returns a `broadcast::Sender<PositionChange>`
+/// the caller can subscribe to for live notifications. Drop the
+/// receiver to stop listening — the broadcast accepts new subscribers
+/// at any time. Capacity is 1024; lagged subscribers see a `Lagged`
+/// recv error (the writers don't block).
+pub fn spawn_with_changes() -> (SharedAccountState, broadcast::Sender<PositionChange>) {
     let state: SharedAccountState = Arc::new(RwLock::new(AccountState::default()));
+    let (change_tx, _) = broadcast::channel::<PositionChange>(1024);
     let api_key = std::env::var("FLIPSTER_API_KEY").ok();
     let api_secret = std::env::var("FLIPSTER_API_SECRET").ok();
     if api_key.is_none() || api_secret.is_none() {
         warn!(
             "[flip-acct] FLIPSTER_API_KEY/FLIPSTER_API_SECRET not set — account sync disabled"
         );
-        return state;
+        return (state, change_tx);
     }
     let key = api_key.unwrap();
     let secret = api_secret.unwrap();
@@ -194,17 +233,19 @@ pub fn spawn() -> SharedAccountState {
         let st = state.clone();
         let key = key.clone();
         let secret = secret.clone();
+        let tx = change_tx.clone();
         tokio::spawn(async move {
-            rest_poll_loop(st, key, secret, poll_interval_s).await;
+            rest_poll_loop(st, key, secret, poll_interval_s, tx).await;
         });
     }
     {
         let st = state.clone();
+        let tx = change_tx.clone();
         tokio::spawn(async move {
-            ws_loop(st, key, secret).await;
+            ws_loop(st, key, secret, tx).await;
         });
     }
-    state
+    (state, change_tx)
 }
 
 /// Set the account-level trade mode. Valid values per Flipster docs:
@@ -254,7 +295,13 @@ pub async fn set_trade_mode(mode: &str) -> Result<()> {
 // REST poll task
 // -----------------------------------------------------------------------------
 
-async fn rest_poll_loop(state: SharedAccountState, api_key: String, api_secret: String, interval_s: u64) {
+async fn rest_poll_loop(
+    state: SharedAccountState,
+    api_key: String,
+    api_secret: String,
+    interval_s: u64,
+    change_tx: broadcast::Sender<PositionChange>,
+) {
     let mut builder = reqwest::Client::builder().gzip(true).https_only(true);
     // Same CF-bypass proxy used by flipster-client. Optional — if the env
     // var isn't set the client goes direct.
@@ -282,7 +329,7 @@ async fn rest_poll_loop(state: SharedAccountState, api_key: String, api_secret: 
     // instantly which is fine — issue is just to log the first cycle.
     loop {
         tick.tick().await;
-        if let Err(e) = poll_once(&client, &api_key, &api_secret, &state).await {
+        if let Err(e) = poll_once(&client, &api_key, &api_secret, &state, &change_tx).await {
             warn!(error = %e, "[flip-acct/rest] poll failed");
         }
     }
@@ -293,6 +340,7 @@ async fn poll_once(
     api_key: &str,
     api_secret: &str,
     state: &SharedAccountState,
+    change_tx: &broadcast::Sender<PositionChange>,
 ) -> Result<()> {
     let now_ms = unix_now_ms();
     let account = fetch_json(client, api_key, api_secret, "GET", "/api/v1/account").await?;
@@ -319,17 +367,105 @@ async fn poll_once(
     for b in balances {
         s.balances.insert(b.asset.clone(), b);
     }
-    s.positions.clear();
+    // Build the new positions tree, then diff against the old one so
+    // each (symbol, slot) change emits exactly one Open/Update/Close.
+    let mut new_positions: HashMap<String, HashMap<u32, Position>> = HashMap::new();
     for p in positions {
-        let key = format!("{}/{}", p.symbol, p.slot);
-        s.positions.insert(key, p);
+        new_positions
+            .entry(p.symbol.clone())
+            .or_default()
+            .insert(p.slot, p);
     }
+    let changes = diff_positions(&s.positions, &new_positions);
+    s.positions = new_positions;
     s.margins.clear();
     for m in margins {
         s.margins.insert(m.currency.clone(), m);
     }
     s.last_rest_at_ms = now_ms;
+    drop(s);
+    for c in changes {
+        emit_change(change_tx, c);
+    }
     Ok(())
+}
+
+/// Compute (Open / Update / Close) events between two snapshots.
+fn diff_positions(
+    old: &HashMap<String, HashMap<u32, Position>>,
+    new: &HashMap<String, HashMap<u32, Position>>,
+) -> Vec<PositionChange> {
+    let mut changes = Vec::new();
+    // Open / Update.
+    for (sym, slots) in new {
+        for (slot, pos) in slots {
+            match old.get(sym).and_then(|m| m.get(slot)) {
+                None => changes.push(PositionChange {
+                    symbol: sym.clone(),
+                    slot: *slot,
+                    kind: PositionChangeKind::Open,
+                    position: Some(pos.clone()),
+                }),
+                Some(prev) if !position_eq(prev, pos) => changes.push(PositionChange {
+                    symbol: sym.clone(),
+                    slot: *slot,
+                    kind: PositionChangeKind::Update,
+                    position: Some(pos.clone()),
+                }),
+                Some(_) => {}
+            }
+        }
+    }
+    // Close.
+    for (sym, slots) in old {
+        for slot in slots.keys() {
+            if !new.get(sym).map(|m| m.contains_key(slot)).unwrap_or(false) {
+                changes.push(PositionChange {
+                    symbol: sym.clone(),
+                    slot: *slot,
+                    kind: PositionChangeKind::Close,
+                    position: None,
+                });
+            }
+        }
+    }
+    changes
+}
+
+/// Loose Position equality — only the fields that materially change
+/// over a position's lifetime. Avoids spurious `Update` events on
+/// timestamp-only churn.
+fn position_eq(a: &Position, b: &Position) -> bool {
+    a.symbol == b.symbol
+        && a.slot == b.slot
+        && a.position_amount == b.position_amount
+        && a.position_qty == b.position_qty
+        && a.entry_price == b.entry_price
+        && a.position_side == b.position_side
+}
+
+fn emit_change(tx: &broadcast::Sender<PositionChange>, ev: PositionChange) {
+    let kind = ev.kind;
+    let summary = ev
+        .position
+        .as_ref()
+        .map(|p| {
+            format!(
+                "side={} amount={} entry={}",
+                p.position_side.as_deref().unwrap_or(""),
+                p.position_amount.as_deref().unwrap_or("?"),
+                p.entry_price.as_deref().unwrap_or("?"),
+            )
+        })
+        .unwrap_or_else(|| "(closed)".into());
+    info!(
+        symbol = %ev.symbol,
+        slot = ev.slot,
+        kind = ?kind,
+        detail = %summary,
+        "[flip-acct] position change"
+    );
+    let _ = tx.send(ev);
 }
 
 async fn fetch_json(
@@ -377,9 +513,14 @@ fn parse_array<T: for<'de> Deserialize<'de>>(value: &Value) -> Vec<T> {
 // WS task
 // -----------------------------------------------------------------------------
 
-async fn ws_loop(state: SharedAccountState, api_key: String, api_secret: String) {
+async fn ws_loop(
+    state: SharedAccountState,
+    api_key: String,
+    api_secret: String,
+    change_tx: broadcast::Sender<PositionChange>,
+) {
     loop {
-        match ws_connect_once(&state, &api_key, &api_secret).await {
+        match ws_connect_once(&state, &api_key, &api_secret, &change_tx).await {
             Ok(()) => warn!("[flip-acct/ws] closed cleanly; reconnecting in 3s"),
             Err(e) => warn!(error = %e, "[flip-acct/ws] error; reconnecting in 3s"),
         }
@@ -395,6 +536,7 @@ async fn ws_connect_once(
     state: &SharedAccountState,
     api_key: &str,
     api_secret: &str,
+    change_tx: &broadcast::Sender<PositionChange>,
 ) -> Result<()> {
     let expires = unix_now_secs() + 60;
     let signature = sign_hmac(api_secret, "GET", WS_AUTH_PATH, expires, None);
@@ -448,12 +590,16 @@ async fn ws_connect_once(
             Ok(v) => v,
             Err(_) => continue,
         };
-        apply_ws_message(&parsed, state).await;
+        apply_ws_message(&parsed, state, change_tx).await;
     }
     Ok(())
 }
 
-async fn apply_ws_message(parsed: &Value, state: &SharedAccountState) {
+async fn apply_ws_message(
+    parsed: &Value,
+    state: &SharedAccountState,
+    change_tx: &broadcast::Sender<PositionChange>,
+) {
     // Wire shape per docs: { topic, ts, data: [{ actionType, rows: [...] }, ...] }
     let topic = match parsed.get("topic").and_then(|v| v.as_str()) {
         Some(t) => t,
@@ -464,20 +610,31 @@ async fn apply_ws_message(parsed: &Value, state: &SharedAccountState) {
         None => return,
     };
     let now_ms = unix_now_ms();
-    let mut s = state.write().await;
-    s.last_ws_at_ms = now_ms;
-    for entry in data {
-        let rows = match entry.get("rows").and_then(|v| v.as_array()) {
-            Some(r) => r,
-            None => continue,
-        };
-        for row in rows {
-            apply_row(topic, row, &mut s);
+    let mut pending: Vec<PositionChange> = Vec::new();
+    {
+        let mut s = state.write().await;
+        s.last_ws_at_ms = now_ms;
+        for entry in data {
+            let rows = match entry.get("rows").and_then(|v| v.as_array()) {
+                Some(r) => r,
+                None => continue,
+            };
+            for row in rows {
+                apply_row(topic, row, &mut s, &mut pending);
+            }
         }
+    }
+    for c in pending {
+        emit_change(change_tx, c);
     }
 }
 
-fn apply_row(topic: &str, row: &Value, state: &mut AccountState) {
+fn apply_row(
+    topic: &str,
+    row: &Value,
+    state: &mut AccountState,
+    pending: &mut Vec<PositionChange>,
+) {
     match topic {
         "account" => {
             if let Ok(a) = serde_json::from_value::<AccountInfo>(row.clone()) {
@@ -496,9 +653,10 @@ fn apply_row(topic: &str, row: &Value, state: &mut AccountState) {
         }
         "account.position" => {
             if let Ok(p) = serde_json::from_value::<Position>(row.clone()) {
-                let key = format!("{}/{}", p.symbol, p.slot);
-                // A zero positionAmount typically means "position closed";
-                // remove it so iter_open_positions() works as expected.
+                let sym = p.symbol.clone();
+                let slot = p.slot;
+                // Zero positionAmount = closed; drop it so consumers
+                // see Close events and iter_* methods don't list ghosts.
                 let is_zero = p
                     .position_amount
                     .as_deref()
@@ -506,9 +664,33 @@ fn apply_row(topic: &str, row: &Value, state: &mut AccountState) {
                     .map(|n| n == 0.0)
                     .unwrap_or(false);
                 if is_zero {
-                    state.positions.remove(&key);
+                    if let Some(slots) = state.positions.get_mut(&sym) {
+                        if slots.remove(&slot).is_some() {
+                            pending.push(PositionChange {
+                                symbol: sym.clone(),
+                                slot,
+                                kind: PositionChangeKind::Close,
+                                position: None,
+                            });
+                        }
+                        if slots.is_empty() {
+                            state.positions.remove(&sym);
+                        }
+                    }
                 } else {
-                    state.positions.insert(key, p);
+                    let entry = state.positions.entry(sym.clone()).or_default();
+                    let kind = match entry.get(&slot) {
+                        None => PositionChangeKind::Open,
+                        Some(prev) if !position_eq(prev, &p) => PositionChangeKind::Update,
+                        Some(_) => return, // no-op update
+                    };
+                    entry.insert(slot, p.clone());
+                    pending.push(PositionChange {
+                        symbol: sym,
+                        slot,
+                        kind,
+                        position: Some(p),
+                    });
                 }
             }
         }
@@ -604,11 +786,34 @@ mod tests {
     #[test]
     fn apply_position_close_removes_entry() {
         let mut st = AccountState::default();
+        let mut pending: Vec<PositionChange> = Vec::new();
         let row = serde_json::json!({"symbol":"BTCUSDT.PERP","slot":0,"positionAmount":"0.5"});
-        apply_row("account.position", &row, &mut st);
+        apply_row("account.position", &row, &mut st, &mut pending);
         assert!(st.position_for("BTCUSDT.PERP", 0).is_some());
+        assert!(matches!(pending.last().unwrap().kind, PositionChangeKind::Open));
         let close_row = serde_json::json!({"symbol":"BTCUSDT.PERP","slot":0,"positionAmount":"0.0"});
-        apply_row("account.position", &close_row, &mut st);
+        apply_row("account.position", &close_row, &mut st, &mut pending);
         assert!(st.position_for("BTCUSDT.PERP", 0).is_none());
+        assert!(matches!(pending.last().unwrap().kind, PositionChangeKind::Close));
+    }
+
+    #[test]
+    fn diff_emits_open_update_close() {
+        let mut old: HashMap<String, HashMap<u32, Position>> = HashMap::new();
+        let mut new: HashMap<String, HashMap<u32, Position>> = HashMap::new();
+        let p_a = Position { symbol: "BTCUSDT.PERP".into(), slot: 1, position_amount: Some("1".into()), ..Default::default() };
+        let p_b = Position { symbol: "BTCUSDT.PERP".into(), slot: 1, position_amount: Some("2".into()), ..Default::default() };
+        let p_c = Position { symbol: "BTCUSDT.PERP".into(), slot: 2, position_amount: Some("1".into()), ..Default::default() };
+        old.entry("BTCUSDT.PERP".into()).or_default().insert(1, p_a.clone());
+        old.entry("BTCUSDT.PERP".into()).or_default().insert(2, p_c.clone());
+        new.entry("BTCUSDT.PERP".into()).or_default().insert(1, p_b);
+        // slot 2 is gone in new; slot 3 is new.
+        let p_d = Position { symbol: "BTCUSDT.PERP".into(), slot: 3, position_amount: Some("1".into()), ..Default::default() };
+        new.entry("BTCUSDT.PERP".into()).or_default().insert(3, p_d);
+        let changes = diff_positions(&old, &new);
+        let kinds: Vec<_> = changes.iter().map(|c| (c.slot, c.kind)).collect();
+        assert!(kinds.contains(&(1, PositionChangeKind::Update)));
+        assert!(kinds.contains(&(2, PositionChangeKind::Close)));
+        assert!(kinds.contains(&(3, PositionChangeKind::Open)));
     }
 }
