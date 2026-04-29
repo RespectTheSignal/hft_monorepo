@@ -195,6 +195,7 @@ struct OpenAction {
     size_usd: f64,
     entry_price: f64,
     binance_mid: f64,
+    flipster_spread_bp: f64,
     ts: DateTime<Utc>,
 }
 
@@ -439,6 +440,7 @@ async fn on_tick(
                             size_usd: params.entry_size_usd,
                             entry_price,
                             binance_mid: bin_mid,
+                            flipster_spread_bp: fli_spread_bp,
                             ts: now,
                         });
                     }
@@ -458,6 +460,7 @@ async fn on_tick(
             o.binance_mid,
             o.pos_id,
             o.ts,
+            Some(o.flipster_spread_bp),
         );
         if let Err(e) = writer
             .write_trade_signal(
@@ -597,6 +600,7 @@ async fn log_close(
         c.exit_price,
         c.pos.id,
         c.exit_ts,
+        None,
     );
     if let Err(e) = writer
         .write_trade_signal(

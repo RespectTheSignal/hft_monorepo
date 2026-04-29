@@ -28,6 +28,18 @@ use crate::questdb;
 use crate::trade_log::{TradeLog, TradeRecord};
 use crate::zmq_sub::TradeSignal;
 
+/// Decision-logic filters (chop_detect, dyn_filter, adjusted_size) moved
+/// into `collector::coordinator` in Phase 3b. Default = bypassed in the
+/// executor — the coordinator owns those decisions now. Set
+/// `EXEC_LEGACY_FILTERS=1` to restore the old executor-side behavior as a
+/// fallback (e.g. while validating the new collector path or rolling back).
+///
+/// Freshness gates that *do* still belong here regardless — stale signal
+/// age and the QuestDB mid recheck — are unchanged.
+fn legacy_filters_enabled() -> bool {
+    std::env::var("EXEC_LEGACY_FILTERS").as_deref() == Ok("1")
+}
+
 /// Per-position bookkeeping used to compute exit PnL/slippage and write
 /// the JSONL trade record. Mirrors Python `LivePosition`.
 #[derive(Debug, Clone)]
@@ -174,16 +186,19 @@ impl Executor {
         let entry_t0 = Instant::now();
         let flipster_sym = format!("{}USDT.PERP", ev.base);
         let gate_sym = format!("{}_USDT", ev.base);
-        // Per-symbol dynamic sizing. Set GL_DYN_SIZE=0 to disable.
+        // Per-symbol dynamic sizing. Owned by `coordinator::route_signal`
+        // in Phase 3b — the size on the wire is already adjusted. Restore
+        // executor-side adjustment only when EXEC_LEGACY_FILTERS=1.
         let dyn_size_enabled = std::env::var("GL_DYN_SIZE")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
             .map(|v| v != 0)
             .unwrap_or(true);
-        let mut size = if dyn_size_enabled {
+        let mut size = if dyn_size_enabled && legacy_filters_enabled() {
             self.sym_stats.adjusted_size(&ev.base, self.size_usd)
         } else {
-            self.size_usd
+            // Trust the coordinator's adjusted size (passed via the signal).
+            ev.size_usd
         };
 
         tracing::info!(
@@ -264,9 +279,10 @@ impl Executor {
         }
 
         // Chop detector: if previous signal on this base was the OPPOSITE
-        // side within CHOP_DETECT_WINDOW_S, the symbol is zigzagging. Skip
-        // and reset the last_signal so a third same-side signal can fire.
-        {
+        // side within CHOP_DETECT_WINDOW_S, the symbol is zigzagging.
+        // Owned by coordinator::route_signal in Phase 3b. Restore here
+        // only when EXEC_LEGACY_FILTERS=1.
+        if legacy_filters_enabled() {
             let now_inst = std::time::Instant::now();
             let entry = self.last_signal.get(&ev.base).map(|v| v.value().clone());
             if let Some((prev_side, prev_ts)) = entry {
@@ -287,14 +303,15 @@ impl Executor {
         }
 
         // Dynamic per-symbol filter (sliding-window PnL + paper signal +
-        // current spread). Set GL_DYN_FILTER=0 to disable.
+        // current spread). Owned by coordinator::route_signal in Phase 3b.
+        // Restore here only when EXEC_LEGACY_FILTERS=1.
         let dyn_enabled = std::env::var("GL_DYN_FILTER")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
             .map(|v| v != 0)
             .unwrap_or(true);
-        if dyn_enabled {
-            use crate::symbol_stats::{FilterDecision, SkipReason};
+        if dyn_enabled && legacy_filters_enabled() {
+            use crate::symbol_stats::FilterDecision;
             match self.sym_stats.check_entry(&ev.base, current_spread_bp) {
                 FilterDecision::Pass => {}
                 FilterDecision::Probe => {

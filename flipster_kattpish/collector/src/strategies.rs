@@ -1081,6 +1081,7 @@ async fn try_enter_pairs(
     crate::coordinator::route_signal(
         &params.account_id, base, "entry", side_s,
         size_usd, f_entry, b_entry, pos_id, now,
+        Some(fq.spread_bp()),
     );
     if let Err(e) = _writer
         .write_trade_signal(
@@ -1526,10 +1527,12 @@ async fn sweep_exits(book: &Arc<Mutex<PaperBook>>, writer: &IlpWriter, params: &
         // Emit exit signal for live executor sidecar.
         if matches!(pos.strategy, Strategy::Pairs) {
             let exit_side = if pos.flipster_side > 0 { "long" } else { "short" };
-            // ZMQ PUB first.
+            // ZMQ PUB first. Exits never go through coordinator filtering;
+            // spread_bp is informational only here.
             crate::coordinator::route_signal(
                 &params.account_id, &pos.base, "exit", exit_side,
                 pos.size_usd, f_exit, b_exit, pos.id, now,
+                None,
             );
             if let Err(e) = writer
                 .write_trade_signal(

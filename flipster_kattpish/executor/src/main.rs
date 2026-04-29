@@ -85,12 +85,23 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
+    let legacy_filters = std::env::var("EXEC_LEGACY_FILTERS").as_deref() == Ok("1");
     tracing::info!(
         variant = %cli.variant,
         size_usd = cli.size_usd,
         dry_run = cli.dry_run,
+        legacy_filters,
         "starting executor"
     );
+    if legacy_filters {
+        tracing::warn!(
+            "EXEC_LEGACY_FILTERS=1 — applying chop/dyn_filter/adjusted_size in executor (Phase 3b rollback). Coordinator filters in collector are still active unless COORDINATOR_FILTERS=0 there."
+        );
+    } else {
+        tracing::info!(
+            "EXEC_LEGACY_FILTERS off (default) — chop/dyn_filter/adjusted_size are owned by collector::coordinator. signal.size_usd is trusted as the final order size; executor's --size-usd CLI flag is bypassed for sizing decisions in this mode."
+        );
+    }
 
     // Bring up the fill_publisher PUB socket so the collector's coordinator
     // (Phase 3+) can see live fills/aborts in real time. Non-fatal: if the

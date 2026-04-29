@@ -25,6 +25,7 @@ hex.workspace = true
 http.workspace = true
 urlencoding = "2"
 zmq.workspace = true
+dashmap.workspace = true
 pairs_core = { path = "../pairs_core" }
 
 [[bin]]

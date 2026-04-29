@@ -47,9 +47,15 @@ async fn main() -> Result<()> {
 
     // Phase 3a: parallel learner. Subscribes to fill_events, pairs entry+exit
     // by (account_id, position_id), updates a collector-side sym_stats store
-    // independent of the executor's. Used in Phase 3b to drive pre-publish
-    // filtering.
-    let _live_stats = collector::live_stats::spawn(fill_events_tx.subscribe());
+    // independent of the executor's. Phase 3b uses it for pre-publish
+    // filtering via the coordinator.
+    let live_stats_store = collector::live_stats::spawn(fill_events_tx.subscribe());
+
+    // Phase 3b: hand the coordinator the live-stats handle so it can apply
+    // chop_detect / sym_stats / adjusted_size filters before publishing.
+    // Override default behaviour with COORDINATOR_FILTERS=0 (pass-through)
+    // or CHOP_WINDOW_MS=<n> (default 15000).
+    collector::coordinator::init(live_stats_store);
 
     // Broadcast bus for downstream consumers (e.g. latency calculator, paper bot).
     // 1M slots absorbs the replay producer's burst rate without lagging the
