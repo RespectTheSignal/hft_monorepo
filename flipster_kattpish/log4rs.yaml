@@ -1,0 +1,26 @@
+refresh_rate: 30 seconds
+
+appenders:
+  stdout:
+    kind: console
+    filters:
+      # trace 제외; debug 이상 출력 (data_cache는 debug, 나머지는 logger에서 info로 제한)
+      # regex 필터는 log4rs에 deserializer 미등록으로 제거 (Reduce only 필터링 원하면 코드에서 처리)
+      - kind: threshold
+        level: debug
+
+    encoder:
+      pattern: "{h({l})}: {m}{n}"
+
+root:
+  level: info
+  appenders:
+    - stdout
+
+# data_cache module: debug and above; everything else stays info and above
+# loggers:
+#   gate_hft_rust::data_cache:
+#     level: debug
+#     appenders:
+#       - stdout
+#     additive: false

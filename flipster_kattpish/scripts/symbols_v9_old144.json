@@ -1,0 +1,1154 @@
+[
+  {
+    "base": "BTC",
+    "tick": 0.1,
+    "price": 76091.4,
+    "tick_bp": 0.013,
+    "vol24h": 661.309418,
+    "binance_vol_usd": 14087824497.17
+  },
+  {
+    "base": "ETH",
+    "tick": 0.01,
+    "price": 2355.39,
+    "tick_bp": 0.042,
+    "vol24h": 11752.0316,
+    "binance_vol_usd": 11615285049.31
+  },
+  {
+    "base": "RAVE",
+    "tick": 1e-05,
+    "price": 12.98609,
+    "tick_bp": 0.008,
+    "vol24h": 62962.6,
+    "binance_vol_usd": 2862040042.07288
+  },
+  {
+    "base": "SOL",
+    "tick": 0.01,
+    "price": 86.81,
+    "tick_bp": 1.152,
+    "vol24h": 71252.492,
+    "binance_vol_usd": 1901521454.6409
+  },
+  {
+    "base": "XRP",
+    "tick": 0.0001,
+    "price": 1.436,
+    "tick_bp": 0.696,
+    "vol24h": 88889.0,
+    "binance_vol_usd": 894508544.962
+  },
+  {
+    "base": "DOGE",
+    "tick": 1e-05,
+    "price": 0.09592,
+    "tick_bp": 1.043,
+    "vol24h": 721722.0,
+    "binance_vol_usd": 764222705.35173
+  },
+  {
+    "base": "ORDI",
+    "tick": 0.001,
+    "price": 5.447,
+    "tick_bp": 1.836,
+    "vol24h": 51945.34,
+    "binance_vol_usd": 549489453.5081
+  },
+  {
+    "base": "BNB",
+    "tick": 0.01,
+    "price": 632.45,
+    "tick_bp": 0.158,
+    "vol24h": 141.1162,
+    "binance_vol_usd": 340351494.271
+  },
+  {
+    "base": "HYPE",
+    "tick": 0.001,
+    "price": 44.231,
+    "tick_bp": 0.226,
+    "vol24h": 5750.36,
+    "binance_vol_usd": 335194272.81974
+  },
+  {
+    "base": "ENA",
+    "tick": 1e-05,
+    "price": 0.12111,
+    "tick_bp": 0.826,
+    "vol24h": 82380.0,
+    "binance_vol_usd": 272030133.72533
+  },
+  {
+    "base": "TAO",
+    "tick": 0.01,
+    "price": 248.96,
+    "tick_bp": 0.402,
+    "vol24h": 225.13,
+    "binance_vol_usd": 226364168.9
+  },
+  {
+    "base": "SUI",
+    "tick": 0.0001,
+    "price": 0.9678,
+    "tick_bp": 1.033,
+    "vol24h": 18578.4,
+    "binance_vol_usd": 195750389.40245
+  },
+  {
+    "base": "BASED",
+    "tick": 1e-05,
+    "price": 0.10966,
+    "tick_bp": 0.912,
+    "vol24h": 242008.0,
+    "binance_vol_usd": 171540473.42579
+  },
+  {
+    "base": "AVAX",
+    "tick": 0.001,
+    "price": 9.383,
+    "tick_bp": 1.066,
+    "vol24h": 583.94,
+    "binance_vol_usd": 147501881.622
+  },
+  {
+    "base": "LINK",
+    "tick": 0.001,
+    "price": 9.357,
+    "tick_bp": 1.069,
+    "vol24h": 304.72,
+    "binance_vol_usd": 123432308.807
+  },
+  {
+    "base": "GENIUS",
+    "tick": 0.0001,
+    "price": 0.7932,
+    "tick_bp": 1.261,
+    "vol24h": 13324.4,
+    "binance_vol_usd": 122830929.3916
+  },
+  {
+    "base": "FIL",
+    "tick": 0.0001,
+    "price": 0.954,
+    "tick_bp": 1.048,
+    "vol24h": 1502.74,
+    "binance_vol_usd": 103507008.004
+  },
+  {
+    "base": "ASTER",
+    "tick": 0.0001,
+    "price": 0.6673,
+    "tick_bp": 1.499,
+    "vol24h": 3106.82,
+    "binance_vol_usd": 96813654.2801
+  },
+  {
+    "base": "ENJ",
+    "tick": 1e-05,
+    "price": 0.05607,
+    "tick_bp": 1.783,
+    "vol24h": 296496.0,
+    "binance_vol_usd": 85667982.76673
+  },
+  {
+    "base": "EDGE",
+    "tick": 0.0001,
+    "price": 1.3376,
+    "tick_bp": 0.748,
+    "vol24h": 2215.4,
+    "binance_vol_usd": 81971723.9287
+  },
+  {
+    "base": "M",
+    "tick": 0.0001,
+    "price": 4.4528,
+    "tick_bp": 0.225,
+    "vol24h": 14323.4,
+    "binance_vol_usd": 67562872.5431
+  },
+  {
+    "base": "PENGU",
+    "tick": 1e-06,
+    "price": 0.007382,
+    "tick_bp": 1.355,
+    "vol24h": 2674610.0,
+    "binance_vol_usd": 60120939.719122
+  },
+  {
+    "base": "PNUT",
+    "tick": 1e-05,
+    "price": 0.05683,
+    "tick_bp": 1.76,
+    "vol24h": 1764825.8,
+    "binance_vol_usd": 55129305.40496
+  },
+  {
+    "base": "SAPIEN",
+    "tick": 1e-05,
+    "price": 0.08552,
+    "tick_bp": 1.169,
+    "vol24h": 10016.6,
+    "binance_vol_usd": 51748831.85269
+  },
+  {
+    "base": "TRX",
+    "tick": 1e-05,
+    "price": 0.3255,
+    "tick_bp": 0.307,
+    "vol24h": 748.0,
+    "binance_vol_usd": 50087480.68685
+  },
+  {
+    "base": "PENDLE",
+    "tick": 0.0001,
+    "price": 1.3646,
+    "tick_bp": 0.733,
+    "vol24h": 500.2,
+    "binance_vol_usd": 48317874.851
+  },
+  {
+    "base": "XLM",
+    "tick": 1e-05,
+    "price": 0.16964,
+    "tick_bp": 0.589,
+    "vol24h": 4290.0,
+    "binance_vol_usd": 48110513.55611
+  },
+  {
+    "base": "IP",
+    "tick": 0.0001,
+    "price": 0.5519,
+    "tick_bp": 1.812,
+    "vol24h": 33515.72,
+    "binance_vol_usd": 45384142.44109
+  },
+  {
+    "base": "VIRTUAL",
+    "tick": 0.0001,
+    "price": 0.7189,
+    "tick_bp": 1.391,
+    "vol24h": 1849.8,
+    "binance_vol_usd": 43143643.30852
+  },
+  {
+    "base": "APT",
+    "tick": 0.0001,
+    "price": 0.9434,
+    "tick_bp": 1.06,
+    "vol24h": 10759.56,
+    "binance_vol_usd": 40621908.88132
+  },
+  {
+    "base": "H",
+    "tick": 1e-05,
+    "price": 0.1186,
+    "tick_bp": 0.843,
+    "vol24h": 206944.0,
+    "binance_vol_usd": 40055942.1351
+  },
+  {
+    "base": "STO",
+    "tick": 1e-05,
+    "price": 0.09927,
+    "tick_bp": 1.007,
+    "vol24h": 51876.0,
+    "binance_vol_usd": 34838321.86508
+  },
+  {
+    "base": "HBAR",
+    "tick": 1e-05,
+    "price": 0.08901,
+    "tick_bp": 1.123,
+    "vol24h": 8594.0,
+    "binance_vol_usd": 34675008.01171
+  },
+  {
+    "base": "BEAT",
+    "tick": 0.0001,
+    "price": 0.5247,
+    "tick_bp": 1.906,
+    "vol24h": 929504.0,
+    "binance_vol_usd": 29854287.1769
+  },
+  {
+    "base": "GWEI",
+    "tick": 1e-05,
+    "price": 0.09827,
+    "tick_bp": 1.018,
+    "vol24h": 481176.0,
+    "binance_vol_usd": 27989570.016745
+  },
+  {
+    "base": "4",
+    "tick": 1e-06,
+    "price": 0.013096,
+    "tick_bp": 0.764,
+    "vol24h": 106783.4,
+    "binance_vol_usd": 27372406.995897
+  },
+  {
+    "base": "APR",
+    "tick": 1e-05,
+    "price": 0.17358,
+    "tick_bp": 0.576,
+    "vol24h": 7138.4,
+    "binance_vol_usd": 24998484.0468
+  },
+  {
+    "base": "TON",
+    "tick": 0.0001,
+    "price": 1.3688,
+    "tick_bp": 0.731,
+    "vol24h": 1224.2,
+    "binance_vol_usd": 24743345.83883
+  },
+  {
+    "base": "PIXEL",
+    "tick": 1e-06,
+    "price": 0.00855,
+    "tick_bp": 1.17,
+    "vol24h": 4538528.0,
+    "binance_vol_usd": 23669107.547674
+  },
+  {
+    "base": "LIT",
+    "tick": 0.0001,
+    "price": 1.03,
+    "tick_bp": 0.971,
+    "vol24h": 9022.88,
+    "binance_vol_usd": 23306083.25481
+  },
+  {
+    "base": "BOME",
+    "tick": 1e-07,
+    "price": 0.0005021,
+    "tick_bp": 1.992,
+    "vol24h": 994244.0,
+    "binance_vol_usd": 20490600.5585268
+  },
+  {
+    "base": "GRIFFAIN",
+    "tick": 1e-06,
+    "price": 0.017127,
+    "tick_bp": 0.584,
+    "vol24h": 17440.6,
+    "binance_vol_usd": 19516720.652032
+  },
+  {
+    "base": "BR",
+    "tick": 1e-05,
+    "price": 0.11488,
+    "tick_bp": 0.87,
+    "vol24h": 25490.0,
+    "binance_vol_usd": 19440364.80671
+  },
+  {
+    "base": "MOODENG",
+    "tick": 1e-05,
+    "price": 0.05524,
+    "tick_bp": 1.81,
+    "vol24h": 58324.0,
+    "binance_vol_usd": 18811318.46973
+  },
+  {
+    "base": "CAKE",
+    "tick": 0.0001,
+    "price": 1.5349,
+    "tick_bp": 0.652,
+    "vol24h": 316.2,
+    "binance_vol_usd": 18018442.333
+  },
+  {
+    "base": "EUL",
+    "tick": 0.0001,
+    "price": 1.4143,
+    "tick_bp": 0.707,
+    "vol24h": 129.96,
+    "binance_vol_usd": 17288948.31628
+  },
+  {
+    "base": "SEI",
+    "tick": 1e-05,
+    "price": 0.05665,
+    "tick_bp": 1.765,
+    "vol24h": 8413.4,
+    "binance_vol_usd": 17225470.20161
+  },
+  {
+    "base": "POL",
+    "tick": 1e-05,
+    "price": 0.08911,
+    "tick_bp": 1.122,
+    "vol24h": 6238.4,
+    "binance_vol_usd": 16771588.60909
+  },
+  {
+    "base": "ZRO",
+    "tick": 0.0001,
+    "price": 1.8803,
+    "tick_bp": 0.532,
+    "vol24h": 287.8,
+    "binance_vol_usd": 16719986.24799
+  },
+  {
+    "base": "KITE",
+    "tick": 1e-05,
+    "price": 0.14558,
+    "tick_bp": 0.687,
+    "vol24h": 1315.0,
+    "binance_vol_usd": 16043493.2993
+  },
+  {
+    "base": "POWER",
+    "tick": 1e-05,
+    "price": 0.09439,
+    "tick_bp": 1.059,
+    "vol24h": 267269.4,
+    "binance_vol_usd": 15950148.74015
+  },
+  {
+    "base": "VANRY",
+    "tick": 1e-06,
+    "price": 0.005724,
+    "tick_bp": 1.747,
+    "vol24h": 75518.0,
+    "binance_vol_usd": 14900404.878826
+  },
+  {
+    "base": "SAND",
+    "tick": 1e-05,
+    "price": 0.08234,
+    "tick_bp": 1.214,
+    "vol24h": 5092.0,
+    "binance_vol_usd": 13499833.87114
+  },
+  {
+    "base": "MORPHO",
+    "tick": 0.0001,
+    "price": 1.9025,
+    "tick_bp": 0.526,
+    "vol24h": 114.2,
+    "binance_vol_usd": 13423466.746
+  },
+  {
+    "base": "MAGIC",
+    "tick": 1e-05,
+    "price": 0.068,
+    "tick_bp": 1.471,
+    "vol24h": 6370.6,
+    "binance_vol_usd": 13254805.120396
+  },
+  {
+    "base": "CFX",
+    "tick": 1e-05,
+    "price": 0.06044,
+    "tick_bp": 1.655,
+    "vol24h": 3512.0,
+    "binance_vol_usd": 13071209.76296
+  },
+  {
+    "base": "ZETA",
+    "tick": 1e-05,
+    "price": 0.05537,
+    "tick_bp": 1.806,
+    "vol24h": 4207.8,
+    "binance_vol_usd": 12617271.24253
+  },
+  {
+    "base": "ONG",
+    "tick": 1e-05,
+    "price": 0.0844,
+    "tick_bp": 1.185,
+    "vol24h": 4874.0,
+    "binance_vol_usd": 11237288.20073
+  },
+  {
+    "base": "FF",
+    "tick": 1e-05,
+    "price": 0.07222,
+    "tick_bp": 1.385,
+    "vol24h": 9724.2,
+    "binance_vol_usd": 10806366.09021
+  },
+  {
+    "base": "BANANAS31",
+    "tick": 1e-06,
+    "price": 0.009935,
+    "tick_bp": 1.007,
+    "vol24h": 60184.0,
+    "binance_vol_usd": 10234116.799044
+  },
+  {
+    "base": "POPCAT",
+    "tick": 1e-05,
+    "price": 0.06224,
+    "tick_bp": 1.607,
+    "vol24h": 7382.0,
+    "binance_vol_usd": 9556690.09398
+  },
+  {
+    "base": "SPACE",
+    "tick": 1e-06,
+    "price": 0.006001,
+    "tick_bp": 1.666,
+    "vol24h": 28980.0,
+    "binance_vol_usd": 9411261.006331
+  },
+  {
+    "base": "PIEVERSE",
+    "tick": 0.0001,
+    "price": 0.5169,
+    "tick_bp": 1.935,
+    "vol24h": 12198.4,
+    "binance_vol_usd": 9217367.1799
+  },
+  {
+    "base": "TURBO",
+    "tick": 1e-07,
+    "price": 0.0011501,
+    "tick_bp": 0.869,
+    "vol24h": 297828.0,
+    "binance_vol_usd": 8659863.1684928
+  },
+  {
+    "base": "ENSO",
+    "tick": 0.0001,
+    "price": 0.8766,
+    "tick_bp": 1.141,
+    "vol24h": 1413.04,
+    "binance_vol_usd": 8649720.04464
+  },
+  {
+    "base": "CYBER",
+    "tick": 0.0001,
+    "price": 0.5474,
+    "tick_bp": 1.827,
+    "vol24h": 570.2,
+    "binance_vol_usd": 7913533.62939
+  },
+  {
+    "base": "INIT",
+    "tick": 1e-05,
+    "price": 0.09716,
+    "tick_bp": 1.029,
+    "vol24h": 3883.4,
+    "binance_vol_usd": 7736103.02012
+  },
+  {
+    "base": "2Z",
+    "tick": 1e-05,
+    "price": 0.08922,
+    "tick_bp": 1.121,
+    "vol24h": 3776.8,
+    "binance_vol_usd": 7369118.42784
+  },
+  {
+    "base": "0G",
+    "tick": 0.0001,
+    "price": 0.5861,
+    "tick_bp": 1.706,
+    "vol24h": 539.48,
+    "binance_vol_usd": 7032605.1475
+  },
+  {
+    "base": "JST",
+    "tick": 1e-05,
+    "price": 0.0709,
+    "tick_bp": 1.41,
+    "vol24h": 1204.0,
+    "binance_vol_usd": 6969558.180366
+  },
+  {
+    "base": "BSB",
+    "tick": 1e-05,
+    "price": 0.24054,
+    "tick_bp": 0.416,
+    "vol24h": 1320.2,
+    "binance_vol_usd": 6944589.51185
+  },
+  {
+    "base": "WAL",
+    "tick": 1e-05,
+    "price": 0.07332,
+    "tick_bp": 1.364,
+    "vol24h": 4620.0,
+    "binance_vol_usd": 6886819.60044
+  },
+  {
+    "base": "MEME",
+    "tick": 1e-07,
+    "price": 0.0005552,
+    "tick_bp": 1.801,
+    "vol24h": 561600.0,
+    "binance_vol_usd": 6789566.3872413
+  },
+  {
+    "base": "VET",
+    "tick": 1e-06,
+    "price": 0.007104,
+    "tick_bp": 1.408,
+    "vol24h": 42776.0,
+    "binance_vol_usd": 6763426.578789
+  },
+  {
+    "base": "IR",
+    "tick": 1e-05,
+    "price": 0.05262,
+    "tick_bp": 1.9,
+    "vol24h": 5985.8,
+    "binance_vol_usd": 6610825.49385
+  },
+  {
+    "base": "INX",
+    "tick": 1e-06,
+    "price": 0.011135,
+    "tick_bp": 0.898,
+    "vol24h": 25912.0,
+    "binance_vol_usd": 6395061.430398
+  },
+  {
+    "base": "KERNEL",
+    "tick": 1e-05,
+    "price": 0.08213,
+    "tick_bp": 1.218,
+    "vol24h": 4012.0,
+    "binance_vol_usd": 5878777.77124
+  },
+  {
+    "base": "ATH",
+    "tick": 1e-06,
+    "price": 0.006115,
+    "tick_bp": 1.635,
+    "vol24h": 1839066.0,
+    "binance_vol_usd": 5853153.711474
+  },
+  {
+    "base": "HUMA",
+    "tick": 1e-06,
+    "price": 0.019054,
+    "tick_bp": 0.525,
+    "vol24h": 17865.6,
+    "binance_vol_usd": 5851408.617606
+  },
+  {
+    "base": "MEW",
+    "tick": 1e-07,
+    "price": 0.0006024,
+    "tick_bp": 1.66,
+    "vol24h": 541184.0,
+    "binance_vol_usd": 5592413.4517422
+  },
+  {
+    "base": "CARV",
+    "tick": 1e-05,
+    "price": 0.05792,
+    "tick_bp": 1.727,
+    "vol24h": 5380.8,
+    "binance_vol_usd": 5588255.97326
+  },
+  {
+    "base": "IN",
+    "tick": 1e-05,
+    "price": 0.06441,
+    "tick_bp": 1.553,
+    "vol24h": 4618.0,
+    "binance_vol_usd": 5525619.07451
+  },
+  {
+    "base": "BAS",
+    "tick": 1e-06,
+    "price": 0.007751,
+    "tick_bp": 1.29,
+    "vol24h": 141362.0,
+    "binance_vol_usd": 5510188.47515
+  },
+  {
+    "base": "WET",
+    "tick": 1e-05,
+    "price": 0.11029,
+    "tick_bp": 0.907,
+    "vol24h": 3084.8,
+    "binance_vol_usd": 5012824.69851
+  },
+  {
+    "base": "ARC",
+    "tick": 1e-05,
+    "price": 0.06962,
+    "tick_bp": 1.436,
+    "vol24h": 284923.0,
+    "binance_vol_usd": 4891965.21757
+  },
+  {
+    "base": "ANKR",
+    "tick": 1e-06,
+    "price": 0.005152,
+    "tick_bp": 1.941,
+    "vol24h": 52740.0,
+    "binance_vol_usd": 4839815.488312
+  },
+  {
+    "base": "ALT",
+    "tick": 1e-06,
+    "price": 0.007284,
+    "tick_bp": 1.373,
+    "vol24h": 37980.0,
+    "binance_vol_usd": 4290320.037405
+  },
+  {
+    "base": "ELSA",
+    "tick": 1e-05,
+    "price": 0.07147,
+    "tick_bp": 1.399,
+    "vol24h": 30029.2,
+    "binance_vol_usd": 4091999.90396
+  },
+  {
+    "base": "SYRUP",
+    "tick": 1e-05,
+    "price": 0.24321,
+    "tick_bp": 0.411,
+    "vol24h": 215.4,
+    "binance_vol_usd": 4071123.17077
+  },
+  {
+    "base": "C",
+    "tick": 1e-05,
+    "price": 0.07565,
+    "tick_bp": 1.322,
+    "vol24h": 3591.8,
+    "binance_vol_usd": 4012020.58407
+  },
+  {
+    "base": "MAGMA",
+    "tick": 1e-05,
+    "price": 0.20425,
+    "tick_bp": 0.49,
+    "vol24h": 3540.2,
+    "binance_vol_usd": 3958881.68647
+  },
+  {
+    "base": "SKY",
+    "tick": 1e-05,
+    "price": 0.07697,
+    "tick_bp": 1.299,
+    "vol24h": 3732.0,
+    "binance_vol_usd": 3831640.89656
+  },
+  {
+    "base": "TREE",
+    "tick": 1e-05,
+    "price": 0.06854,
+    "tick_bp": 1.459,
+    "vol24h": 4152.8,
+    "binance_vol_usd": 3777720.27735
+  },
+  {
+    "base": "ESP",
+    "tick": 1e-05,
+    "price": 0.07593,
+    "tick_bp": 1.317,
+    "vol24h": 3688.0,
+    "binance_vol_usd": 3765205.38909
+  },
+  {
+    "base": "LAYER",
+    "tick": 1e-05,
+    "price": 0.0862,
+    "tick_bp": 1.16,
+    "vol24h": 652.9,
+    "binance_vol_usd": 3722849.074787
+  },
+  {
+    "base": "FLOCK",
+    "tick": 1e-05,
+    "price": 0.05995,
+    "tick_bp": 1.668,
+    "vol24h": 4872.6,
+    "binance_vol_usd": 3689082.83612
+  },
+  {
+    "base": "MANTA",
+    "tick": 1e-05,
+    "price": 0.06921,
+    "tick_bp": 1.445,
+    "vol24h": 3892.2,
+    "binance_vol_usd": 3661848.778452
+  },
+  {
+    "base": "LISTA",
+    "tick": 1e-05,
+    "price": 0.09248,
+    "tick_bp": 1.081,
+    "vol24h": 2999.0,
+    "binance_vol_usd": 3584939.38892
+  },
+  {
+    "base": "ACH",
+    "tick": 1e-06,
+    "price": 0.006281,
+    "tick_bp": 1.592,
+    "vol24h": 43146.0,
+    "binance_vol_usd": 3396790.054891
+  },
+  {
+    "base": "WCT",
+    "tick": 1e-05,
+    "price": 0.05984,
+    "tick_bp": 1.671,
+    "vol24h": 9484.0,
+    "binance_vol_usd": 3349105.98379
+  },
+  {
+    "base": "CHILLGUY",
+    "tick": 1e-06,
+    "price": 0.013349,
+    "tick_bp": 0.749,
+    "vol24h": 21824.0,
+    "binance_vol_usd": 3318698.431615
+  },
+  {
+    "base": "LUMIA",
+    "tick": 1e-05,
+    "price": 0.1097,
+    "tick_bp": 0.912,
+    "vol24h": 2562.2,
+    "binance_vol_usd": 3229340.771075
+  },
+  {
+    "base": "HOLO",
+    "tick": 1e-05,
+    "price": 0.05921,
+    "tick_bp": 1.689,
+    "vol24h": 6716.0,
+    "binance_vol_usd": 2890723.31544
+  },
+  {
+    "base": "SCRT",
+    "tick": 1e-05,
+    "price": 0.09963,
+    "tick_bp": 1.004,
+    "vol24h": 2646.0,
+    "binance_vol_usd": 2875787.82966
+  },
+  {
+    "base": "ZKP",
+    "tick": 1e-05,
+    "price": 0.07386,
+    "tick_bp": 1.354,
+    "vol24h": 3449.8,
+    "binance_vol_usd": 2801946.90633
+  },
+  {
+    "base": "HYPER",
+    "tick": 1e-05,
+    "price": 0.0993,
+    "tick_bp": 1.007,
+    "vol24h": 2632.0,
+    "binance_vol_usd": 2666920.16263
+  },
+  {
+    "base": "MIRA",
+    "tick": 1e-05,
+    "price": 0.08625,
+    "tick_bp": 1.159,
+    "vol24h": 3022.6,
+    "binance_vol_usd": 2633853.39337
+  },
+  {
+    "base": "POLYX",
+    "tick": 1e-05,
+    "price": 0.05148,
+    "tick_bp": 1.943,
+    "vol24h": 4898.0,
+    "binance_vol_usd": 2616799.13643
+  },
+  {
+    "base": "A",
+    "tick": 1e-05,
+    "price": 0.0819,
+    "tick_bp": 1.221,
+    "vol24h": 3161.6,
+    "binance_vol_usd": 2563813.77297
+  },
+  {
+    "base": "VELVET",
+    "tick": 1e-05,
+    "price": 0.07799,
+    "tick_bp": 1.282,
+    "vol24h": 3708.0,
+    "binance_vol_usd": 2556641.7344
+  },
+  {
+    "base": "BAN",
+    "tick": 1e-05,
+    "price": 0.07217,
+    "tick_bp": 1.386,
+    "vol24h": 3884.0,
+    "binance_vol_usd": 2512566.97302
+  },
+  {
+    "base": "USTC",
+    "tick": 1e-06,
+    "price": 0.005532,
+    "tick_bp": 1.808,
+    "vol24h": 48820.0,
+    "binance_vol_usd": 2500619.259201
+  },
+  {
+    "base": "TRUST",
+    "tick": 1e-05,
+    "price": 0.06982,
+    "tick_bp": 1.432,
+    "vol24h": 453.0,
+    "binance_vol_usd": 2487103.80455
+  },
+  {
+    "base": "CELO",
+    "tick": 1e-05,
+    "price": 0.08569,
+    "tick_bp": 1.167,
+    "vol24h": 3136.8,
+    "binance_vol_usd": 2407006.707026
+  },
+  {
+    "base": "ALCH",
+    "tick": 1e-05,
+    "price": 0.07751,
+    "tick_bp": 1.29,
+    "vol24h": 3756.0,
+    "binance_vol_usd": 2357363.612
+  },
+  {
+    "base": "BRETT",
+    "tick": 1e-06,
+    "price": 0.007299,
+    "tick_bp": 1.37,
+    "vol24h": 38266.0,
+    "binance_vol_usd": 2278034.454486
+  },
+  {
+    "base": "TAG",
+    "tick": 1e-07,
+    "price": 0.0007067,
+    "tick_bp": 1.415,
+    "vol24h": 359932.0,
+    "binance_vol_usd": 2188349.5389988
+  },
+  {
+    "base": "BOB",
+    "tick": 1e-06,
+    "price": 0.007662,
+    "tick_bp": 1.305,
+    "vol24h": 31138.0,
+    "binance_vol_usd": 2138255.295183
+  },
+  {
+    "base": "SUN",
+    "tick": 1e-06,
+    "price": 0.018503,
+    "tick_bp": 0.54,
+    "vol24h": 4035920.0,
+    "binance_vol_usd": 2132183.573887
+  },
+  {
+    "base": "ACU",
+    "tick": 1e-05,
+    "price": 0.0917,
+    "tick_bp": 1.091,
+    "vol24h": 2845.8,
+    "binance_vol_usd": 2000606.14773
+  },
+  {
+    "base": "CROSS",
+    "tick": 1e-05,
+    "price": 0.08396,
+    "tick_bp": 1.191,
+    "vol24h": 3224.8,
+    "binance_vol_usd": 1994651.37687
+  },
+  {
+    "base": "SKR",
+    "tick": 1e-06,
+    "price": 0.016652,
+    "tick_bp": 0.601,
+    "vol24h": 16062.0,
+    "binance_vol_usd": 1960547.185186
+  },
+  {
+    "base": "SOPH",
+    "tick": 1e-06,
+    "price": 0.008895,
+    "tick_bp": 1.124,
+    "vol24h": 136798.0,
+    "binance_vol_usd": 1947399.430718
+  },
+  {
+    "base": "AT",
+    "tick": 1e-05,
+    "price": 0.17201,
+    "tick_bp": 0.581,
+    "vol24h": 1607.2,
+    "binance_vol_usd": 1941403.41781
+  },
+  {
+    "base": "NEWT",
+    "tick": 1e-05,
+    "price": 0.07568,
+    "tick_bp": 1.321,
+    "vol24h": 3336.0,
+    "binance_vol_usd": 1896849.59267
+  },
+  {
+    "base": "ZKC",
+    "tick": 1e-05,
+    "price": 0.07456,
+    "tick_bp": 1.341,
+    "vol24h": 3338.6,
+    "binance_vol_usd": 1824076.69982
+  },
+  {
+    "base": "Q",
+    "tick": 1e-06,
+    "price": 0.009218,
+    "tick_bp": 1.085,
+    "vol24h": 27402.0,
+    "binance_vol_usd": 1765666.76026
+  },
+  {
+    "base": "ALLO",
+    "tick": 1e-05,
+    "price": 0.11109,
+    "tick_bp": 0.9,
+    "vol24h": 2338.0,
+    "binance_vol_usd": 1761107.5164
+  },
+  {
+    "base": "HOME",
+    "tick": 1e-06,
+    "price": 0.018086,
+    "tick_bp": 0.553,
+    "vol24h": 13710.7,
+    "binance_vol_usd": 1737168.351733
+  },
+  {
+    "base": "T",
+    "tick": 1e-06,
+    "price": 0.006405,
+    "tick_bp": 1.561,
+    "vol24h": 36708.0,
+    "binance_vol_usd": 1704038.857429
+  },
+  {
+    "base": "GLM",
+    "tick": 1e-05,
+    "price": 0.13291,
+    "tick_bp": 0.752,
+    "vol24h": 1970.0,
+    "binance_vol_usd": 1702959.46967
+  },
+  {
+    "base": "NAORIS",
+    "tick": 1e-05,
+    "price": 0.05354,
+    "tick_bp": 1.868,
+    "vol24h": 6006.0,
+    "binance_vol_usd": 1615369.28757
+  },
+  {
+    "base": "ESPORTS",
+    "tick": 1e-05,
+    "price": 0.36852,
+    "tick_bp": 0.271,
+    "vol24h": 640.0,
+    "binance_vol_usd": 1588210.02678
+  },
+  {
+    "base": "WAXP",
+    "tick": 1e-06,
+    "price": 0.006821,
+    "tick_bp": 1.466,
+    "vol24h": 35896.0,
+    "binance_vol_usd": 1577896.276255
+  },
+  {
+    "base": "ASTR",
+    "tick": 1e-06,
+    "price": 0.008041,
+    "tick_bp": 1.244,
+    "vol24h": 30754.0,
+    "binance_vol_usd": 1472204.116086
+  },
+  {
+    "base": "F",
+    "tick": 1e-06,
+    "price": 0.005593,
+    "tick_bp": 1.788,
+    "vol24h": 47040.0,
+    "binance_vol_usd": 1433397.809487
+  },
+  {
+    "base": "BIRB",
+    "tick": 1e-05,
+    "price": 0.14234,
+    "tick_bp": 0.703,
+    "vol24h": 1743.2,
+    "binance_vol_usd": 1384607.37417
+  },
+  {
+    "base": "STEEM",
+    "tick": 1e-05,
+    "price": 0.05892,
+    "tick_bp": 1.697,
+    "vol24h": 4310.0,
+    "binance_vol_usd": 1136250.4476
+  },
+  {
+    "base": "DEGEN",
+    "tick": 1e-07,
+    "price": 0.0007735,
+    "tick_bp": 1.293,
+    "vol24h": 316770.0,
+    "binance_vol_usd": 1113464.4800045
+  },
+  {
+    "base": "HIVE",
+    "tick": 1e-05,
+    "price": 0.06252,
+    "tick_bp": 1.599,
+    "vol24h": 3942.0,
+    "binance_vol_usd": 1082112.63635
+  },
+  {
+    "base": "POWR",
+    "tick": 1e-05,
+    "price": 0.06734,
+    "tick_bp": 1.485,
+    "vol24h": 3538.0,
+    "binance_vol_usd": 996079.0763
+  },
+  {
+    "base": "AWE",
+    "tick": 1e-05,
+    "price": 0.05493,
+    "tick_bp": 1.82,
+    "vol24h": 254.0,
+    "binance_vol_usd": 937369.69905
+  },
+  {
+    "base": "VTHO",
+    "tick": 1e-07,
+    "price": 0.0005922,
+    "tick_bp": 1.689,
+    "vol24h": 402956.0,
+    "binance_vol_usd": 822401.2963633
+  },
+  {
+    "base": "B2",
+    "tick": 0.0001,
+    "price": 0.6668,
+    "tick_bp": 1.5,
+    "vol24h": 403.6,
+    "binance_vol_usd": 745756.8204
+  }
+]

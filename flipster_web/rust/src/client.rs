@@ -104,6 +104,9 @@ impl FlipsterClient {
     /// verbatim. Use this when feeding the raw CDP-extracted cookie map
     /// (e.g. via `dump_cookies.py`) — the legacy `from_cookies` only
     /// picks a hardcoded subset.
+    ///
+    /// If env var `FLIPSTER_PROXY_URL` is set, all HTTP requests route
+    /// through that proxy (used to bypass CF IP bans on the host).
     pub fn from_all_cookies(cookies: &HashMap<String, String>) -> Self {
         let cf_bm = cookies.get("__cf_bm").cloned().unwrap_or_default();
         let jar = Arc::new(Jar::default());
@@ -115,11 +118,19 @@ impl FlipsterClient {
             );
         }
 
-        let builder = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .cookie_provider(jar.clone())
             .default_headers(Self::default_headers())
             .gzip(true)
             .https_only(true);
+
+        if let Ok(proxy_url) = std::env::var("FLIPSTER_PROXY_URL") {
+            if !proxy_url.is_empty() {
+                builder = builder.proxy(
+                    reqwest::Proxy::all(&proxy_url).expect("invalid FLIPSTER_PROXY_URL"),
+                );
+            }
+        }
 
         FlipsterClient {
             http: builder.build().expect("failed to build HTTP client"),

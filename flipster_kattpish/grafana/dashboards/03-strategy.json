@@ -1,0 +1,123 @@
+{
+  "uid": "flipster-strategy",
+  "title": "3 · Strategy — Latency & PnL",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "utc",
+  "tags": ["flipster", "strategy"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Signals last 1h",
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "questdb" },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "none" },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "targets": [
+        { "refId": "A", "format": "table",
+          "rawSql": "SELECT count() FROM latency_log WHERE binance_ts > dateadd('h', -1, now())" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Avg latency last 1h",
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "questdb" },
+      "fieldConfig": { "defaults": { "unit": "ms", "decimals": 1 } },
+      "targets": [
+        { "refId": "A", "format": "table",
+          "rawSql": "SELECT avg(latency_ms) FROM latency_log WHERE binance_ts > dateadd('h', -1, now())" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Paper PnL 24h (bp)",
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0 },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        { "refId": "A", "format": "table",
+          "rawSql": "SELECT sum(pnl_bp) FROM position_log WHERE mode='paper' AND timestamp > dateadd('d', -1, now())" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "barchart",
+      "title": "Avg latency per symbol (24h)",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "postgres", "uid": "questdb" },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [
+        { "refId": "A", "format": "table",
+          "rawSql": "SELECT symbol, avg(latency_ms) avg_ms FROM latency_log WHERE binance_ts > dateadd('d', -1, now()) GROUP BY symbol ORDER BY avg_ms DESC" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "histogram",
+      "title": "Latency distribution (24h)",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "postgres", "uid": "questdb" },
+      "options": { "bucketSize": 50 },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [
+        { "refId": "A", "format": "table",
+          "rawSql": "SELECT latency_ms FROM latency_log WHERE binance_ts > dateadd('d', -1, now())" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Cumulative paper PnL (bp)",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 15 },
+      "datasource": { "type": "postgres", "uid": "questdb" },
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "fillOpacity": 20 } } },
+      "targets": [
+        { "refId": "A", "format": "time_series",
+          "rawSql": "SELECT timestamp AS time, sum(pnl_bp) OVER (ORDER BY timestamp) AS cum_bp FROM position_log WHERE mode='paper' AND $__timeFilter(timestamp) ORDER BY timestamp" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Per-symbol PnL (24h paper)",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 15 },
+      "datasource": { "type": "postgres", "uid": "questdb" },
+      "targets": [
+        { "refId": "A", "format": "table",
+          "rawSql": "SELECT symbol, strategy, count() trades, avg(pnl_bp) avg_bp, sum(pnl_bp) total_bp, sum(CASE WHEN pnl_bp > 0 THEN 1 ELSE 0 END)::double / count() hit_rate FROM position_log WHERE mode='paper' AND timestamp > dateadd('d', -1, now()) GROUP BY symbol, strategy ORDER BY total_bp DESC" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Price-diff at signal (bp) — by symbol",
+      "description": "|binance_mid - flipster_mid| / flipster_mid × 10000 at the instant a binance price move >= entry_threshold was detected.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 25 },
+      "datasource": { "type": "postgres", "uid": "questdb" },
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "targets": [
+        { "refId": "A", "format": "time_series",
+          "rawSql": "SELECT binance_ts time, symbol, price_diff_bp FROM latency_log WHERE $__timeFilter(binance_ts) ORDER BY binance_ts" }
+      ]
+    }
+  ]
+}

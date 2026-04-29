@@ -1,0 +1,202 @@
+{
+  "uid": "flipster-price-compare",
+  "title": "6 · Flipster Dual-Feed Price Compare (web v2 vs api v1)",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "timezone": "utc",
+  "tags": ["flipster", "price-compare", "dual-feed"],
+  "templating": {
+    "list": [
+      {
+        "name": "hours",
+        "type": "textbox",
+        "label": "Lookback (hours)",
+        "query": "1",
+        "current": { "selected": true, "text": "1", "value": "1" }
+      },
+      {
+        "name": "symbol",
+        "type": "query",
+        "label": "Symbol",
+        "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+        "query": "SELECT DISTINCT symbol FROM flipster_price_compare WHERE timestamp > dateadd('h', -6, now()) ORDER BY symbol",
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": { "selected": false, "text": "BTCUSDT.PERP", "value": "BTCUSDT.PERP" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Mid overlay — ${symbol} (web vs api)",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 6,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "web" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "api" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min", "max"] }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT timestamp AS time, source AS metric, mid AS value FROM flipster_price_compare WHERE symbol = '${symbol}' AND timestamp > dateadd('h', -${hours}, now()) ORDER BY timestamp"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "diff_bp — ${symbol} (web.mid − api.mid, in bp)",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 10 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min", "max", "mean", "stdDev"] }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT timestamp AS time, 'web-api (bp)' AS metric, diff_bp AS value FROM flipster_price_compare WHERE symbol = '${symbol}' AND source = 'web' AND timestamp > dateadd('h', -${hours}, now()) ORDER BY timestamp"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Quote-spread bp by source — ${symbol}",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 19 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5, "showPoints": "never" }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "lastNotNull"] }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT timestamp AS time, source AS metric, (ask - bid) / mid * 10000 AS value FROM flipster_price_compare WHERE symbol = '${symbol}' AND timestamp > dateadd('h', -${hours}, now()) ORDER BY timestamp"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Update rate /min per source — ${symbol}",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 19 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60 }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "lastNotNull"] }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT timestamp AS time, source AS metric, count() AS value FROM flipster_price_compare WHERE symbol = '${symbol}' AND timestamp > dateadd('h', -${hours}, now()) SAMPLE BY 1m FILL(0) ORDER BY timestamp"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "diff_bp summary — all symbols (last ${hours}h)",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "right" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "avg_diff_bp" },
+            "properties": [
+              { "id": "decimals", "value": 3 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "dark-red", "value": null },
+                { "color": "orange", "value": -1 },
+                { "color": "yellow", "value": -0.2 },
+                { "color": "light-yellow", "value": 0 },
+                { "color": "light-green", "value": 0.2 },
+                { "color": "green", "value": 1 }
+              ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "std_diff_bp" },
+            "properties": [{ "id": "decimals", "value": 2 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p99_abs_bp" },
+            "properties": [{ "id": "decimals", "value": 2 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "max_abs_bp" },
+            "properties": [{ "id": "decimals", "value": 2 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "symbol" },
+            "properties": [{ "id": "custom.align", "value": "left" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT symbol, count() AS rows, round(avg(diff_bp),3) AS avg_diff_bp, round(stddev(diff_bp),2) AS std_diff_bp, round(max(abs(diff_bp)),2) AS max_abs_bp FROM flipster_price_compare WHERE source = 'web' AND timestamp > dateadd('h', -${hours}, now()) AND diff_bp IS NOT NULL GROUP BY symbol ORDER BY std_diff_bp DESC"
+        }
+      ]
+    }
+  ]
+}

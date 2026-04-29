@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package order_processor;
+
+option go_package = "order_processor_go/gen/order_processorpb;order_processorpb";
+
+service OrderProcessor {
+  rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse);
+}
+
+message PlaceOrderRequest {
+  string account_id = 1;
+  string contract = 2;
+  string order_type = 3;
+  string price = 4;
+  bool reduce_only = 5;
+  string size = 6;
+  string text = 7;
+  string tif = 8;
+  int64 timestamp = 9;
+  string order_processor_ip = 10;
+  int32 priority = 11;
+}
+
+message PlaceOrderResponse {
+  bool ok = 1;
+  int32 status = 2;
+  string status_text = 3;
+  string data_json = 4;
+  int64 response_time = 5;
+  int64 order_processing_time = 6;
+  int64 server_processing_time = 7;
+  int64 request_parsing_time = 8;
+  int64 json_decode_time = 9;
+  int64 account_lookup_time = 10;
+  int64 cookie_retrieval_time = 11;
+  int64 payload_marshal_time = 12;
+  int64 request_build_time = 13;
+  int64 http_request_time = 14;
+}

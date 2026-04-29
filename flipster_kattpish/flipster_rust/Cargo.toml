@@ -1,0 +1,44 @@
+[package]
+name = "flipster_rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Full dep list copied from gate_hft_rust/Cargo.toml to keep source 1:1 compatible.
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+parking_lot = "0.12"
+dashmap = "6"
+arc-swap = "1.7"
+log = "0.4"
+env_logger = "0.11"
+dotenvy = "0.15"
+chrono = "0.4"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+regex = "1"
+tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
+futures-util = "0.3"
+rand = "0.9"
+crossbeam-channel = "0.5"
+crossbeam-queue = "0.3"
+log4rs = { version = "1.4", features = ["gzip"] }
+rayon = "1.8"
+rust_decimal = { version = "1.33", features = ["serde-with-str"] }
+ctrlc = "3.4"
+redis = "0.27"
+tonic = "0.12"
+zmq = "0.10"
+prost = "0.13"
+prost-types = "0.13"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "1"
+
+[build-dependencies]
+tonic-build = "0.12"
+protoc-bin-vendored = "3"

@@ -1,0 +1,34 @@
+[package]
+name = "executor"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+zmq = { workspace = true }
+clap = { workspace = true }
+dashmap = { workspace = true }
+uuid = { workspace = true }
+
+# Sibling crates outside this workspace.
+flipster-client = { path = "../../hft_monorepo/flipster_web/rust" }
+gate-client = { path = "../../hft_monorepo/gate_web/rust" }
+
+# Async HTTP for QuestDB queries.
+reqwest = { workspace = true }
+urlencoding = "2"
+
+[[bin]]
+name = "executor"
+path = "src/main.rs"
