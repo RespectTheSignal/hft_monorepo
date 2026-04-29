@@ -22,7 +22,9 @@ fn symbols_env(key: &str, default: &[&str]) -> Vec<String> {
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .init();
 
     let qdb_host = std::env::var("QDB_HOST").unwrap_or_else(|_| "127.0.0.1".into());
@@ -103,8 +105,8 @@ async fn main() -> Result<()> {
             ExchangeName::Binance => "binance_bookticker",
             _ => "gate_bookticker",
         };
-        let questdb_url = std::env::var("QUESTDB_HTTP_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:9000".into());
+        let questdb_url =
+            std::env::var("QUESTDB_HTTP_URL").unwrap_or_else(|_| "http://127.0.0.1:9000".into());
         let window_minutes: i64 = std::env::var("PAIRS_GAP_WINDOW_MINUTES")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -145,19 +147,19 @@ async fn main() -> Result<()> {
                 p
             };
             // ---- Kelly sizing (existing 5) ----
-            v.push(mk("A_baseline",   2.5, 0.3, 0.3, 100.0, None));
-            v.push(mk("B_minstd2",    2.5, 0.3, 2.0, 100.0, None));
-            v.push(mk("C_minstd3",    2.5, 0.3, 3.0, 100.0, None));
-            v.push(mk("D_high_sig",   4.0, 0.3, 0.3, 100.0, None));
-            v.push(mk("E_stop6",      2.5, 0.3, 2.0,   6.0, None));
+            v.push(mk("A_baseline", 2.5, 0.3, 0.3, 100.0, None));
+            v.push(mk("B_minstd2", 2.5, 0.3, 2.0, 100.0, None));
+            v.push(mk("C_minstd3", 2.5, 0.3, 3.0, 100.0, None));
+            v.push(mk("D_high_sig", 4.0, 0.3, 0.3, 100.0, None));
+            v.push(mk("E_stop6", 2.5, 0.3, 2.0, 6.0, None));
             // ---- Fixed-size companions of the winning variants ----
             // F mirrors B with $200 notional per trade (fair sizing control).
             // G mirrors C with $200 (tighter min_std + same fixed size).
             // H mirrors B with $1000 notional (capital scaling test — is the
             // edge robust at 5x the base size given slippage we're not
             // modeling yet?).
-            v.push(mk("F_minstd2_fix200",  2.5, 0.3, 2.0, 100.0, Some(200.0)));
-            v.push(mk("G_minstd3_fix200",  2.5, 0.3, 3.0, 100.0, Some(200.0)));
+            v.push(mk("F_minstd2_fix200", 2.5, 0.3, 2.0, 100.0, Some(200.0)));
+            v.push(mk("G_minstd3_fix200", 2.5, 0.3, 3.0, 100.0, Some(200.0)));
             v.push(mk("H_minstd2_fix1000", 2.5, 0.3, 2.0, 100.0, Some(1000.0)));
             // I mirrors G with $1000 notional — tests whether C/G's tight-edge
             // (+3.23 bp / 63% win at $200) survives 5x scaling. If I lags G in
@@ -208,15 +210,15 @@ async fn main() -> Result<()> {
             };
             // Baseline improved core — still EWMA, no auto-bl, no asym exit,
             // default 60s hold. Measures the combined effect of #1+#2+#3.
-            v.push(mk_improved("J_core",       0.0,  0,  false, 60_000));
+            v.push(mk_improved("J_core", 0.0, 0, false, 60_000));
             // Swap EWMA for a 30s rolling window (#4).
-            v.push(mk_improved("K_roll",      30.0,  0,  false, 60_000));
+            v.push(mk_improved("K_roll", 30.0, 0, false, 60_000));
             // Add per-symbol auto-blacklist (#5).
-            v.push(mk_improved("L_autobl",     0.0, 20,  false, 60_000));
+            v.push(mk_improved("L_autobl", 0.0, 20, false, 60_000));
             // Add asymmetric exit + longer max_hold so the signal can play out (#6).
-            v.push(mk_improved("M_asymexit",   0.0,  0,  true,  300_000));
+            v.push(mk_improved("M_asymexit", 0.0, 0, true, 300_000));
             // Everything on — rolling + auto-bl + asym exit + long hold.
-            v.push(mk_improved("N_full",      30.0, 20,  true,  300_000));
+            v.push(mk_improved("N_full", 30.0, 20, true, 300_000));
 
             // ---- O/P: pure asym-exit ablation on the winning min_std=3 path ----
             // M_asymexit hinted that asymmetric exit pushes converged-only pnl
@@ -288,25 +290,25 @@ async fn main() -> Result<()> {
             };
             variants.extend(vec![
                 // ---- min_std sweep (pivot: es=2.5, asym, 300s) ----
-                mk_sweep("S01_minstd1",  1.0, 2.5, true,  300_000),
-                mk_sweep("S02_minstd2",  2.0, 2.5, true,  300_000),
-                mk_sweep("S03_pivot",    3.0, 2.5, true,  300_000), // pivot
-                mk_sweep("S04_minstd4",  4.0, 2.5, true,  300_000),
+                mk_sweep("S01_minstd1", 1.0, 2.5, true, 300_000),
+                mk_sweep("S02_minstd2", 2.0, 2.5, true, 300_000),
+                mk_sweep("S03_pivot", 3.0, 2.5, true, 300_000), // pivot
+                mk_sweep("S04_minstd4", 4.0, 2.5, true, 300_000),
                 // ---- entry_sigma sweep ----
-                mk_sweep("S05_es20",     3.0, 2.0, true,  300_000),
-                mk_sweep("S06_es30",     3.0, 3.0, true,  300_000),
+                mk_sweep("S05_es20", 3.0, 2.0, true, 300_000),
+                mk_sweep("S06_es30", 3.0, 3.0, true, 300_000),
                 // ---- max_hold sweep ----
-                mk_sweep("S07_hold60",   3.0, 2.5, true,   60_000),
-                mk_sweep("S08_hold120",  3.0, 2.5, true,  120_000),
-                mk_sweep("S09_hold600",  3.0, 2.5, true,  600_000),
+                mk_sweep("S07_hold60", 3.0, 2.5, true, 60_000),
+                mk_sweep("S08_hold120", 3.0, 2.5, true, 120_000),
+                mk_sweep("S09_hold600", 3.0, 2.5, true, 600_000),
                 // ---- asym_exit ablation ----
-                mk_sweep("S10_noasym60", 3.0, 2.5, false,  60_000),  // = original I
-                mk_sweep("S11_noasym300",3.0, 2.5, false, 300_000),
+                mk_sweep("S10_noasym60", 3.0, 2.5, false, 60_000), // = original I
+                mk_sweep("S11_noasym300", 3.0, 2.5, false, 300_000),
                 // ---- T-series: untested optimal combos ----
-                mk_sweep("T01_best",      4.0, 3.0, true,  300_000), // S04 min_std + S06 entry_sigma
-                mk_sweep("T02_best_long", 4.0, 3.0, true,  600_000), // T01 + longer hold
-                mk_sweep("T03_minstd5",   5.0, 3.0, true,  300_000), // push min_std further
-                mk_sweep("T04_es35",      4.0, 3.5, true,  300_000), // push entry_sigma further
+                mk_sweep("T01_best", 4.0, 3.0, true, 300_000), // S04 min_std + S06 entry_sigma
+                mk_sweep("T02_best_long", 4.0, 3.0, true, 600_000), // T01 + longer hold
+                mk_sweep("T03_minstd5", 5.0, 3.0, true, 300_000), // push min_std further
+                mk_sweep("T04_es35", 4.0, 3.5, true, 300_000), // push entry_sigma further
             ]);
             tracing::info!(
                 total = variants.len(),
@@ -437,8 +439,10 @@ async fn main() -> Result<()> {
                     if let Ok(v) = resp.json::<serde_json::Value>().await {
                         if let Some(ds) = v.get("dataset").and_then(|x| x.as_array()) {
                             println!("\n=== BACKTEST SUMMARY ({} → {}) ===", start_iso, end_iso);
-                            println!("{:<28} {:>7} {:>9} {:>11} {:>7}",
-                                     "variant", "n", "avg_bp", "sum_$", "win%");
+                            println!(
+                                "{:<28} {:>7} {:>9} {:>11} {:>7}",
+                                "variant", "n", "avg_bp", "sum_$", "win%"
+                            );
                             for row in ds {
                                 if let Some(a) = row.as_array() {
                                     let variant = a.first().and_then(|x| x.as_str()).unwrap_or("?");
@@ -446,8 +450,10 @@ async fn main() -> Result<()> {
                                     let avg_bp = a.get(2).and_then(|x| x.as_f64()).unwrap_or(0.0);
                                     let sum_usd = a.get(3).and_then(|x| x.as_f64()).unwrap_or(0.0);
                                     let win = a.get(4).and_then(|x| x.as_f64()).unwrap_or(0.0);
-                                    println!("{:<28} {:>7} {:>+9.2} {:>+11.2} {:>6.1}",
-                                             variant, n, avg_bp, sum_usd, win);
+                                    println!(
+                                        "{:<28} {:>7} {:>+9.2} {:>+11.2} {:>6.1}",
+                                        variant, n, avg_bp, sum_usd, win
+                                    );
                                 }
                             }
                             println!();
@@ -472,12 +478,12 @@ async fn main() -> Result<()> {
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
     {
-        let flipster_addr = std::env::var("ZMQ_FLIPSTER")
-            .unwrap_or_else(|_| "tcp://211.181.122.104:7000".into());
-        let binance_addr = std::env::var("ZMQ_BINANCE")
-            .unwrap_or_else(|_| "tcp://211.181.122.24:6000".into());
-        let gate_addr = std::env::var("ZMQ_GATE")
-            .unwrap_or_else(|_| "tcp://211.181.122.24:5559".into());
+        let flipster_addr =
+            std::env::var("ZMQ_FLIPSTER").unwrap_or_else(|_| "tcp://211.181.122.104:7000".into());
+        let binance_addr =
+            std::env::var("ZMQ_BINANCE").unwrap_or_else(|_| "tcp://211.181.122.24:6000".into());
+        let gate_addr =
+            std::env::var("ZMQ_GATE").unwrap_or_else(|_| "tcp://211.181.122.24:5559".into());
         collector::zmq_reader::spawn(flipster_addr, ExchangeName::Flipster, tx.clone());
         collector::zmq_reader::spawn(binance_addr, ExchangeName::Binance, tx.clone());
         collector::zmq_reader::spawn(gate_addr, ExchangeName::Gate, tx.clone());
@@ -503,8 +509,8 @@ async fn main() -> Result<()> {
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
     {
-        let http_url = std::env::var("QUESTDB_HTTP_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:9000".into());
+        let http_url =
+            std::env::var("QUESTDB_HTTP_URL").unwrap_or_else(|_| "http://127.0.0.1:9000".into());
         let poll_ms: u64 = std::env::var("QUESTDB_READ_POLL_MS")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -519,8 +525,8 @@ async fn main() -> Result<()> {
         // and latency signal inputs).
         for (exchange, table) in [
             (ExchangeName::Flipster, "flipster_bookticker"),
-            (ExchangeName::Gate,     "gate_bookticker"),
-            (ExchangeName::Binance,  "binance_bookticker"),
+            (ExchangeName::Gate, "gate_bookticker"),
+            (ExchangeName::Binance, "binance_bookticker"),
         ] {
             collector::questdb_reader::spawn(exchange, table, cfg.clone(), tx.clone());
         }
@@ -562,8 +568,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        let mut intersection: Vec<String> =
-            bin_set.intersection(&flip_bases).cloned().collect();
+        let mut intersection: Vec<String> = bin_set.intersection(&flip_bases).cloned().collect();
         intersection.sort();
         tracing::info!(
             binance_n = bin_set.len(),
@@ -603,12 +608,19 @@ async fn main() -> Result<()> {
         Vec::new()
     };
     let default_usdt = &[
-        "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT", "DOGEUSDT", "TRXUSDT",
-        "ADAUSDT", "PAXGUSDT",
+        "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT", "DOGEUSDT", "TRXUSDT", "ADAUSDT",
+        "PAXGUSDT",
     ];
     let default_gate = &[
-        "BTC_USDT", "ETH_USDT", "SOL_USDT", "XRP_USDT", "BNB_USDT", "DOGE_USDT", "TRX_USDT",
-        "ADA_USDT", "PAXG_USDT",
+        "BTC_USDT",
+        "ETH_USDT",
+        "SOL_USDT",
+        "XRP_USDT",
+        "BNB_USDT",
+        "DOGE_USDT",
+        "TRX_USDT",
+        "ADA_USDT",
+        "PAXG_USDT",
     ];
     let bybit_syms = symbols_env("BYBIT_SYMBOLS", default_usdt);
     let bitget_syms = symbols_env("BITGET_SYMBOLS", default_usdt);
@@ -627,8 +639,18 @@ async fn main() -> Result<()> {
             tx.clone(),
         )));
     }
-    tasks.push(tokio::spawn(run_collector(BybitCollector, bybit_syms, writer.clone(), tx.clone())));
-    tasks.push(tokio::spawn(run_collector(BitgetCollector, bitget_syms, writer.clone(), tx.clone())));
+    tasks.push(tokio::spawn(run_collector(
+        BybitCollector,
+        bybit_syms,
+        writer.clone(),
+        tx.clone(),
+    )));
+    tasks.push(tokio::spawn(run_collector(
+        BitgetCollector,
+        bitget_syms,
+        writer.clone(),
+        tx.clone(),
+    )));
     // Gate WS rejects very large per-connection subscription counts (~200+).
     // Split into 100-symbol chunks, one WS connection per chunk.
     for chunk in gate_syms.chunks(100) {

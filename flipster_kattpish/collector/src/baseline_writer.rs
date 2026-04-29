@@ -118,10 +118,7 @@ async fn compute_one_cycle(
 }
 
 /// 30 min `bf_avg_gap_bp` per base — bucket-matched JOIN, no FILL.
-async fn fetch_gap_30m(
-    http: &reqwest::Client,
-    qdb_http: &str,
-) -> Result<HashMap<String, f64>> {
+async fn fetch_gap_30m(http: &reqwest::Client, qdb_http: &str) -> Result<HashMap<String, f64>> {
     let sql = format!(
         r#"
 WITH bn AS (
