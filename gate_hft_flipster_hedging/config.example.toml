@@ -1,0 +1,52 @@
+# Hedger 설정. 실제 운영은 config.toml 로 복사해서 수정.
+
+[gate]
+# 서브계정 API 키 JSON 경로
+subaccount_keys_path = "./subaccount_keys.json"
+# REST API (초기 포지션 스냅샷용)
+rest_url = "https://api.gateio.ws/api/v4"
+# USDT perp private WS
+ws_url = "wss://fx-ws.gateio.ws/v4/ws/usdt"
+
+[flipster]
+# 공식 HMAC API: positions GET, private WS, bookticker WS
+rest_url = "https://trading-api.flipster.io"
+ws_url = "wss://trading-api.flipster.io/api/v1/stream"
+# flipster_web 쿠키 기반 주문 endpoint
+order_url = "https://api.flipster.io/api/v2/trade/positions"
+# 외부 프로세스가 덤프한 쿠키 파일 (JSON: {cookie_name: value, ...})
+cookie_file = ".flipster_cookies.json"
+
+[strategy]
+# |target - current| * mid < threshold_usd 면 스킵
+threshold_usd = 10000.0
+# 심볼별 독립 debounce (ms)
+debounce_ms = 20
+# true = 주문 안 보내고 로그만. DRY_RUN=1 env 로 override 가능.
+dry_run = true
+
+[symbols]
+# "all"  = 시작 시 Gate ↔ Flipster perp 교집합 자동 계산
+# "list" = 아래 allowlist 사용
+mode = "all"
+# allowlist = ["BTC_USDT", "ETH_USDT"]
+
+[limits]
+# 심볼당 최대 hedge 노션 (USD)
+default_per_symbol_cap_usd = 10000.0
+# 심볼별 override
+# [limits.per_symbol]
+# BTC_USDT = 50000.0
+# ETH_USDT = 30000.0
+
+[order]
+leverage = 1
+# Cross 고정 — 반대방향 주문 자동 상쇄 메커니즘이 hedge 로직의 전제
+margin_type = "Cross"
+# "Market" | "Limit"
+order_type = "Market"
+
+[questdb]
+ilp_addr = "tcp::addr=211.181.122.102:9009;"
+table_name = "hedge_events"
+flush_interval_ms = 200

@@ -41,13 +41,13 @@ def jsonl_to_ilp(r: dict) -> str:
     sym = r["base"] + "_USDT"
     side = r["flipster_side"]
     er = r.get("exit_reason", "?")
-    en = ts_to_ns(r["ts_entry"])
-    ex = ts_to_ns(r["ts_close"])
+    en_ns = ts_to_ns(r["ts_entry"])  # row timestamp, ns (ILP standard)
+    ex_us = ts_to_ns(r["ts_close"]) // 1000  # column TIMESTAMP, μs precision
     return (f"position_log,account_id={ACCOUNT},symbol={esc(sym)},side={esc(side)},"
             f"strategy={STRATEGY},exit_reason={esc(er)},mode=live "
             f"entry_price={float(r.get('flipster_entry', 0))},"
             f"exit_price={float(r.get('flipster_exit', 0))},"
-            f"size={size},pnl_bp={pnl_bp},exit_time={ex}t {en}")
+            f"size={size},pnl_bp={pnl_bp},exit_time={ex_us}t {en_ns}")
 
 def load_offsets() -> dict:
     if STATE_FILE.exists():

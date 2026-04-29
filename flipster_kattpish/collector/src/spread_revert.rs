@@ -43,8 +43,8 @@
 //! so SELECT WHERE strategy='spread_revert' isolates from gate_lead / pairs.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 use anyhow::Result;
@@ -124,12 +124,7 @@ impl Default for SpreadRevertParams {
             flipster_fee_bp: 0.425,
             backtest_mode: false,
             whitelist: Vec::new(),
-            blacklist: vec![
-                "M".into(),
-                "BSB".into(),
-                "SWARMS".into(),
-                "ORCA".into(),
-            ],
+            blacklist: vec!["M".into(), "BSB".into(), "SWARMS".into(), "ORCA".into()],
         }
     }
 }
@@ -137,38 +132,73 @@ impl Default for SpreadRevertParams {
 impl SpreadRevertParams {
     pub fn from_env() -> Self {
         let mut p = Self::default();
-        if let Ok(v) = std::env::var("SR_ACCOUNT_ID") { p.account_id = v; }
-        if let Some(v) = std::env::var("SR_SIZE_USD").ok().and_then(|s| s.parse().ok()) {
+        if let Ok(v) = std::env::var("SR_ACCOUNT_ID") {
+            p.account_id = v;
+        }
+        if let Some(v) = std::env::var("SR_SIZE_USD")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.entry_size_usd = v;
         }
-        if let Some(v) = std::env::var("SR_MAX_POSITIONS").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("SR_MAX_POSITIONS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.max_open_positions = v;
         }
-        if let Some(v) = std::env::var("SR_MAX_POSITIONS_PER_BASE").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("SR_MAX_POSITIONS_PER_BASE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.max_positions_per_base = v;
         }
-        if let Some(v) = std::env::var("SR_GAP_WINDOW_S").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("SR_GAP_WINDOW_S")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.gap_window_s = v;
         }
-        if let Some(v) = std::env::var("SR_SPREAD_WINDOW_S").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("SR_SPREAD_WINDOW_S")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.spread_window_s = v;
         }
-        if let Some(v) = std::env::var("SR_SAMPLE_INTERVAL_MS").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("SR_SAMPLE_INTERVAL_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.sample_interval_ms = v;
         }
-        if let Some(v) = std::env::var("SR_MIN_SAMPLES").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("SR_MIN_SAMPLES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.min_window_samples = v;
         }
-        if let Some(v) = std::env::var("SR_ENTRY_BP").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("SR_ENTRY_BP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.entry_threshold_bp = v;
         }
-        if let Some(v) = std::env::var("SR_STOP_BP").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("SR_STOP_BP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.stop_bp = v;
         }
-        if let Some(v) = std::env::var("SR_MAX_HOLD_S").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("SR_MAX_HOLD_S")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.max_hold_s = v;
         }
-        if let Some(v) = std::env::var("SR_ENTRY_COOLDOWN_MS").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("SR_ENTRY_COOLDOWN_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.entry_cooldown_ms = v;
         }
         if let Some(v) = std::env::var("SR_FEE_BP").ok().and_then(|s| s.parse().ok()) {
@@ -232,8 +262,8 @@ struct OpenPos {
     id: u64,
     side: i8, // +1 long flipster, -1 short flipster
     entry_ts: DateTime<Utc>,
-    entry_price: f64,        // flipster fill price
-    entry_gap_bp: f64,       // gap at entry (used for stop-loss)
+    entry_price: f64,  // flipster fill price
+    entry_gap_bp: f64, // gap at entry (used for stop-loss)
     deadline: DateTime<Utc>,
 }
 
@@ -307,7 +337,9 @@ pub async fn run(
                 if params.blacklist.contains(&base) {
                     continue;
                 }
-                let Some(latest) = points.last() else { continue };
+                let Some(latest) = points.last() else {
+                    continue;
+                };
                 if !latest.bf_avg_gap_bp.is_finite() {
                     continue;
                 }
@@ -427,13 +459,19 @@ async fn on_tick(
         // Both sides must be fresh (≤ 2s) to compute a meaningful gap.
         let b_ts = entry.binance_ts;
         let f_ts = entry.flipster_ts;
-        let stale_b = b_ts.map(|t| (now - t).num_milliseconds() > 2000).unwrap_or(true);
-        let stale_f = f_ts.map(|t| (now - t).num_milliseconds() > 2000).unwrap_or(true);
+        let stale_b = b_ts
+            .map(|t| (now - t).num_milliseconds() > 2000)
+            .unwrap_or(true);
+        let stale_f = f_ts
+            .map(|t| (now - t).num_milliseconds() > 2000)
+            .unwrap_or(true);
         if stale_b || stale_f {
             return Ok(());
         }
-        if entry.binance_bid <= 0.0 || entry.binance_ask <= 0.0
-            || entry.flipster_bid <= 0.0 || entry.flipster_ask <= 0.0
+        if entry.binance_bid <= 0.0
+            || entry.binance_ask <= 0.0
+            || entry.flipster_bid <= 0.0
+            || entry.flipster_ask <= 0.0
         {
             return Ok(());
         }
@@ -487,8 +525,7 @@ async fn on_tick(
 
         // Per-venue avg_spread: mean over the recent `spread_window_s`
         // slice. We walk back from the tail until we hit the cutoff.
-        let spread_cutoff =
-            now - Duration::milliseconds((params.spread_window_s * 1000.0) as i64);
+        let spread_cutoff = now - Duration::milliseconds((params.spread_window_s * 1000.0) as i64);
         let mut sum_fs = 0.0;
         let mut sum_bs = 0.0;
         let mut n_short: usize = 0;
@@ -512,13 +549,21 @@ async fn on_tick(
         let mut keep: Vec<OpenPos> = Vec::with_capacity(entry.open.len());
         for pos in entry.open.drain(..) {
             let mut exit_pick: Option<(&'static str, f64)> = None;
-            let displacement = (gap_bp - pos.entry_gap_bp) * (pos.side as f64);
-            if displacement <= -params.stop_bp {
-                let exit_px = if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask };
+            let loss = (pos.entry_price - fli_mid) * (pos.side as f64) / pos.entry_price * 1e4;
+            if loss > params.stop_bp {
+                let exit_px = if pos.side == 1 {
+                    entry.flipster_bid
+                } else {
+                    entry.flipster_ask
+                };
                 exit_pick = Some(("stop", exit_px));
             }
             if exit_pick.is_none() && now >= pos.deadline {
-                let exit_px = if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask };
+                let exit_px = if pos.side == 1 {
+                    entry.flipster_bid
+                } else {
+                    entry.flipster_ask
+                };
                 exit_pick = Some(("timeout", exit_px));
             }
             match exit_pick {
@@ -562,7 +607,11 @@ async fn on_tick(
             let mut keep: Vec<OpenPos> = Vec::with_capacity(entry.open.len());
             for pos in entry.open.drain(..) {
                 if pos.side != want {
-                    let exit_px = if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask };
+                    let exit_px = if pos.side == 1 {
+                        entry.flipster_bid
+                    } else {
+                        entry.flipster_ask
+                    };
                     close_acts.push(CloseAction {
                         base: base.clone(),
                         pos,
@@ -698,7 +747,9 @@ async fn sweep_exits(
             })
             .collect();
         for base in bases {
-            let Some(entry) = s.get_mut(&base) else { continue };
+            let Some(entry) = s.get_mut(&base) else {
+                continue;
+            };
             let bin_mid = if entry.binance_bid > 0.0 && entry.binance_ask > 0.0 {
                 (entry.binance_bid + entry.binance_ask) * 0.5
             } else {
@@ -722,7 +773,11 @@ async fn sweep_exits(
                     continue;
                 }
                 let exit_price = if entry.flipster_bid > 0.0 && entry.flipster_ask > 0.0 {
-                    if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask }
+                    if pos.side == 1 {
+                        entry.flipster_bid
+                    } else {
+                        entry.flipster_ask
+                    }
                 } else {
                     pos.entry_price
                 };
