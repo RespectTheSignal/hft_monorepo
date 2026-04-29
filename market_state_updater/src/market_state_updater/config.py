@@ -63,6 +63,7 @@ class AppConfig:
     include_gate_web: bool
     include_spread_pair: bool
     include_gate_gate_web_gap: bool
+    include_flipster_gap: bool
 
     include_price_change: bool
     price_change_prefix: str
@@ -376,6 +377,9 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
         ),
         include_gate_gate_web_gap=_bool_from(
             "MARKET_GAP_INCLUDE_GATE_GATE_WEB_GAP", inc.get("gate_gate_web_gap"), True
+        ),
+        include_flipster_gap=_bool_from(
+            "MARKET_GAP_INCLUDE_FLIPSTER_GAP", inc.get("flipster_gap"), True
         ),
         include_price_change=_bool_from(
             "MARKET_GAP_INCLUDE_PRICE_CHANGE", inc.get("price_change"), True

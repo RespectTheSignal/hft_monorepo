@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from market_state_updater.jobs import gap, gate_web_gap, spread_pair
+from market_state_updater.jobs import flipster_gap, gap, gate_web_gap, spread_pair
 
 
 # ---- gap.parse_dataset ----
@@ -121,3 +121,55 @@ def test_gate_web_gap_parse_no_avg_mid_gap_returns_empty() -> None:
     """gate_web_gap 은 컬럼 없으면 ValueError 가 아니라 빈 dict (원본 동작 유지)."""
     payload = {"columns": [{"name": "symbol"}], "dataset": [["BTC_USDT"]]}
     assert gate_web_gap.parse_dataset(payload) == {}
+
+
+# ---- flipster_gap.parse_dataset ----
+
+
+def test_flipster_gap_parse_full_payload() -> None:
+    payload = {
+        "columns": [
+            {"name": "symbol"},
+            {"name": "avg_mid_gap"},
+            {"name": "avg_spread"},
+            {"name": "avg_spread_flipster"},
+        ],
+        "dataset": [
+            ["BTC_USDT", 0.0012, 0.00015, 0.00010],
+            ["ETH_USDT", -0.0008, 0.00025, None],  # None → 0.0
+            ["SOL_USDT", None, 0.0003, 0.0002],    # gap None → 0.0
+        ],
+    }
+    gaps, b_sp, f_sp = flipster_gap.parse_dataset(payload)
+    assert gaps == {"BTC_USDT": 0.0012, "ETH_USDT": -0.0008, "SOL_USDT": 0.0}
+    assert b_sp == {"BTC_USDT": 0.00015, "ETH_USDT": 0.00025, "SOL_USDT": 0.0003}
+    assert f_sp == {"BTC_USDT": 0.00010, "ETH_USDT": 0.0, "SOL_USDT": 0.0002}
+
+
+def test_flipster_gap_parse_missing_avg_mid_gap_raises() -> None:
+    payload = {
+        "columns": [
+            {"name": "symbol"},
+            {"name": "avg_spread"},
+            {"name": "avg_spread_flipster"},
+        ],
+        "dataset": [["BTC_USDT", 0.0001, 0.0001]],
+    }
+    with pytest.raises(ValueError):
+        flipster_gap.parse_dataset(payload)
+
+
+def test_flipster_gap_parse_empty_dataset() -> None:
+    payload = {
+        "columns": [
+            {"name": "symbol"},
+            {"name": "avg_mid_gap"},
+            {"name": "avg_spread"},
+            {"name": "avg_spread_flipster"},
+        ],
+        "dataset": [],
+    }
+    gaps, b_sp, f_sp = flipster_gap.parse_dataset(payload)
+    assert gaps == {}
+    assert b_sp == {}
+    assert f_sp == {}

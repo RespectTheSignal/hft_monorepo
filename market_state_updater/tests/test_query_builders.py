@@ -5,7 +5,13 @@ SQL string 그대로 비교하면 brittle 하니까 핵심 키워드/테이블/s
 
 from __future__ import annotations
 
-from market_state_updater.jobs import gap, gate_web_gap, price_change, spread_pair
+from market_state_updater.jobs import (
+    flipster_gap,
+    gap,
+    gate_web_gap,
+    price_change,
+    spread_pair,
+)
 
 
 def test_gap_query_short_window_uses_fill_prev() -> None:
@@ -65,6 +71,35 @@ def test_gate_web_gap_query_30m_no_fill() -> None:
     assert "FILL(PREV)" not in sql
     # 30m 디폴트 = 500T (500ms)
     assert "SAMPLE BY 500T" in sql
+
+
+def test_flipster_gap_query_short_window() -> None:
+    sql = flipster_gap.build_query(1)
+    assert "binance_bookticker" in sql
+    assert "flipster_bookticker" in sql
+    assert "FILL(PREV)" in sql
+    # flipster 는 sample interval 최소 5s clamp — 100T/200T 가 5s 로 bump
+    assert "SAMPLE BY 5s" in sql
+    assert "SAMPLE BY 100T" not in sql
+    # flipster 심볼 정규화 ('.PERP' 제거 + USDT → _USDT)
+    assert "replace(replace(symbol, '.PERP', ''), 'USDT', '_USDT')" in sql
+    assert "avg_mid_gap" in sql
+    assert "avg_spread_flipster" in sql
+
+
+def test_flipster_gap_query_long_window_no_fill() -> None:
+    sql = flipster_gap.build_query(60)
+    assert "FILL(PREV)" not in sql
+    # 60m default = 1s → clamp → 5s
+    assert "SAMPLE BY 5s" in sql
+    assert "SAMPLE BY 1s" not in sql
+    assert "replace(replace(symbol, '.PERP', ''), 'USDT', '_USDT')" in sql
+
+
+def test_flipster_gap_query_720m_keeps_default() -> None:
+    """default 가 이미 5s 이상이면 그대로 (720m=10s)."""
+    sql = flipster_gap.build_query(720)
+    assert "SAMPLE BY 10s" in sql
 
 
 def test_price_change_query_basic() -> None:

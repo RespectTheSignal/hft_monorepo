@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 
 from market_state_updater.config import AppConfig, load_config
 from market_state_updater.jobs import (
+    flipster_gap,
     gap,
     gate_web_gap,
     market_dangerous,
@@ -116,6 +117,23 @@ def build_schedules(
                     cadence_secs=cad(w),
                     run=partial(
                         gate_web_gap.run,
+                        cfg.questdb_url,
+                        redis_client,
+                        cfg.market_gap_prefix,
+                        w,
+                    ),
+                )
+            )
+
+    # 3b) binance vs flipster gap (flipster 심볼 정규화 포함)
+    if cfg.include_flipster_gap:
+        for w in gap_windows:
+            out.append(
+                Schedule(
+                    name=f"flipster_gap:binance:flipster:{w}m",
+                    cadence_secs=cad(w),
+                    run=partial(
+                        flipster_gap.run,
                         cfg.questdb_url,
                         redis_client,
                         cfg.market_gap_prefix,

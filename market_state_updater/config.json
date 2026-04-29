@@ -34,6 +34,7 @@
     "gate_web": true,
     "spread_pair": true,
     "gate_gate_web_gap": true,
+    "flipster_gap": true,
     "price_change": true,
     "price_change_gap_corr": false,
     "mid_corr": true,

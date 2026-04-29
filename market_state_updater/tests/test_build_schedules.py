@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 from market_state_updater.config import AppConfig
@@ -33,6 +34,7 @@ def _cfg(window_mode: str, *, include_corr: bool = True) -> AppConfig:
         include_gate_web=True,
         include_spread_pair=True,
         include_gate_gate_web_gap=True,
+        include_flipster_gap=False,
         include_price_change=True,
         price_change_prefix="pc",
         price_change_sources=("gate", "binance"),
@@ -137,6 +139,28 @@ def test_fast_includes_only_fast_windows_in_names() -> None:
             # name: corr:gate_web:binance:{w}m:{ret}s
             window_str = s.name.split(":")[3].rstrip("m")
             assert int(window_str) in FAST_WINDOWS
+
+
+def test_flipster_gap_adds_one_per_window() -> None:
+    """include_flipster_gap=True 면 gap_windows 만큼 schedule 추가."""
+    base = _cfg("all")
+    with_fp = replace(base, include_flipster_gap=True)
+    diff = len(build_schedules(with_fp, MagicMock())) - len(build_schedules(base, MagicMock()))
+    assert diff == len(WINDOW_MINUTES)
+
+
+def test_flipster_gap_schedule_name_format() -> None:
+    cfg_fp = replace(_cfg("fast"), include_flipster_gap=True)
+    schedules = build_schedules(cfg_fp, MagicMock())
+    fp_names = [s.name for s in schedules if s.name.startswith("flipster_gap:")]
+    assert len(fp_names) == len(FAST_WINDOWS)
+    for n in fp_names:
+        # name: flipster_gap:binance:flipster:{w}m
+        parts = n.split(":")
+        assert parts[0] == "flipster_gap"
+        assert parts[1] == "binance"
+        assert parts[2] == "flipster"
+        assert int(parts[3].rstrip("m")) in FAST_WINDOWS
 
 
 def test_corr_disabled_drops_schedules() -> None:
