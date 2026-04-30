@@ -536,6 +536,78 @@ async fn on_tick(
                     }
                 }
 
+                // Whipsaw filter A — BIN retrace from peak within anchor window.
+                // Catches DOLO 14:18 / TAG 14:20:55 pattern: BIN dipped briefly,
+                // partially bounced back, and the dip-then-bounce got read as a
+                // valid signal. We check whether BIN reached a more-extreme
+                // aligned move at any time within [anchor_target, now] and the
+                // current value has retraced from that peak by ≥ N bp. If yes,
+                // the move is already reversing → skip.
+                let bin_retrace_bp: f64 = std::env::var("GL_BIN_RETRACE_BP")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0.0);
+                if bin_retrace_bp > 0.0 {
+                    let mut peak_aligned = move_bp.abs();
+                    for (t, m) in entry.gate_mids.iter() {
+                        if *t < target { continue; }
+                        let aligned = (m - anchor) / anchor * 1e4 * (side as f64);
+                        if aligned > peak_aligned { peak_aligned = aligned; }
+                    }
+                    let retrace = peak_aligned - move_bp.abs();
+                    if retrace > bin_retrace_bp {
+                        info!(
+                            base = %base,
+                            side = if side == 1 { "long" } else { "short" },
+                            gate_move_bp = format!("{:+.1}", move_bp),
+                            peak_bp = format!("{:+.1}", peak_aligned),
+                            retrace_bp = format!("{:+.1}", retrace),
+                            bin_retrace_bp,
+                            "[gate_lead] SKIP — BIN already retraced from peak"
+                        );
+                        return Ok(());
+                    }
+                }
+
+                // Whipsaw filter B — pre-anchor revert. The anchor is N seconds
+                // back, but if BIN was at the *current* level *before* the
+                // anchor, the apparent move is just a return to baseline rather
+                // than a fresh lead-move. Check ticks in
+                // [anchor_target - pre_window, anchor_target]: if any of them
+                // sit within `pre_revert_bp` of `mid` (signed), this looks like
+                // a round-trip dip.
+                let pre_revert_bp: f64 = std::env::var("GL_BIN_PRE_REVERT_BP")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0.0);
+                let pre_window_ms: i64 = std::env::var("GL_BIN_PRE_WINDOW_MS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(2000);
+                if pre_revert_bp > 0.0 {
+                    let pre_lo = target - Duration::milliseconds(pre_window_ms);
+                    let mut prior_at_current = false;
+                    for (t, m) in entry.gate_mids.iter() {
+                        if *t < pre_lo || *t >= target { continue; }
+                        let aligned_to_now = (mid - m) / m * 1e4 * (side as f64);
+                        if aligned_to_now.abs() <= pre_revert_bp {
+                            prior_at_current = true;
+                            break;
+                        }
+                    }
+                    if prior_at_current {
+                        info!(
+                            base = %base,
+                            side = if side == 1 { "long" } else { "short" },
+                            gate_move_bp = format!("{:+.1}", move_bp),
+                            pre_window_ms,
+                            pre_revert_bp,
+                            "[gate_lead] SKIP — BIN was at current level before anchor (round-trip)"
+                        );
+                        return Ok(());
+                    }
+                }
+
                 // Long: pay ask. Short: pay bid.
                 let entry_price = if side == 1 {
                     entry.flipster_ask
@@ -616,7 +688,28 @@ async fn on_tick(
                         if move_signed >= params.exit_bp {
                             exit_pick = Some(("tp", if pos.side == 1 { bid } else { ask }));
                         } else if move_signed <= -params.stop_bp {
-                            exit_pick = Some(("stop", if pos.side == 1 { bid } else { ask }));
+                            // Stop grace — within the first GL_STOP_GRACE_MS of
+                            // entry, ignore stop unless the move is past the
+                            // hard cap. Catches GWEI 14:19:20-style whipsaws
+                            // where entry slip causes a momentary spike (10ms
+                            // post-entry the mid was -19bp, then 600ms later
+                            // the venue actually crashed +57bp in our favor;
+                            // tight stop locked us out of the real move).
+                            let grace_ms: i64 = std::env::var("GL_STOP_GRACE_MS")
+                                .ok()
+                                .and_then(|v| v.parse().ok())
+                                .unwrap_or(0);
+                            let hard_bp: f64 = std::env::var("GL_STOP_HARD_BP")
+                                .ok()
+                                .and_then(|v| v.parse().ok())
+                                .unwrap_or(100.0);
+                            let elapsed_ms = (now - pos.entry_ts).num_milliseconds();
+                            let in_grace = grace_ms > 0 && elapsed_ms < grace_ms;
+                            let catastrophic = move_signed <= -hard_bp;
+                            if !in_grace || catastrophic {
+                                exit_pick = Some(("stop", if pos.side == 1 { bid } else { ask }));
+                            }
+                            // else: ride the spike; another tick will re-check.
                         }
                     }
                     if exit_pick.is_none() && now >= pos.deadline {
