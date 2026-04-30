@@ -162,12 +162,14 @@ function drawChart(d) {
   // of timestamps and step-fill the most recent value.
   const spread = computeSpread(d.binance, d.flipster)
 
-  // Top panel: Binance + Flipster prices
+  // Top panel: Binance + Flipster prices (STEP — horizontal+vertical only,
+  // tick value held until next update; matches how the orderbook actually
+  // behaves and avoids misleading diagonal interpolation).
   if (d.binance && d.binance.t.length) {
     traces.push({
       x: d.binance.t, y: d.binance.mid,
       type: 'scattergl', mode: 'lines', name: 'Binance',
-      line: { color: '#ff5499', width: 2 },
+      line: { color: '#ff5499', width: 2, shape: 'hv' },
       xaxis: 'x', yaxis: 'y',
     })
   }
@@ -175,7 +177,7 @@ function drawChart(d) {
     traces.push({
       x: d.flipster.t, y: d.flipster.mid,
       type: 'scattergl', mode: 'lines', name: 'Flipster',
-      line: { color: '#54aaff', width: 2 },
+      line: { color: '#54aaff', width: 2, shape: 'hv' },
       xaxis: 'x', yaxis: 'y',
     })
   }
@@ -186,14 +188,29 @@ function drawChart(d) {
       x: [t.entry_ts, t.exit_ts],
       y: [t.entry_price, t.entry_price],
       type: 'scattergl', mode: 'lines', name: '',
-      line: { color: t.pnl_bp > 0 ? 'rgba(40,200,100,0.5)' : 'rgba(220,60,60,0.5)', width: 6 },
+      line: { color: t.pnl_bp > 0 ? 'rgba(40,200,100,0.55)' : 'rgba(220,60,60,0.55)', width: 8 },
       showlegend: false, hoverinfo: 'skip',
       xaxis: 'x', yaxis: 'y',
     })
   }
 
-  // Entry markers
+  // Entry markers — large solid triangle, white outline, drop-shadow ring
   if (d.trades.length) {
+    // Outer halo (bigger, semi-transparent) — makes the marker visible against
+    // dense price lines without obscuring them.
+    traces.push({
+      x: d.trades.map(t => t.entry_ts),
+      y: d.trades.map(t => t.entry_price),
+      type: 'scattergl', mode: 'markers',
+      marker: {
+        symbol: d.trades.map(t => t.side === 'long' ? 'triangle-up' : 'triangle-down'),
+        size: 28,
+        color: d.trades.map(t => t.side === 'long' ? 'rgba(40,200,100,0.25)' : 'rgba(220,60,60,0.25)'),
+        line: { width: 0 },
+      },
+      showlegend: false, hoverinfo: 'skip',
+      xaxis: 'x', yaxis: 'y',
+    })
     traces.push({
       x: d.trades.map(t => t.entry_ts),
       y: d.trades.map(t => t.entry_price),
@@ -201,31 +218,49 @@ function drawChart(d) {
       type: 'scattergl', mode: 'markers', name: 'Entry',
       marker: {
         symbol: d.trades.map(t => t.side === 'long' ? 'triangle-up' : 'triangle-down'),
-        size: 14,
+        size: 18,
         color: d.trades.map(t => t.side === 'long' ? '#2c5' : '#c33'),
-        line: { width: 1.5, color: '#fff' },
+        line: { width: 2, color: '#fff' },
       },
       hovertemplate: '%{text}<br>%{x}<extra></extra>',
       xaxis: 'x', yaxis: 'y',
     })
-    // Exit markers
+    // Exit markers — diamond colored by W/L, white border
+    traces.push({
+      x: d.trades.map(t => t.exit_ts),
+      y: d.trades.map(t => t.exit_price),
+      type: 'scattergl', mode: 'markers',
+      marker: {
+        symbol: 'diamond',
+        size: 26,
+        color: d.trades.map(t => t.pnl_bp > 0 ? 'rgba(40,200,100,0.20)' : 'rgba(220,60,60,0.20)'),
+        line: { width: 0 },
+      },
+      showlegend: false, hoverinfo: 'skip',
+      xaxis: 'x', yaxis: 'y',
+    })
     traces.push({
       x: d.trades.map(t => t.exit_ts),
       y: d.trades.map(t => t.exit_price),
       text: d.trades.map(t => `exit ${t.exit_reason} ${t.pnl_bp.toFixed(2)}bp`),
       type: 'scattergl', mode: 'markers', name: 'Exit',
-      marker: { symbol: 'x-thin', size: 12, color: '#fff', line: { width: 2 } },
+      marker: {
+        symbol: 'diamond',
+        size: 14,
+        color: d.trades.map(t => t.pnl_bp > 0 ? '#2c5' : '#c33'),
+        line: { width: 2, color: '#fff' },
+      },
       hovertemplate: '%{text}<br>%{x}<extra></extra>',
       xaxis: 'x', yaxis: 'y',
     })
   }
 
-  // Bottom panel: spread (Flipster - Binance) in bp
+  // Bottom panel: spread (Flipster - Binance) in bp — also stepped
   if (spread.t.length) {
     traces.push({
       x: spread.t, y: spread.bp,
       type: 'scattergl', mode: 'lines', name: 'lag (Flipster - Binance, bp)',
-      line: { color: '#ffcc55', width: 1.5 },
+      line: { color: '#ffcc55', width: 1.5, shape: 'hv' },
       fill: 'tozeroy', fillcolor: 'rgba(255,204,85,0.10)',
       xaxis: 'x', yaxis: 'y2',
     })
@@ -244,12 +279,40 @@ function drawChart(d) {
               domain: [0, 0.28], title: { text: 'lag bp', font: { size: 10 } } },
     legend: { x: 0, y: 1, bgcolor: 'rgba(0,0,0,0.4)', font: { size: 10 } },
     hovermode: 'x unified',
-    shapes: [
-      { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y2',
-        y0: 0, y1: 0, line: { color: '#444', width: 1 } }
-    ],
+    shapes: buildShapes(d),
   }
   Plotly.react('chart', traces, layout, { displayModeBar: false, responsive: true })
+}
+
+// Shapes: zero-line on lag panel + a vertical guide at every trade
+// entry/exit, spanning both subplots (yref: paper, 0..1). Entry guides
+// are tinted by side (green long, red short), exit guides by W/L.
+function buildShapes(d) {
+  const shapes = [
+    { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y2',
+      y0: 0, y1: 0, line: { color: '#444', width: 1 } },
+  ]
+  for (const t of d.trades || []) {
+    shapes.push({
+      type: 'line', xref: 'x', yref: 'paper',
+      x0: t.entry_ts, x1: t.entry_ts, y0: 0, y1: 1,
+      line: {
+        color: t.side === 'long' ? 'rgba(40,200,100,0.45)' : 'rgba(220,60,60,0.45)',
+        width: 1.5, dash: 'dot',
+      },
+      layer: 'below',
+    })
+    shapes.push({
+      type: 'line', xref: 'x', yref: 'paper',
+      x0: t.exit_ts, x1: t.exit_ts, y0: 0, y1: 1,
+      line: {
+        color: t.pnl_bp > 0 ? 'rgba(40,200,100,0.35)' : 'rgba(220,60,60,0.35)',
+        width: 1, dash: 'dash',
+      },
+      layer: 'below',
+    })
+  }
+  return shapes
 }
 
 function computeSpread(b, f) {

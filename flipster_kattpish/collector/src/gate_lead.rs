@@ -223,6 +223,11 @@ struct BaseState {
     flipster_ts: Option<DateTime<Utc>>,
     cooldown_until: Option<DateTime<Utc>>,
     open: Option<OpenPos>,
+    /// Whipsaw guard: when the last trade closed via stop, hold off
+    /// re-entry for an extended cooldown. Flash-spike chops (ALCH
+    /// 13:04:11 → 13:04:15 = +50bp / -50bp / +50bp in 4s) had two
+    /// stop-outs in a row; without this guard we'd keep diving in.
+    last_stop_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
@@ -381,6 +386,26 @@ async fn on_tick(
                 }
                 if let Some(cd) = entry.cooldown_until {
                     if now < cd {
+                        return Ok(());
+                    }
+                }
+                // Whipsaw cooldown: after a stop-out, hold the symbol
+                // off for `GL_STOP_COOLDOWN_S` (default 30s). Stops
+                // typically signal the venue is mid-spike — re-entering
+                // immediately catches the second leg of the whipsaw.
+                let stop_cd_s: f64 = std::env::var("GL_STOP_COOLDOWN_S")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(30.0);
+                if let Some(stop_at) = entry.last_stop_at {
+                    let elapsed_s = (now - stop_at).num_milliseconds() as f64 / 1000.0;
+                    if elapsed_s < stop_cd_s {
+                        info!(
+                            base = %base,
+                            elapsed_s = format!("{:.1}", elapsed_s),
+                            stop_cd_s,
+                            "[gate_lead] SKIP — whipsaw stop-cooldown"
+                        );
                         return Ok(());
                     }
                 }
@@ -599,6 +624,9 @@ async fn on_tick(
                     }
                     if let Some((reason, exit_price)) = exit_pick {
                         entry.open = None;
+                        if reason == "stop" {
+                            entry.last_stop_at = Some(now);
+                        }
                         close_act = Some(CloseAction {
                             base: base.clone(),
                             pos,
