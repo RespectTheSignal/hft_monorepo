@@ -7,8 +7,8 @@
 //! `seen_*` dedup sets + running stats.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
@@ -20,13 +20,16 @@ use flipster_client::{
     FlipsterClient, MarginType as FMarginType, OrderParams as FOrderParams,
     OrderType as FOrderType, Side as FSide,
 };
-use gate_client::{GateClient, OrderParams as GParams, OrderType as GType, Side as GSide, TimeInForce as GTif};
+use gate_client::{
+    GateClient, OrderParams as GParams, OrderType as GType, Side as GSide, TimeInForce as GTif,
+};
 
 use crate::config::*;
 use crate::flipster_helpers::{extract_fill as flip_extract_fill, limit_ioc_entry};
 use crate::flipster_ws::SharedState as FlipsterWsState;
 use crate::gate_contracts::{self, ContractMap};
 use crate::gate_helpers::{extract_fill as gate_extract_fill, extract_order_id, extract_status};
+use crate::questdb;
 use crate::trade_log::{TradeLog, TradeRecord};
 use crate::zmq_sub::TradeSignal;
 
@@ -63,6 +66,15 @@ pub struct LivePosition {
     pub f_entry_slip_bp: f64,
     pub g_entry_slip_bp: f64,
     pub signal_lag_ms_entry: f64,
+    pub f_entry_order_rtt_ms: f64,
+    pub f_entry_total_ms: f64,
+    pub f_maker_exit_order_rtt_ms: f64,
+    pub entry_bbo_recheck_ms: f64,
+    pub entry_bbo_adverse_bp: f64,
+    pub entry_topbook_qty: f64,
+    pub entry_order_qty_before_topbook: f64,
+    pub entry_size_before_topbook_usd: f64,
+    pub entry_size_after_topbook_usd: f64,
     pub paper_f_entry: f64,
     pub paper_g_entry: f64,
     /// If pre-placed maker exit LIMIT exists, its order_id + price.
@@ -94,10 +106,17 @@ impl Stats {
     }
     pub fn print(&self) {
         let (n, w, p) = self.snapshot();
-        let pct = if n > 0 { w as f64 / n as f64 * 100.0 } else { 0.0 };
+        let pct = if n > 0 {
+            w as f64 / n as f64 * 100.0
+        } else {
+            0.0
+        };
         tracing::info!(
             "[STATS] trades={} wins={} win%={:.1} total_pnl=${:+.4}",
-            n, w, pct, p
+            n,
+            w,
+            pct,
+            p
         );
     }
 }
@@ -138,11 +157,34 @@ pub struct Executor {
     pub unmatched_first_seen: DashMap<String, std::time::Instant>,
     /// Per-order_id "first seen open" — stale-order sweeper.
     pub order_first_seen: DashMap<String, std::time::Instant>,
+    /// Per-order_id consecutive cancel-failure count. Reset on Ok,
+    /// promoted to `abandoned_orders` once it hits the retry cap. Wrapped
+    /// in Arc because DashMap::clone() deep-copies (it has no internal
+    /// Arc), and the sweeper hands a clone to a spawned task that needs
+    /// to mutate the original — without Arc the increments stay in the
+    /// task's local copy and the count never advances.
+    pub cancel_failure_count: Arc<DashMap<String, u32>>,
+    /// Orders we've given up on (cancel kept failing). Sweeper skips
+    /// these to stop burning API calls + scheduling lag. Auto-pruned
+    /// when WS no longer reports the order open (filled / cancelled
+    /// out-of-band / disappeared). Same Arc rationale as
+    /// `cancel_failure_count`.
+    pub abandoned_orders: Arc<DashMap<String, AbandonedOrder>>,
     /// Last signal per base — used to detect side-flip chop and skip the
     /// reversed entry. Key=base, value=(side, timestamp).
     pub last_signal: DashMap<String, (String, std::time::Instant)>,
     pub sym_stats: Arc<crate::symbol_stats::SymbolStatsStore>,
     pub flip_contracts: crate::flipster_contracts::ContractMap,
+}
+
+/// Bookkeeping entry for an order whose cancel keeps failing. Kept in
+/// memory only — restart starts fresh, since stale orders typically
+/// resolve themselves on the venue side after long enough.
+#[derive(Debug, Clone)]
+pub struct AbandonedOrder {
+    pub at: std::time::Instant,
+    pub attempts: u32,
+    pub last_error: String,
 }
 
 impl Executor {
@@ -206,8 +248,15 @@ impl Executor {
         }
         self.flipster
             .place_order_oneway_with_margin(
-                symbol, side, amount_usd, ref_price, leverage, reduce_only,
-                order_type, post_only, &self.margin,
+                symbol,
+                side,
+                amount_usd,
+                ref_price,
+                leverage,
+                reduce_only,
+                order_type,
+                post_only,
+                &self.margin,
             )
             .await
     }
@@ -240,7 +289,10 @@ impl Executor {
                 if age_ms > MAX_ENTRY_SIGNAL_AGE_MS {
                     tracing::info!(
                         "[ENTRY-DROP] {} | side={} | age={:.0}ms > {:.0}ms (queue stale, skip)",
-                        ev.base, ev.side, age_ms, MAX_ENTRY_SIGNAL_AGE_MS
+                        ev.base,
+                        ev.side,
+                        age_ms,
+                        MAX_ENTRY_SIGNAL_AGE_MS
                     );
                     return Ok(());
                 }
@@ -280,8 +332,13 @@ impl Executor {
 
         tracing::info!(
             "[ENTRY] {} | side={} | ${:.0} | lag={:.0}ms | paper f={} g={} pos_id={}",
-            ev.base, ev.side, size, signal_lag_ms,
-            ev.flipster_price, ev.gate_price, ev.position_id,
+            ev.base,
+            ev.side,
+            size,
+            signal_lag_ms,
+            ev.flipster_price,
+            ev.gate_price,
+            ev.position_id,
         );
 
         if self.dry_run {
@@ -306,6 +363,15 @@ impl Executor {
                     f_entry_slip_bp: 0.0,
                     g_entry_slip_bp: 0.0,
                     signal_lag_ms_entry: signal_lag_ms,
+                    f_entry_order_rtt_ms: 0.0,
+                    f_entry_total_ms: 0.0,
+                    f_maker_exit_order_rtt_ms: 0.0,
+                    entry_bbo_recheck_ms: 0.0,
+                    entry_bbo_adverse_bp: 0.0,
+                    entry_topbook_qty: 0.0,
+                    entry_order_qty_before_topbook: 0.0,
+                    entry_size_before_topbook_usd: size,
+                    entry_size_after_topbook_usd: size,
                     paper_f_entry: ev.flipster_price,
                     paper_g_entry: ev.gate_price,
                     exit_order_id: None,
@@ -324,9 +390,20 @@ impl Executor {
             (Some(b), Some(a)) if b > 0.0 && a > 0.0 && a >= b => Some((b, a)),
             _ => None,
         };
+        let mut entry_bid_ask = current_bid_ask;
+        let mut entry_bbo_recheck_ms = 0.0;
+        let mut entry_bbo_adverse_bp = 0.0;
+        let mut entry_topbook_qty = 0.0;
+        let mut entry_order_qty_before_topbook = 0.0;
+        let mut entry_size_before_topbook_usd = size;
+        let mut entry_size_after_topbook_usd = size;
         let current_spread_bp: Option<f64> = current_bid_ask.map(|(b, a)| {
             let m = 0.5 * (b + a);
-            if m > 0.0 { (a - b) / m * 1e4 } else { 0.0 }
+            if m > 0.0 {
+                (a - b) / m * 1e4
+            } else {
+                0.0
+            }
         });
         // Decision-rule filters (min_spread, edge_recheck) live in the
         // collector's coordinator now; the signal we just received has
@@ -379,21 +456,20 @@ impl Executor {
         // the hedge ratio is 1:1. Skipped in flipster_only mode (no Gate
         // hedge to size against).
         if !self.flipster_only {
-            let spec = self
-                .gate_contracts
-                .get(&gate_sym)
-                .copied()
-                .unwrap_or(crate::gate_contracts::ContractSpec {
+            let spec = self.gate_contracts.get(&gate_sym).copied().unwrap_or(
+                crate::gate_contracts::ContractSpec {
                     multiplier: 1.0,
                     order_size_min: 1,
-                });
+                },
+            );
             let gate_contracts_pre =
                 gate_contracts::size_from_usd(&self.gate_contracts, &gate_sym, size, ev.gate_price);
             let adjusted = (gate_contracts_pre as f64) * spec.multiplier * ev.gate_price;
             if adjusted < 3.0 || adjusted > size * 2.5 {
                 tracing::info!(
                     "  [SKIP] hedge mismatch — gate notional=${:.2} vs target=${}",
-                    adjusted, size
+                    adjusted,
+                    size
                 );
                 return Ok(());
             }
@@ -403,10 +479,210 @@ impl Executor {
         // Flipster entry — LIMIT-IOC. Use the BBO carried on the signal:
         // collector publishes the freshest snapshot it observed. Falls
         // back to the signal mid if BBO is missing (legacy publisher).
-        let f_limit_price = match current_bid_ask {
-            Some((bid, ask)) => if ev.side == "long" { ask } else { bid },
+        if executor_bbo_recheck_enabled(size, signal_lag_ms) {
+            let recheck_t0 = Instant::now();
+            match questdb::fetch_latest_book_age(
+                &self.qdb_http,
+                "flipster_bookticker",
+                &flipster_sym,
+            )
+            .await
+            {
+                Some(book) if book.bid > 0.0 && book.ask > 0.0 && book.ask >= book.bid => {
+                    entry_bbo_recheck_ms = recheck_t0.elapsed().as_secs_f64() * 1000.0;
+                    let age_ms = book.age_s * 1000.0;
+                    if age_ms <= env_f64("GL_EXECUTOR_BBO_MAX_AGE_MS", 200.0) {
+                        if let Some((old_bid, old_ask)) = current_bid_ask {
+                            let old_take = if ev.side == "long" { old_ask } else { old_bid };
+                            let new_take = if ev.side == "long" {
+                                book.ask
+                            } else {
+                                book.bid
+                            };
+                            entry_bbo_adverse_bp = if old_take > 0.0 {
+                                let raw = (new_take - old_take) / old_take * 1e4;
+                                if ev.side == "long" {
+                                    raw
+                                } else {
+                                    -raw
+                                }
+                            } else {
+                                0.0
+                            };
+                        }
+                        let max_adverse_bp = env_f64("GL_EXECUTOR_RECHECK_MAX_ADVERSE_BP", 2.0);
+                        if entry_bbo_adverse_bp > max_adverse_bp {
+                            tracing::info!(
+                                "[ENTRY-DROP] {} | side={} | BBO stale adverse={:+.2}bp > {:.2}bp | qdb_age={:.0}ms qdb_rtt={:.0}ms",
+                                ev.base, ev.side, entry_bbo_adverse_bp, max_adverse_bp, age_ms, entry_bbo_recheck_ms
+                            );
+                            return Ok(());
+                        }
+                        entry_bid_ask = Some((book.bid, book.ask));
+                        entry_topbook_qty = if ev.side == "long" {
+                            book.ask_size
+                        } else {
+                            book.bid_size
+                        };
+                        let take_px = if ev.side == "long" {
+                            book.ask
+                        } else {
+                            book.bid
+                        };
+                        if topbook_size_guard_enabled() && take_px > 0.0 && entry_topbook_qty > 0.0
+                        {
+                            let max_participation =
+                                env_f64("GL_EXECUTOR_TOPBOOK_MAX_PARTICIPATION", 0.5)
+                                    .clamp(0.0, 1.0);
+                            entry_order_qty_before_topbook = size / take_px;
+                            let max_qty = entry_topbook_qty * max_participation;
+                            if entry_order_qty_before_topbook > max_qty {
+                                entry_size_before_topbook_usd = size;
+                                entry_size_after_topbook_usd = max_qty * take_px;
+                                let min_size = env_f64("GL_EXECUTOR_TOPBOOK_MIN_SIZE_USD", 15.0);
+                                if entry_size_after_topbook_usd < min_size {
+                                    tracing::info!(
+                                        "[ENTRY-DROP] {} | side={} | topbook cap size=${:.2} < min=${:.2} | order_qty={:.6} top_qty={:.6} max_part={:.2}",
+                                        ev.base,
+                                        ev.side,
+                                        entry_size_after_topbook_usd,
+                                        min_size,
+                                        entry_order_qty_before_topbook,
+                                        entry_topbook_qty,
+                                        max_participation
+                                    );
+                                    return Ok(());
+                                }
+                                size = entry_size_after_topbook_usd;
+                                tracing::info!(
+                                    "  [TOPBOOK-SIZE] shrink ${:.2} → ${:.2} | order_qty={:.6} top_qty={:.6} max_part={:.2}",
+                                    entry_size_before_topbook_usd,
+                                    size,
+                                    entry_order_qty_before_topbook,
+                                    entry_topbook_qty,
+                                    max_participation
+                                );
+                            }
+                        }
+                        tracing::info!(
+                            "  [BBO-RECHECK] use latest Flipster BBO bid={} ask={} bid_sz={} ask_sz={} age={:.0}ms rtt={:.0}ms adverse={:+.2}bp",
+                            book.bid,
+                            book.ask,
+                            book.bid_size,
+                            book.ask_size,
+                            age_ms,
+                            entry_bbo_recheck_ms,
+                            entry_bbo_adverse_bp
+                        );
+                    } else {
+                        tracing::warn!(
+                            "  [BBO-RECHECK] latest quote too old age={:.0}ms > max; keeping signal BBO",
+                            age_ms
+                        );
+                    }
+                }
+                Some(_) | None => {
+                    entry_bbo_recheck_ms = recheck_t0.elapsed().as_secs_f64() * 1000.0;
+                    tracing::warn!(
+                        "  [BBO-RECHECK] no valid latest Flipster BBO ({:.0}ms); keeping signal BBO",
+                        entry_bbo_recheck_ms
+                    );
+                }
+            }
+        }
+        let f_limit_price = match entry_bid_ask {
+            Some((bid, ask)) => {
+                if ev.side == "long" {
+                    ask
+                } else {
+                    bid
+                }
+            }
             None => ev.flipster_price,
         };
+
+        // Depth-based size guard via WS L10 orderbook. Independent of
+        // BBO recheck — runs whenever depth is fresh in flip_state.
+        // Walks take-side levels until the order qty is filled; if
+        // impact_bp exceeds GL_EXECUTOR_DEPTH_MAX_IMPACT_BP we shrink
+        // size to the qty available within that impact, or skip if the
+        // resulting notional falls below GL_EXECUTOR_DEPTH_MIN_SIZE_USD.
+        if depth_size_guard_enabled() && f_limit_price > 0.0 {
+            let max_impact_bp = env_f64("GL_EXECUTOR_DEPTH_MAX_IMPACT_BP", 5.0);
+            let max_age_ms = env_f64("GL_EXECUTOR_DEPTH_MAX_AGE_MS", 1000.0) as u64;
+            let needed_qty = size / f_limit_price;
+            let walk_opt = self
+                .flip_state
+                .read()
+                .await
+                .depth_walk_for_qty(&flipster_sym, &ev.side, needed_qty, max_age_ms);
+            match walk_opt {
+                Some(walk) => {
+                    entry_topbook_qty = walk.levels_total_qty;
+                    entry_order_qty_before_topbook = needed_qty;
+                    entry_size_before_topbook_usd = size;
+                    if walk.impact_bp > max_impact_bp {
+                        // Shrink: cap qty to what stays within max_impact_bp.
+                        let capped_qty = qty_within_impact(
+                            &self.flip_state,
+                            &flipster_sym,
+                            &ev.side,
+                            max_impact_bp,
+                            max_age_ms,
+                        )
+                        .await
+                        .unwrap_or(0.0);
+                        let capped_usd = capped_qty * f_limit_price;
+                        let min_size = env_f64("GL_EXECUTOR_DEPTH_MIN_SIZE_USD", 15.0);
+                        if capped_usd < min_size {
+                            tracing::info!(
+                                "[ENTRY-DROP] {} | side={} | depth impact={:+.2}bp > {:.2}bp, cap=${:.2} < min=${:.2} | needed_qty={:.6} top_qty={:.6}",
+                                ev.base, ev.side, walk.impact_bp, max_impact_bp,
+                                capped_usd, min_size, needed_qty, walk.levels_total_qty
+                            );
+                            return Ok(());
+                        }
+                        size = capped_usd;
+                        entry_size_after_topbook_usd = size;
+                        tracing::info!(
+                            "  [DEPTH-SHRINK] {} | impact={:+.2}bp > {:.2}bp | ${:.2} → ${:.2} | needed_qty={:.6} → {:.6}",
+                            ev.base, walk.impact_bp, max_impact_bp,
+                            entry_size_before_topbook_usd, size, needed_qty, capped_qty
+                        );
+                    } else {
+                        entry_size_after_topbook_usd = size;
+                        tracing::info!(
+                            "  [DEPTH-OK] {} | impact={:+.2}bp ≤ {:.2}bp | qty={:.6} avail={:.6}",
+                            ev.base, walk.impact_bp, max_impact_bp, needed_qty, walk.levels_total_qty
+                        );
+                    }
+                }
+                None => {
+                    // No fresh depth — fall back to a fixed cap so we
+                    // never blindly send full size against an unknown
+                    // book. fallback_cap=0 means SKIP entry entirely
+                    // (interpret zero as "we won't trade blind").
+                    let fallback_cap = env_f64("GL_EXECUTOR_DEPTH_FALLBACK_CAP_USD", 100.0);
+                    if fallback_cap <= 0.0 {
+                        tracing::info!(
+                            "[ENTRY-DROP] {} | side={} | no fresh WS depth (fallback_cap=0)",
+                            ev.base, ev.side
+                        );
+                        return Ok(());
+                    }
+                    if size > fallback_cap {
+                        entry_size_before_topbook_usd = size;
+                        entry_size_after_topbook_usd = fallback_cap;
+                        tracing::warn!(
+                            "  [DEPTH-FALLBACK] {} | no fresh WS depth → cap ${:.2} → ${:.2}",
+                            ev.base, size, fallback_cap
+                        );
+                        size = fallback_cap;
+                    }
+                }
+            }
+        }
+
         // Hybrid entry: big lead-exchange moves use MARKET (guaranteed
         // fill), smaller moves use LIMIT-IOC (price control). The lead
         // move size is approximated by the gap between gate_price (lead)
@@ -429,15 +705,30 @@ impl Executor {
         // (it goes through the one-way endpoint). Until the helper is
         // ported, force MARKET entries so each one definitely lands on
         // its own slot via the multi-position endpoint.
-        let use_market_entry = lead_move_bp > market_threshold_bp || self.multiple_positions;
+        //
+        // GL_FORCE_MARKET=1 also forces MARKET regardless of lead-move
+        // size: gate_lead's alpha is gone in <1s, so LIMIT-IOC's 3s
+        // wait + ~11% fill rate + adverse selection on the fills that
+        // do hit makes it strictly worse than guaranteed-fill MARKET
+        // at the cost of 0.55bp/leg extra fee.
+        let force_market = std::env::var("GL_FORCE_MARKET")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let use_market_entry =
+            force_market || lead_move_bp > market_threshold_bp || self.multiple_positions;
 
         let f_max_lev = self.flip_contracts.max_leverage(&flipster_sym);
         let f_t0 = Instant::now();
+        let f_entry_order_rtt_ms;
+        let mut f_entry_total_from_helper_ms = 0.0;
         let f_result_opt = if use_market_entry {
             tracing::info!(
                 "  [MARKET-ENTRY] big move (lead={:.1}bp > {}bp threshold) lev={}x",
-                lead_move_bp, market_threshold_bp, f_max_lev
+                lead_move_bp,
+                market_threshold_bp,
+                f_max_lev
             );
+            let order_t0 = Instant::now();
             match self
                 .flipster_place(
                     &flipster_sym,
@@ -452,6 +743,7 @@ impl Executor {
                 .await
             {
                 Ok(r) => {
+                    f_entry_order_rtt_ms = order_t0.elapsed().as_secs_f64() * 1000.0;
                     let (avg, sz, _) = flip_extract_fill(&r);
                     if avg > 0.0 && sz > 0.0 {
                         Some(r)
@@ -473,13 +765,14 @@ impl Executor {
                     }
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "  [MARKET-ENTRY] FAILED");
+                    let rtt_ms = order_t0.elapsed().as_secs_f64() * 1000.0;
+                    tracing::warn!(error = %e, rtt_ms, "  [MARKET-ENTRY] FAILED");
                     return Ok(());
                 }
             }
         } else {
             match limit_ioc_entry(
-                &self.flipster,
+                self.flipster.clone(),
                 &self.flip_state,
                 &flipster_sym,
                 &ev.side,
@@ -491,27 +784,101 @@ impl Executor {
             )
             .await
             {
-                Ok((Some(v), _)) => Some(v),
-                Ok((None, _)) => None,
+                Ok((Some(v), _, timing)) => {
+                    f_entry_order_rtt_ms = timing.place_rtt_ms;
+                    f_entry_total_from_helper_ms = timing.total_ms;
+                    Some(v)
+                }
+                Ok((None, _, timing)) => {
+                    f_entry_order_rtt_ms = timing.place_rtt_ms;
+                    f_entry_total_from_helper_ms = timing.total_ms;
+                    None
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "  [FLIPSTER-LIMIT] FAILED");
                     return Ok(());
                 }
             }
         };
-        let f_dt_ms = f_t0.elapsed().as_secs_f64() * 1000.0;
+        let f_dt_ms = if f_entry_total_from_helper_ms > 0.0 {
+            f_entry_total_from_helper_ms
+        } else {
+            f_t0.elapsed().as_secs_f64() * 1000.0
+        };
         let Some(f_result) = f_result_opt else {
             tracing::info!(
-                "  [FLIPSTER] not filled ({:.0}ms) — abort, no Gate, no revert",
+                "  [FLIPSTER] not filled ({:.0}ms) — abort, async leak watcher armed",
                 f_dt_ms
             );
+            // LIMIT-IOC abort path. Flipster's IOC isn't strict — partial
+            // fills land between place and our timeout. WS position
+            // broadcasts can lag fills by 100ms~3s+, so we can't sync-
+            // wait without blocking the dispatch task. Spawn a 4s
+            // watcher (under the orphan sweeper's 5s threshold) that
+            // polls WS state every 100ms and reduce-only MARKET closes
+            // the moment a leak appears. The orphan sweeper remains a
+            // backstop in case the watcher's window is also too short.
+            let flipster = self.flipster.clone();
+            let flip_state = self.flip_state.clone();
+            let lev = self.flip_contracts.max_leverage(&flipster_sym);
+            let sym_c = flipster_sym.clone();
+            let margin = self.margin.clone();
+            let ref_px = match (ev.flipster_bid, ev.flipster_ask) {
+                (Some(b), Some(a)) if b > 0.0 && a > 0.0 => 0.5 * (b + a),
+                _ => ev.flipster_price,
+            };
+            tokio::spawn(async move {
+                let t0 = std::time::Instant::now();
+                let mut leaked_size: f64 = 0.0;
+                for _ in 0..40 {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    let s = flip_state.read().await.position_size(&sym_c, 0);
+                    if s.abs() > 0.0 {
+                        leaked_size = s;
+                        break;
+                    }
+                }
+                if leaked_size.abs() == 0.0 {
+                    tracing::info!(
+                        symbol = %sym_c,
+                        watch_ms = t0.elapsed().as_millis() as u64,
+                        "[ABORT-WATCH] clean (no leak detected within 4s)"
+                    );
+                    return;
+                }
+                let close_side = if leaked_size > 0.0 { "short" } else { "long" };
+                let notional_usd = leaked_size.abs() * ref_px * 1.5;
+                tracing::warn!(
+                    symbol = %sym_c,
+                    leaked_size,
+                    detect_ms = t0.elapsed().as_millis() as u64,
+                    "[ABORT-CLEANUP] partial fill leaked — reduce-only MARKET close"
+                );
+                match flipster
+                    .place_order_oneway_with_margin(
+                        &sym_c, close_side, notional_usd, ref_px, lev,
+                        true, "ORDER_TYPE_MARKET", false, &margin,
+                    )
+                    .await
+                {
+                    Ok(_) => tracing::info!(symbol = %sym_c, "[ABORT-CLEANUP] OK"),
+                    Err(e) => tracing::error!(
+                        error = %e, symbol = %sym_c,
+                        "[ABORT-CLEANUP] FAILED — orphan sweeper will retry"
+                    ),
+                }
+            });
             return Ok(());
         };
         let (f_pre_avg, f_pre_size, f_pre_slot) = flip_extract_fill(&f_result);
         let entry_path = if use_market_entry { "MARKET" } else { "LIMIT" };
         tracing::info!(
-            "  [FLIPSTER-{}] OK ({:.0}ms) size=${:.2} fill={}",
-            entry_path, f_dt_ms, size, f_pre_avg
+            "  [FLIPSTER-{}] OK order_rtt={:.0}ms total={:.0}ms size=${:.2} fill={}",
+            entry_path,
+            f_entry_order_rtt_ms,
+            f_dt_ms,
+            size,
+            f_pre_avg
         );
 
         // Single-leg mode: skip Gate placement entirely. Used for the
@@ -520,7 +887,11 @@ impl Executor {
         if self.flipster_only {
             let f_entry_slip = if f_pre_avg > 0.0 && ev.flipster_price > 0.0 {
                 let raw = (f_pre_avg - ev.flipster_price) / ev.flipster_price * 1e4;
-                if ev.side == "long" { raw } else { -raw }
+                if ev.side == "long" {
+                    raw
+                } else {
+                    -raw
+                }
             } else {
                 0.0
             };
@@ -541,6 +912,7 @@ impl Executor {
                 .unwrap_or(true);
             let mut exit_order_id: Option<String> = None;
             let mut exit_limit_price: f64 = 0.0;
+            let mut f_maker_exit_order_rtt_ms = 0.0;
             if maker_exit_enabled && f_pre_avg > 0.0 {
                 // Tick-valid pricing: prefer the bid/ask we just read from
                 // QuestDB (always populated for active symbols), fall back
@@ -587,6 +959,7 @@ impl Executor {
                 };
                 if exit_px > 0.0 {
                     let exit_side = if ev.side == "long" { "short" } else { "long" };
+                    let maker_t0 = Instant::now();
                     let resp = self
                         .flipster_place(
                             &flipster_sym,
@@ -599,6 +972,7 @@ impl Executor {
                             true,
                         )
                         .await;
+                    f_maker_exit_order_rtt_ms = maker_t0.elapsed().as_secs_f64() * 1000.0;
                     match resp {
                         Ok(r) => {
                             let oid = r
@@ -608,8 +982,10 @@ impl Executor {
                                 .map(|s| s.to_string());
                             if oid.is_some() {
                                 tracing::info!(
-                                    "  [MAKER-EXIT] placed @ {:.6} order_id={:?}",
-                                    exit_px, oid
+                                    "  [MAKER-EXIT] placed @ {:.6} order_id={:?} rtt={:.0}ms",
+                                    exit_px,
+                                    oid,
+                                    f_maker_exit_order_rtt_ms
                                 );
                                 exit_limit_price = exit_px;
                                 exit_order_id = oid;
@@ -642,6 +1018,15 @@ impl Executor {
                     f_entry_slip_bp: f_entry_slip,
                     g_entry_slip_bp: 0.0,
                     signal_lag_ms_entry: signal_lag_ms,
+                    f_entry_order_rtt_ms,
+                    f_entry_total_ms: f_dt_ms,
+                    f_maker_exit_order_rtt_ms,
+                    entry_bbo_recheck_ms,
+                    entry_bbo_adverse_bp,
+                    entry_topbook_qty,
+                    entry_order_qty_before_topbook,
+                    entry_size_before_topbook_usd,
+                    entry_size_after_topbook_usd,
                     paper_f_entry: ev.flipster_price,
                     paper_g_entry: ev.gate_price,
                     exit_order_id,
@@ -650,7 +1035,9 @@ impl Executor {
             );
             tracing::info!(
                 "  [TRACK] flipster_entry={} size={} slot={} (single-leg)",
-                f_pre_avg, f_pre_size, f_pre_slot.unwrap_or(0)
+                f_pre_avg,
+                f_pre_size,
+                f_pre_slot.unwrap_or(0)
             );
             crate::fill_publisher::publish_fill(
                 &self.variant,
@@ -676,11 +1063,20 @@ impl Executor {
         // used to live here is now part of the coordinator's filter
         // chain (or simply absent, since the signal price already
         // reflects publish-time market state).
-        let g_side = if ev.side == "long" { GSide::Short } else { GSide::Long };
-        let g_size = gate_contracts::size_from_usd(&self.gate_contracts, &gate_sym, size, ev.gate_price);
+        let g_side = if ev.side == "long" {
+            GSide::Short
+        } else {
+            GSide::Long
+        };
+        let g_size =
+            gate_contracts::size_from_usd(&self.gate_contracts, &gate_sym, size, ev.gate_price);
         let g_limit_price = match (ev.gate_bid, ev.gate_ask) {
             (Some(b), Some(a)) if b > 0.0 && a > 0.0 && a >= b => {
-                if g_side == GSide::Short { b } else { a }
+                if g_side == GSide::Short {
+                    b
+                } else {
+                    a
+                }
             }
             _ => ev.gate_price,
         };
@@ -689,12 +1085,18 @@ impl Executor {
         {
             let mut set = self.gate_leverage_set.lock().await;
             if !set.contains(&gate_sym) {
-                match self.gate.set_leverage(&gate_sym, 0, self.gate_leverage).await {
+                match self
+                    .gate
+                    .set_leverage(&gate_sym, 0, self.gate_leverage)
+                    .await
+                {
                     Ok(v) => {
                         let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("");
                         tracing::info!(
                             "  [LEV] {} → cross {}x: {}",
-                            gate_sym, self.gate_leverage, msg
+                            gate_sym,
+                            self.gate_leverage,
+                            msg
                         );
                         set.insert(gate_sym.clone());
                     }
@@ -724,14 +1126,32 @@ impl Executor {
             Ok(r) => {
                 tracing::warn!(
                     "  [GATE] not ok: status={} msg={} label={}",
-                    r.status, r.message(), r.label()
+                    r.status,
+                    r.message(),
+                    r.label()
                 );
-                self.safety_revert_and_log(&ev, &flipster_sym, &gate_sym, &f_result, size, signal_lag_ms).await;
+                self.safety_revert_and_log(
+                    &ev,
+                    &flipster_sym,
+                    &gate_sym,
+                    &f_result,
+                    size,
+                    signal_lag_ms,
+                )
+                .await;
                 return Ok(());
             }
             Err(e) => {
                 tracing::warn!(error = %e, "  [GATE] place_order err");
-                self.safety_revert_and_log(&ev, &flipster_sym, &gate_sym, &f_result, size, signal_lag_ms).await;
+                self.safety_revert_and_log(
+                    &ev,
+                    &flipster_sym,
+                    &gate_sym,
+                    &f_result,
+                    size,
+                    signal_lag_ms,
+                )
+                .await;
                 return Ok(());
             }
         };
@@ -743,14 +1163,26 @@ impl Executor {
         let _ = extract_status(&g_result);
         if g_fill_price <= 0.0 || g_filled_size <= 0 {
             tracing::warn!("  [GATE-IOC] not filled");
-            self.safety_revert_and_log(&ev, &flipster_sym, &gate_sym, &f_result, size, signal_lag_ms).await;
+            self.safety_revert_and_log(
+                &ev,
+                &flipster_sym,
+                &gate_sym,
+                &f_result,
+                size,
+                signal_lag_ms,
+            )
+            .await;
             return Ok(());
         }
         let g_dt_ms = g_t0.elapsed().as_secs_f64() * 1000.0;
         let total_dt_ms = entry_t0.elapsed().as_secs_f64() * 1000.0;
         tracing::info!(
             "  [GATE-IOC] filled={} @{} ({:.0}ms) | total_entry={:.0}ms sig→done={:.0}ms",
-            g_filled_size, g_fill_price, g_dt_ms, total_dt_ms, signal_lag_ms + total_dt_ms
+            g_filled_size,
+            g_fill_price,
+            g_dt_ms,
+            total_dt_ms,
+            signal_lag_ms + total_dt_ms
         );
 
         // Track the position.
@@ -762,19 +1194,28 @@ impl Executor {
         };
         let f_entry_slip = if f_avg > 0.0 && ev.flipster_price > 0.0 {
             let raw = (f_avg - ev.flipster_price) / ev.flipster_price * 1e4;
-            if ev.side == "long" { raw } else { -raw }
+            if ev.side == "long" {
+                raw
+            } else {
+                -raw
+            }
         } else {
             0.0
         };
         let g_entry_slip = if g_fill_price > 0.0 && ev.gate_price > 0.0 {
             let raw = (g_fill_price - ev.gate_price) / ev.gate_price * 1e4;
-            if ev.side == "long" { -raw } else { raw }
+            if ev.side == "long" {
+                -raw
+            } else {
+                raw
+            }
         } else {
             0.0
         };
         tracing::info!(
             "  [SLIP-IN] flipster={:+.2}bp gate={:+.2}bp",
-            f_entry_slip, g_entry_slip
+            f_entry_slip,
+            g_entry_slip
         );
         self.open_positions.insert(
             (ev.base.clone(), ev.position_id),
@@ -788,7 +1229,11 @@ impl Executor {
                 flipster_size: f_size,
                 flipster_slot: f_slot.unwrap_or(0),
                 gate_entry_price: g_fill_price,
-                gate_size: if g_filled_size > 0 { g_filled_size } else { g_size },
+                gate_size: if g_filled_size > 0 {
+                    g_filled_size
+                } else {
+                    g_size
+                },
                 gate_contract: gate_sym.clone(),
                 entry_spread_bp: entry_sprd_bp,
                 entry_epoch: epoch_now(),
@@ -796,6 +1241,15 @@ impl Executor {
                 f_entry_slip_bp: f_entry_slip,
                 g_entry_slip_bp: g_entry_slip,
                 signal_lag_ms_entry: signal_lag_ms,
+                f_entry_order_rtt_ms,
+                f_entry_total_ms: f_dt_ms,
+                f_maker_exit_order_rtt_ms: 0.0,
+                entry_bbo_recheck_ms,
+                entry_bbo_adverse_bp,
+                entry_topbook_qty,
+                entry_order_qty_before_topbook,
+                entry_size_before_topbook_usd,
+                entry_size_after_topbook_usd,
                 paper_f_entry: ev.flipster_price,
                 paper_g_entry: ev.gate_price,
                 exit_order_id: None,
@@ -884,6 +1338,17 @@ impl Executor {
             f_exit_slip_bp: None,
             g_exit_slip_bp: None,
             signal_lag_ms: None,
+            f_entry_order_rtt_ms: None,
+            f_entry_total_ms: None,
+            f_maker_exit_order_rtt_ms: None,
+            f_maker_cancel_rtt_ms: None,
+            f_exit_order_rtt_ms: None,
+            entry_bbo_recheck_ms: None,
+            entry_bbo_adverse_bp: None,
+            entry_topbook_qty: None,
+            entry_order_qty_before_topbook: None,
+            entry_size_before_topbook_usd: None,
+            entry_size_after_topbook_usd: None,
             paper_f_entry: None,
             paper_g_entry: None,
             paper_f_exit: None,
@@ -911,7 +1376,9 @@ impl Executor {
         self.stats.add(net);
         tracing::info!(
             "  [SAFETY-PNL] f_pnl=${:+.4} fee=${:.4} net=${:+.4}",
-            f_pnl_usd, approx_fee, net
+            f_pnl_usd,
+            approx_fee,
+            net
         );
         self.stats.print();
     }
@@ -923,7 +1390,11 @@ impl Executor {
             .map(|(_, v)| v);
         tracing::info!(
             "[EXIT] {} | side={} | pos_id={} | paper f={} g={}",
-            ev.base, ev.side, ev.position_id, ev.flipster_price, ev.gate_price
+            ev.base,
+            ev.side,
+            ev.position_id,
+            ev.flipster_price,
+            ev.gate_price
         );
 
         let Some(pos) = pos else {
@@ -946,17 +1417,25 @@ impl Executor {
             pos.flipster_entry_price
         };
         let mut f_close_avg = 0.0;
+        let mut f_maker_cancel_rtt_ms = 0.0;
+        let mut f_exit_order_rtt_ms = 0.0;
 
         // If we pre-placed a maker exit LIMIT, try cancelling first. The
         // cancel response tells us whether it was already filled.
         let mut maker_filled = false;
         if let Some(oid) = pos.exit_order_id.as_ref() {
+            let cancel_t0 = Instant::now();
             match self.flipster.cancel_order(&flipster_sym, oid).await {
                 Ok(_) => {
+                    f_maker_cancel_rtt_ms = cancel_t0.elapsed().as_secs_f64() * 1000.0;
                     // Cancel succeeded → LIMIT was still open, not filled.
-                    tracing::info!("  [MAKER-EXIT] cancelled (will MARKET close)");
+                    tracing::info!(
+                        "  [MAKER-EXIT] cancelled rtt={:.0}ms (will MARKET close)",
+                        f_maker_cancel_rtt_ms
+                    );
                 }
                 Err(e) => {
+                    f_maker_cancel_rtt_ms = cancel_t0.elapsed().as_secs_f64() * 1000.0;
                     let msg = format!("{e}");
                     // "Order not found" / "already filled" / similar errors
                     // mean the LIMIT was filled before we cancelled.
@@ -1011,7 +1490,11 @@ impl Executor {
             let (close_order_type, close_price) = if self.multiple_positions {
                 let lim_px = match (ev.flipster_bid, ev.flipster_ask) {
                     (Some(b), Some(a)) if b > 0.0 && a > 0.0 => {
-                        if close_side == "short" { b } else { a }
+                        if close_side == "short" {
+                            b
+                        } else {
+                            a
+                        }
                     }
                     _ => ref_px,
                 };
@@ -1019,6 +1502,7 @@ impl Executor {
             } else {
                 ("ORDER_TYPE_MARKET", ref_px)
             };
+            let close_t0 = Instant::now();
             match self
                 .flipster_place(
                     &flipster_sym,
@@ -1033,23 +1517,33 @@ impl Executor {
                 .await
             {
                 Ok(r) => {
+                    f_exit_order_rtt_ms = close_t0.elapsed().as_secs_f64() * 1000.0;
                     let (avg, _, _) = flip_extract_fill(&r);
                     f_close_avg = avg;
                     tracing::info!(
-                        "  [FLIPSTER CLOSE] OK type={} @ {}",
-                        close_order_type, f_close_avg
+                        "  [FLIPSTER CLOSE] OK type={} @ {} rtt={:.0}ms",
+                        close_order_type,
+                        f_close_avg,
+                        f_exit_order_rtt_ms
                     );
                 }
-                Err(e) => tracing::error!(
-                    error = %e,
-                    "  [FLIPSTER CLOSE] FAILED — MANUAL CLOSE may be needed"
-                ),
+                Err(e) => {
+                    f_exit_order_rtt_ms = close_t0.elapsed().as_secs_f64() * 1000.0;
+                    tracing::error!(
+                        error = %e,
+                        "  [FLIPSTER CLOSE] FAILED — MANUAL CLOSE may be needed"
+                    );
+                }
             }
         }
 
         // Gate close: reduce-only IOC opposite direction. Skipped in
         // single-leg mode (gate_lead never opens a Gate leg).
-        let close_size_signed = if ev.side == "long" { pos.gate_size } else { -pos.gate_size };
+        let close_size_signed = if ev.side == "long" {
+            pos.gate_size
+        } else {
+            -pos.gate_size
+        };
         let mut g_close_avg = 0.0;
         if !self.flipster_only && pos.gate_size != 0 {
             match self
@@ -1062,7 +1556,10 @@ impl Executor {
                     g_close_avg = avg;
                     tracing::info!(
                         "  [GATE CLOSE] ok={} label={} size={} fill={}",
-                        r.ok, r.label(), close_size_signed, g_close_avg
+                        r.ok,
+                        r.label(),
+                        close_size_signed,
+                        g_close_avg
                     );
                 }
                 Err(e) => tracing::error!(error = %e, "  [GATE CLOSE] FAILED"),
@@ -1100,13 +1597,21 @@ impl Executor {
         // Slippage at exit.
         let f_exit_slip = if f_close_avg > 0.0 && ev.flipster_price > 0.0 {
             let raw = (f_close_avg - ev.flipster_price) / ev.flipster_price * 1e4;
-            if ev.side == "long" { -raw } else { raw }
+            if ev.side == "long" {
+                -raw
+            } else {
+                raw
+            }
         } else {
             0.0
         };
         let g_exit_slip = if g_close_avg > 0.0 && ev.gate_price > 0.0 {
             let raw = (g_close_avg - ev.gate_price) / ev.gate_price * 1e4;
-            if ev.side == "long" { raw } else { -raw }
+            if ev.side == "long" {
+                raw
+            } else {
+                -raw
+            }
         } else {
             0.0
         };
@@ -1114,7 +1619,11 @@ impl Executor {
         self.stats.add(net_after_fees);
         tracing::info!(
             "  [PNL] flipster=${:+.4} gate=${:+.4} net=${:+.4} (-fees ${:.4}) → ${:+.4}",
-            f_pnl_usd, g_pnl_usd, net_pnl_usd, approx_fee, net_after_fees
+            f_pnl_usd,
+            g_pnl_usd,
+            net_pnl_usd,
+            approx_fee,
+            net_after_fees
         );
         self.stats.print();
 
@@ -1126,19 +1635,19 @@ impl Executor {
         };
         let paper_bp_for_dyn = if pos.paper_f_entry > 0.0 && ev.flipster_price > 0.0 {
             let raw = (ev.flipster_price - pos.paper_f_entry) / pos.paper_f_entry * 1e4;
-            if ev.side == "long" { raw } else { -raw }
+            if ev.side == "long" {
+                raw
+            } else {
+                -raw
+            }
         } else {
             0.0
         };
         // Total slippage = entry slip + exit slip (both in our direction
         // expressed as cost, i.e. positive = unfavorable).
         let slip_bp_total = pos.f_entry_slip_bp.max(0.0) + f_exit_slip.max(0.0);
-        self.sym_stats.record_trade(
-            &pos.base,
-            pnl_bp_for_dyn,
-            paper_bp_for_dyn,
-            slip_bp_total,
-        );
+        self.sym_stats
+            .record_trade(&pos.base, pnl_bp_for_dyn, paper_bp_for_dyn, slip_bp_total);
 
         let exit_reason = match ev.timestamp.as_str() {
             "shutdown" => "shutdown".to_string(),
@@ -1161,6 +1670,17 @@ impl Executor {
             f_exit_slip_bp: Some(round2(f_exit_slip)),
             g_exit_slip_bp: Some(round2(g_exit_slip)),
             signal_lag_ms: Some(pos.signal_lag_ms_entry.round()),
+            f_entry_order_rtt_ms: Some(round2(pos.f_entry_order_rtt_ms)),
+            f_entry_total_ms: Some(round2(pos.f_entry_total_ms)),
+            f_maker_exit_order_rtt_ms: Some(round2(pos.f_maker_exit_order_rtt_ms)),
+            f_maker_cancel_rtt_ms: Some(round2(f_maker_cancel_rtt_ms)),
+            f_exit_order_rtt_ms: Some(round2(f_exit_order_rtt_ms)),
+            entry_bbo_recheck_ms: Some(round2(pos.entry_bbo_recheck_ms)),
+            entry_bbo_adverse_bp: Some(round2(pos.entry_bbo_adverse_bp)),
+            entry_topbook_qty: Some(round6(pos.entry_topbook_qty)),
+            entry_order_qty_before_topbook: Some(round6(pos.entry_order_qty_before_topbook)),
+            entry_size_before_topbook_usd: Some(round6(pos.entry_size_before_topbook_usd)),
+            entry_size_after_topbook_usd: Some(round6(pos.entry_size_after_topbook_usd)),
             paper_f_entry: Some(pos.paper_f_entry),
             paper_g_entry: Some(pos.paper_g_entry),
             paper_f_exit: Some(ev.flipster_price),
@@ -1237,23 +1757,38 @@ impl Executor {
     /// longer than `threshold_s`. Catches stuck entry LIMITs whose cancel
     /// API call failed silently. Throttled to 1/tick like the position
     /// sweeper to stay under CF 1015.
+    ///
+    /// Bounded retry: after `EXECUTOR_MAX_CANCEL_RETRIES` (default 3)
+    /// consecutive cancel failures the order is moved to
+    /// `abandoned_orders` and skipped on subsequent passes. This stops
+    /// the burn-and-lag pattern where a permanently stuck order on the
+    /// venue side made us hammer cancel every 8s forever, with each
+    /// cancel API call (~300ms RTT through proxy) introducing a tail of
+    /// ZMQ-dispatch lag for new entry signals queued behind it.
     pub async fn sweep_stale_orders(self: Arc<Self>, threshold_s: f64) {
         let ws_orders = self.flip_state.read().await.iter_open_orders();
         if ws_orders.is_empty() {
             self.order_first_seen.clear();
+            self.cancel_failure_count.clear();
+            self.abandoned_orders.clear();
             return;
         }
+        let max_retries: u32 = std::env::var("EXECUTOR_MAX_CANCEL_RETRIES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3);
         let now = std::time::Instant::now();
-        let mut still_open: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut still_open: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut acted = false;
         for (oid, sym) in ws_orders {
             still_open.insert(oid.clone());
+            // Skip orders we've given up on. They keep showing up in WS
+            // state until the venue resolves them, but we no longer act.
+            if self.abandoned_orders.contains_key(&oid) {
+                continue;
+            }
             let age_s = {
-                let first = self
-                    .order_first_seen
-                    .entry(oid.clone())
-                    .or_insert(now);
+                let first = self.order_first_seen.entry(oid.clone()).or_insert(now);
                 now.duration_since(*first.value()).as_secs_f64()
             };
             if age_s < threshold_s || acted {
@@ -1261,26 +1796,65 @@ impl Executor {
             }
             acted = true;
             self.order_first_seen.remove(&oid);
+            let attempt = self
+                .cancel_failure_count
+                .get(&oid)
+                .map(|v| *v + 1)
+                .unwrap_or(1);
             tracing::warn!(
-                order_id = %oid, symbol = %sym, age_s = age_s,
+                order_id = %oid, symbol = %sym, age_s = age_s, attempt, max = max_retries,
                 "[STALE-ORDER] cancelling"
             );
             let flipster = self.flipster.clone();
             let oid_c = oid.clone();
             let sym_c = sym.clone();
+            let cancel_failure_count = self.cancel_failure_count.clone();
+            let abandoned = self.abandoned_orders.clone();
             tokio::spawn(async move {
                 match flipster.cancel_order(&sym_c, &oid_c).await {
-                    Ok(_) => tracing::info!(
-                        order_id = %oid_c, "[STALE-ORDER] cancel OK"
-                    ),
-                    Err(e) => tracing::warn!(
-                        error = %e, order_id = %oid_c,
-                        "[STALE-ORDER] cancel err"
-                    ),
+                    Ok(_) => {
+                        tracing::info!(
+                            order_id = %oid_c,
+                            "[STALE-ORDER] cancel OK"
+                        );
+                        cancel_failure_count.remove(&oid_c);
+                    }
+                    Err(e) => {
+                        let new_count = {
+                            let mut c = cancel_failure_count.entry(oid_c.clone()).or_insert(0);
+                            *c += 1;
+                            *c
+                        };
+                        if new_count >= max_retries {
+                            cancel_failure_count.remove(&oid_c);
+                            abandoned.insert(
+                                oid_c.clone(),
+                                AbandonedOrder {
+                                    at: std::time::Instant::now(),
+                                    attempts: new_count,
+                                    last_error: format!("{e}"),
+                                },
+                            );
+                            tracing::error!(
+                                error = %e, order_id = %oid_c, attempts = new_count,
+                                "[STALE-ORDER] giving up — added to abandon list"
+                            );
+                        } else {
+                            tracing::warn!(
+                                error = %e, order_id = %oid_c,
+                                attempt = new_count, max = max_retries,
+                                "[STALE-ORDER] cancel err; will retry"
+                            );
+                        }
+                    }
                 }
             });
         }
         self.order_first_seen.retain(|k, _| still_open.contains(k));
+        self.cancel_failure_count.retain(|k, _| still_open.contains(k));
+        // Auto-prune the abandon list once the venue has resolved it
+        // (filled / cancelled out-of-band / disappeared from WS).
+        self.abandoned_orders.retain(|k, _| still_open.contains(k));
     }
 
     /// Sweep positions/orders that exist on Flipster (per WS state) but
@@ -1381,8 +1955,15 @@ impl Executor {
                 tokio::spawn(async move {
                     match flipster
                         .place_order_oneway_with_margin(
-                            &sym_clone, &side_clone, notional_usd, ref_px, lev,
-                            true, "ORDER_TYPE_MARKET", false, &margin_mode,
+                            &sym_clone,
+                            &side_clone,
+                            notional_usd,
+                            ref_px,
+                            lev,
+                            true,
+                            "ORDER_TYPE_MARKET",
+                            false,
+                            &margin_mode,
                         )
                         .await
                     {
@@ -1515,8 +2096,7 @@ fn signal_age_ms(ts: &str) -> f64 {
 }
 
 fn now_iso() -> String {
-    Utc::now()
-        .to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
+    Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
 }
 
 fn epoch_now() -> f64 {
@@ -1524,6 +2104,79 @@ fn epoch_now() -> f64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
     d.as_secs_f64()
+}
+
+fn env_f64(name: &str, default: f64) -> f64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(default)
+}
+
+fn env_bool(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .map(|v| v != 0)
+        .unwrap_or(default)
+}
+
+fn executor_bbo_recheck_enabled(size_usd: f64, signal_lag_ms: f64) -> bool {
+    if !env_bool("GL_EXECUTOR_BBO_RECHECK", false) {
+        return false;
+    }
+    let min_size = env_f64("GL_EXECUTOR_BBO_RECHECK_MIN_SIZE", 300.0);
+    let min_lag = env_f64("GL_EXECUTOR_BBO_RECHECK_MIN_SIGNAL_LAG_MS", 80.0);
+    size_usd >= min_size || signal_lag_ms >= min_lag
+}
+
+fn topbook_size_guard_enabled() -> bool {
+    env_bool("GL_EXECUTOR_TOPBOOK_SIZE_GUARD", true)
+}
+
+fn depth_size_guard_enabled() -> bool {
+    env_bool("GL_EXECUTOR_DEPTH_SIZE_GUARD", true)
+}
+
+/// Walk the same take-side levels as `depth_walk_for_qty` but stop at
+/// `max_impact_bp`. Returns the cumulative qty reachable while staying
+/// within the impact budget. None if depth missing/stale.
+async fn qty_within_impact(
+    state: &crate::flipster_ws::SharedState,
+    symbol: &str,
+    side: &str,
+    max_impact_bp: f64,
+    max_age_ms: u64,
+) -> Option<f64> {
+    let snap = {
+        let s = state.read().await;
+        s.depth.get(symbol).cloned()?
+    };
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    if now_ms.saturating_sub(snap.recv_ms) > max_age_ms {
+        return None;
+    }
+    let levels = if side == "long" { &snap.asks } else { &snap.bids };
+    if levels.is_empty() {
+        return None;
+    }
+    let top = levels[0].0;
+    if top <= 0.0 {
+        return None;
+    }
+    let mut acc = 0.0;
+    for (px, sz) in levels.iter() {
+        let impact_bp =
+            ((px - top) / top) * 1e4 * if side == "long" { 1.0 } else { -1.0 };
+        if impact_bp > max_impact_bp {
+            break;
+        }
+        acc += sz;
+    }
+    Some(acc)
 }
 
 fn round2(v: f64) -> f64 {

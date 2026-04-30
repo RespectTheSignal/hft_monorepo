@@ -342,22 +342,78 @@ async fn main() -> Result<()> {
 
         // Gate→Flipster lead-lag strategy. Runs as a paper bot alongside the
         // pairs variants. Set GATE_LEAD=0 to disable (default: enabled).
+        //
+        // BACKTEST_GL_SWEEP=1 spawns 4 variants with min_move_bp ∈ {15,20,25,30}
+        // and an empty whitelist (full Binance∩Flipster universe). Each
+        // variant gets its own account_id (GL_BT_mm15…mm30) so position_log
+        // rows can be grouped per (variant, base) for whitelist screening.
         if std::env::var("GATE_LEAD").unwrap_or_else(|_| "1".into()) != "0" {
-            let writer_g = writer.clone();
-            let rx_g = tx.subscribe();
-            let mut gl_params = collector::gate_lead::GateLeadParams::from_env();
-            // Historical replay ticks have event_ts hours/days behind
-            // wall_now — the wall-clock stale gate would drop them all.
-            // Mirror what strategies.rs does for pairs.
-            gl_params.backtest_mode = is_backtest;
-            tracing::info!(
-                account_id = %gl_params.account_id,
-                backtest = gl_params.backtest_mode,
-                "gate_lead strategy enabled"
-            );
-            tokio::spawn(async move {
-                collector::gate_lead::run(writer_g, rx_g, gl_params).await;
-            });
+            let gl_sweep = is_backtest
+                && std::env::var("BACKTEST_GL_SWEEP")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+            // BACKTEST_GL_ANCHOR_SWEEP=1 → fix min_move_bp at 30 and
+            // sweep anchor_s ∈ {2, 3, 5, 7, 10} instead. Use this to
+            // pick the best lookback window without touching mm.
+            let anchor_sweep = is_backtest
+                && std::env::var("BACKTEST_GL_ANCHOR_SWEEP")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+            let mm_grid: Vec<f64> = if gl_sweep {
+                vec![15.0, 20.0, 25.0, 30.0]
+            } else {
+                vec![] // single default variant
+            };
+            let anchor_grid: Vec<f64> = if anchor_sweep {
+                vec![2.0, 3.0, 5.0, 7.0, 10.0]
+            } else {
+                vec![]
+            };
+            let mut gl_variants: Vec<collector::gate_lead::GateLeadParams> = Vec::new();
+            if gl_sweep {
+                for mm in &mm_grid {
+                    let mut p = collector::gate_lead::GateLeadParams::from_env();
+                    p.backtest_mode = true;
+                    p.min_move_bp = *mm;
+                    p.account_id = format!("GL_BT_mm{}", *mm as i32);
+                    p.mode_tag = backtest_tag.clone();
+                    p.whitelist = Vec::new();
+                    gl_variants.push(p);
+                }
+            } else if anchor_sweep {
+                for a in &anchor_grid {
+                    let mut p = collector::gate_lead::GateLeadParams::from_env();
+                    p.backtest_mode = true;
+                    p.min_move_bp = 30.0;
+                    p.anchor_s = *a;
+                    p.account_id = format!("GL_BT_a{}s", *a as i32);
+                    p.mode_tag = backtest_tag.clone();
+                    p.whitelist = Vec::new();
+                    gl_variants.push(p);
+                }
+            } else {
+                let mut p = collector::gate_lead::GateLeadParams::from_env();
+                p.backtest_mode = is_backtest;
+                if is_backtest {
+                    p.mode_tag = backtest_tag.clone();
+                }
+                gl_variants.push(p);
+            }
+            for gl_params in gl_variants {
+                tracing::info!(
+                    account_id = %gl_params.account_id,
+                    min_move_bp = gl_params.min_move_bp,
+                    whitelist_len = gl_params.whitelist.len(),
+                    backtest = gl_params.backtest_mode,
+                    mode_tag = %gl_params.mode_tag,
+                    "gate_lead strategy enabled"
+                );
+                let writer_g = writer.clone();
+                let rx_g = tx.subscribe();
+                tokio::spawn(async move {
+                    collector::gate_lead::run(writer_g, rx_g, gl_params).await;
+                });
+            }
         }
 
         // Spread-reversion strategy (Binance↔Flipster mid-gap mean revert).
@@ -425,12 +481,12 @@ async fn main() -> Result<()> {
             let start_iso = start_ts.to_rfc3339();
             let end_iso = end_ts.to_rfc3339();
             let sql = format!(
-                "SELECT account_id, count() n, round(avg(pnl_bp),2) avg_bp, \
+                "SELECT strategy, account_id, count() n, round(avg(pnl_bp),2) avg_bp, \
                  round(sum(pnl_bp*size/10000),2) sum_usd, \
                  round(sum(case when pnl_bp>0 then 1.0 else 0.0 end)/count()*100,1) win \
-                 FROM position_log WHERE strategy='pairs' AND mode='{backtest_tag}' \
+                 FROM position_log WHERE mode='{backtest_tag}' \
                  AND timestamp > '{start_iso}' AND timestamp <= '{end_iso}' \
-                 GROUP BY account_id ORDER BY sum_usd DESC"
+                 GROUP BY strategy, account_id ORDER BY sum_usd DESC"
             );
             let client = reqwest::Client::new();
             let url = format!("{}/exec", questdb_http.trim_end_matches('/'));
@@ -440,19 +496,20 @@ async fn main() -> Result<()> {
                         if let Some(ds) = v.get("dataset").and_then(|x| x.as_array()) {
                             println!("\n=== BACKTEST SUMMARY ({} → {}) ===", start_iso, end_iso);
                             println!(
-                                "{:<28} {:>7} {:>9} {:>11} {:>7}",
-                                "variant", "n", "avg_bp", "sum_$", "win%"
+                                "{:<14} {:<24} {:>7} {:>9} {:>11} {:>7}",
+                                "strategy", "variant", "n", "avg_bp", "sum_$", "win%"
                             );
                             for row in ds {
                                 if let Some(a) = row.as_array() {
-                                    let variant = a.first().and_then(|x| x.as_str()).unwrap_or("?");
-                                    let n = a.get(1).and_then(|x| x.as_i64()).unwrap_or(0);
-                                    let avg_bp = a.get(2).and_then(|x| x.as_f64()).unwrap_or(0.0);
-                                    let sum_usd = a.get(3).and_then(|x| x.as_f64()).unwrap_or(0.0);
-                                    let win = a.get(4).and_then(|x| x.as_f64()).unwrap_or(0.0);
+                                    let strat = a.first().and_then(|x| x.as_str()).unwrap_or("?");
+                                    let variant = a.get(1).and_then(|x| x.as_str()).unwrap_or("?");
+                                    let n = a.get(2).and_then(|x| x.as_i64()).unwrap_or(0);
+                                    let avg_bp = a.get(3).and_then(|x| x.as_f64()).unwrap_or(0.0);
+                                    let sum_usd = a.get(4).and_then(|x| x.as_f64()).unwrap_or(0.0);
+                                    let win = a.get(5).and_then(|x| x.as_f64()).unwrap_or(0.0);
                                     println!(
-                                        "{:<28} {:>7} {:>+9.2} {:>+11.2} {:>6.1}",
-                                        variant, n, avg_bp, sum_usd, win
+                                        "{:<14} {:<24} {:>7} {:>+9.2} {:>+11.2} {:>6.1}",
+                                        strat, variant, n, avg_bp, sum_usd, win
                                     );
                                 }
                             }

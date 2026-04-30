@@ -2,21 +2,59 @@
 //! checks. Keeps the entry/exit code in `executor.rs` linear.
 
 use serde_json::Value;
+use std::sync::Arc;
+use std::time::Instant;
 
 use crate::flipster_ws::SharedState;
 use flipster_client::FlipsterClient;
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LimitIocTiming {
+    pub place_rtt_ms: f64,
+    pub total_ms: f64,
+}
+
 /// (avg_price, size, slot) extracted from a Flipster open/close response.
 /// Mirrors Python's `_extract_flipster_fill`.
+///
+/// Priority on `avgPrice`: **order first, then position**. Reason: for a
+/// reduce-only close, `position.avgPrice` is the *remaining* position's
+/// entry average (= the original open price), not the price at which we
+/// just sold. Using it as the close price flips PnL by 50-100bp on
+/// active trades. `order.avgPrice` is the fill price of the operation
+/// we just submitted — what we actually want for both open and close.
+/// We skip zero values so a missing/unfilled `order.avgPrice` still
+/// falls through to `position.avgPrice` correctly.
 pub fn extract_fill(resp: &Value) -> (f64, f64, Option<u32>) {
     let pos = resp.get("position").unwrap_or(&Value::Null);
     let order = resp.get("order").unwrap_or(&Value::Null);
-    let avg = first_f64(&[pos.get("avgPrice"), order.get("avgPrice")]).unwrap_or(0.0);
-    let size = first_f64(&[pos.get("size"), order.get("size")])
+    let avg = first_positive_f64(&[order.get("avgPrice"), pos.get("avgPrice")])
+        .unwrap_or(0.0);
+    let size = first_positive_f64(&[order.get("size"), pos.get("size")])
         .map(|s| s.abs())
         .unwrap_or(0.0);
     let slot = first_u32(&[pos.get("slot"), order.get("slot")]);
     (avg, size, slot)
+}
+
+fn first_positive_f64(opts: &[Option<&Value>]) -> Option<f64> {
+    for o in opts {
+        if let Some(v) = o {
+            if let Some(n) = v.as_f64() {
+                if n != 0.0 {
+                    return Some(n);
+                }
+            }
+            if let Some(s) = v.as_str() {
+                if let Ok(n) = s.parse::<f64>() {
+                    if n != 0.0 {
+                        return Some(n);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn first_f64(opts: &[Option<&Value>]) -> Option<f64> {
@@ -59,7 +97,7 @@ fn first_u32(opts: &[Option<&Value>]) -> Option<u32> {
 ///
 /// Mirrors Python `flipster_limit_ioc_entry`.
 pub async fn limit_ioc_entry(
-    fc: &FlipsterClient,
+    fc: Arc<FlipsterClient>,
     state: &SharedState,
     symbol: &str,
     side: &str,
@@ -68,11 +106,13 @@ pub async fn limit_ioc_entry(
     leverage: u32,
     wait_s: f64,
     margin: &str,
-) -> anyhow::Result<(Option<Value>, Option<String>)> {
+) -> anyhow::Result<(Option<Value>, Option<String>, LimitIocTiming)> {
+    let total_t0 = Instant::now();
     // Flipster validates LIMIT prices tightly against current market
     // ("InvalidPrice" if too far off). Pass the signal price as-is —
     // pipeline lag is small, and crossing happens via the order's TIF.
     let limit_price = signal_price;
+    let place_t0 = Instant::now();
     let resp = fc
         .place_order_oneway_with_margin(
             symbol,
@@ -86,10 +126,48 @@ pub async fn limit_ioc_entry(
             margin,
         )
         .await?;
+    let place_rtt_ms = place_t0.elapsed().as_secs_f64() * 1000.0;
 
     let (avg, sz, _slot) = extract_fill(&resp);
     if avg > 0.0 && sz > 0.0 {
-        return Ok((Some(resp), None));
+        // Got an immediate partial-or-full fill. Flipster doesn't have
+        // a true IOC TIF, so any UNFILLED residual stays on the book and
+        // keeps matching incoming liquidity for the next several seconds.
+        // Those extra fills land *after* we've returned the initial fill
+        // size, so the executor tracks N units while the venue actually
+        // holds N+M — the M is the orphan that sweep_abort_orphans
+        // force-MARKET-closes 5s later (with extra slippage). Fix: cancel
+        // the residual immediately. If the order was already fully
+        // filled, cancel is a no-op error which we ignore.
+        let order_id = resp
+            .get("order")
+            .and_then(|o| o.get("orderId"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        if let Some(oid) = order_id {
+            // Fire-and-forget so we don't add latency to the entry path.
+            let fc_clone = fc.clone();
+            let sym = symbol.to_string();
+            tokio::spawn(async move {
+                match fc_clone.cancel_order(&sym, &oid).await {
+                    Ok(_) => tracing::debug!(
+                        order_id = %oid, "[LIMIT-IOC] residual cancelled"
+                    ),
+                    Err(e) => tracing::debug!(
+                        error = %e, order_id = %oid,
+                        "[LIMIT-IOC] residual cancel err (likely fully filled, ignore)"
+                    ),
+                }
+            });
+        }
+        return Ok((
+            Some(resp),
+            None,
+            LimitIocTiming {
+                place_rtt_ms,
+                total_ms: total_t0.elapsed().as_secs_f64() * 1000.0,
+            },
+        ));
     }
 
     let order_id = resp
@@ -98,7 +176,14 @@ pub async fn limit_ioc_entry(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let Some(order_id) = order_id else {
-        return Ok((None, None));
+        return Ok((
+            None,
+            None,
+            LimitIocTiming {
+                place_rtt_ms,
+                total_ms: total_t0.elapsed().as_secs_f64() * 1000.0,
+            },
+        ));
     };
 
     tokio::time::sleep(std::time::Duration::from_secs_f64(wait_s)).await;
@@ -145,8 +230,7 @@ pub async fn limit_ioc_entry(
         if s.position_size(symbol, 0).abs() > 0.0 || s.has_position(symbol, 0) {
             drop(s);
             // Once any signal arrives, poll size for up to 1s more
-            let inner_deadline =
-                std::time::Instant::now() + std::time::Duration::from_secs(1);
+            let inner_deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
             loop {
                 if state.read().await.position_size(symbol, 0).abs() > 0.0 {
                     break;
@@ -176,7 +260,14 @@ pub async fn limit_ioc_entry(
             },
             "order": resp.get("order").cloned().unwrap_or(Value::Null),
         });
-        return Ok((Some(synthetic), Some(order_id)));
+        return Ok((
+            Some(synthetic),
+            Some(order_id),
+            LimitIocTiming {
+                place_rtt_ms,
+                total_ms: total_t0.elapsed().as_secs_f64() * 1000.0,
+            },
+        ));
     }
 
     // Margin-only fallback: WS shows margin reserved but never delivered
@@ -198,11 +289,23 @@ pub async fn limit_ioc_entry(
             },
             "order": resp.get("order").cloned().unwrap_or(Value::Null),
         });
-        tracing::warn!(
-            "[FLIPSTER-LIMIT] margin-only fallback (size unknown) — treating as filled"
-        );
-        return Ok((Some(synthetic), Some(order_id)));
+        tracing::warn!("[FLIPSTER-LIMIT] margin-only fallback (size unknown) — treating as filled");
+        return Ok((
+            Some(synthetic),
+            Some(order_id),
+            LimitIocTiming {
+                place_rtt_ms,
+                total_ms: total_t0.elapsed().as_secs_f64() * 1000.0,
+            },
+        ));
     }
 
-    Ok((None, Some(order_id)))
+    Ok((
+        None,
+        Some(order_id),
+        LimitIocTiming {
+            place_rtt_ms,
+            total_ms: total_t0.elapsed().as_secs_f64() * 1000.0,
+        },
+    ))
 }

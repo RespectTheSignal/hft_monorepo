@@ -1,0 +1,2249 @@
+[
+  {
+    "symbol": "SYRUP",
+    "n": 118,
+    "avg_bp": 26.09,
+    "sum_usd": 61.85,
+    "win_pct": 93.2
+  },
+  {
+    "symbol": "INIT",
+    "n": 238,
+    "avg_bp": 25.54,
+    "sum_usd": 136.05,
+    "win_pct": 89.5
+  },
+  {
+    "symbol": "XLM",
+    "n": 37,
+    "avg_bp": 24.94,
+    "sum_usd": 21.87,
+    "win_pct": 78.4
+  },
+  {
+    "symbol": "SOLV",
+    "n": 473,
+    "avg_bp": 24.060000000000002,
+    "sum_usd": 234.51,
+    "win_pct": 86.9
+  },
+  {
+    "symbol": "TRB",
+    "n": 103,
+    "avg_bp": 23.98,
+    "sum_usd": 55.95,
+    "win_pct": 78.60000000000001
+  },
+  {
+    "symbol": "VTHO",
+    "n": 35,
+    "avg_bp": 23.34,
+    "sum_usd": 17.26,
+    "win_pct": 94.30000000000001
+  },
+  {
+    "symbol": "2Z",
+    "n": 145,
+    "avg_bp": 23.31,
+    "sum_usd": 79.37,
+    "win_pct": 90.30000000000001
+  },
+  {
+    "symbol": "CYBER",
+    "n": 76,
+    "avg_bp": 23.09,
+    "sum_usd": 43.56,
+    "win_pct": 89.5
+  },
+  {
+    "symbol": "EDEN",
+    "n": 670,
+    "avg_bp": 22.6,
+    "sum_usd": 306.41,
+    "win_pct": 82.80000000000001
+  },
+  {
+    "symbol": "ALT",
+    "n": 185,
+    "avg_bp": 22.27,
+    "sum_usd": 111.87,
+    "win_pct": 85.4
+  },
+  {
+    "symbol": "RPL",
+    "n": 117,
+    "avg_bp": 22.27,
+    "sum_usd": 61.27,
+    "win_pct": 84.60000000000001
+  },
+  {
+    "symbol": "AT",
+    "n": 433,
+    "avg_bp": 22.09,
+    "sum_usd": 178.66,
+    "win_pct": 82.7
+  },
+  {
+    "symbol": "USTC",
+    "n": 439,
+    "avg_bp": 22.04,
+    "sum_usd": 187.4,
+    "win_pct": 84.30000000000001
+  },
+  {
+    "symbol": "ASTR",
+    "n": 63,
+    "avg_bp": 21.830000000000002,
+    "sum_usd": 34.84,
+    "win_pct": 85.7
+  },
+  {
+    "symbol": "NIL",
+    "n": 625,
+    "avg_bp": 21.77,
+    "sum_usd": 295.02,
+    "win_pct": 82.60000000000001
+  },
+  {
+    "symbol": "TWT",
+    "n": 125,
+    "avg_bp": 21.73,
+    "sum_usd": 60.33,
+    "win_pct": 87.2
+  },
+  {
+    "symbol": "DOLO",
+    "n": 296,
+    "avg_bp": 21.48,
+    "sum_usd": 115.96000000000001,
+    "win_pct": 86.10000000000001
+  },
+  {
+    "symbol": "CELO",
+    "n": 70,
+    "avg_bp": 21.46,
+    "sum_usd": 31.94,
+    "win_pct": 91.4
+  },
+  {
+    "symbol": "MORPHO",
+    "n": 227,
+    "avg_bp": 21.43,
+    "sum_usd": 123.24000000000001,
+    "win_pct": 91.60000000000001
+  },
+  {
+    "symbol": "B2",
+    "n": 304,
+    "avg_bp": 21.34,
+    "sum_usd": 137.9,
+    "win_pct": 79.60000000000001
+  },
+  {
+    "symbol": "SCR",
+    "n": 285,
+    "avg_bp": 21.32,
+    "sum_usd": 127.10000000000001,
+    "win_pct": 83.9
+  },
+  {
+    "symbol": "ZKC",
+    "n": 198,
+    "avg_bp": 21.22,
+    "sum_usd": 74.49,
+    "win_pct": 83.80000000000001
+  },
+  {
+    "symbol": "LISTA",
+    "n": 578,
+    "avg_bp": 20.89,
+    "sum_usd": 275.89,
+    "win_pct": 81.30000000000001
+  },
+  {
+    "symbol": "ID",
+    "n": 111,
+    "avg_bp": 20.69,
+    "sum_usd": 59.84,
+    "win_pct": 86.5
+  },
+  {
+    "symbol": "SHELL",
+    "n": 493,
+    "avg_bp": 20.64,
+    "sum_usd": 255.85,
+    "win_pct": 83.60000000000001
+  },
+  {
+    "symbol": "EPIC",
+    "n": 574,
+    "avg_bp": 20.59,
+    "sum_usd": 197.72,
+    "win_pct": 85.9
+  },
+  {
+    "symbol": "ACH",
+    "n": 85,
+    "avg_bp": 20.56,
+    "sum_usd": 35.78,
+    "win_pct": 88.2
+  },
+  {
+    "symbol": "GMX",
+    "n": 126,
+    "avg_bp": 20.51,
+    "sum_usd": 59.6,
+    "win_pct": 89.7
+  },
+  {
+    "symbol": "MANTA",
+    "n": 66,
+    "avg_bp": 20.36,
+    "sum_usd": 26.79,
+    "win_pct": 87.9
+  },
+  {
+    "symbol": "G",
+    "n": 49,
+    "avg_bp": 20.23,
+    "sum_usd": 22.39,
+    "win_pct": 83.7
+  },
+  {
+    "symbol": "HOME",
+    "n": 343,
+    "avg_bp": 20.18,
+    "sum_usd": 177.49,
+    "win_pct": 85.7
+  },
+  {
+    "symbol": "PIXEL",
+    "n": 430,
+    "avg_bp": 20.12,
+    "sum_usd": 154.69,
+    "win_pct": 81.4
+  },
+  {
+    "symbol": "LQTY",
+    "n": 126,
+    "avg_bp": 20.04,
+    "sum_usd": 62.28,
+    "win_pct": 84.9
+  },
+  {
+    "symbol": "MIRA",
+    "n": 187,
+    "avg_bp": 20.01,
+    "sum_usd": 69.47,
+    "win_pct": 89.30000000000001
+  },
+  {
+    "symbol": "PARTI",
+    "n": 479,
+    "avg_bp": 19.97,
+    "sum_usd": 221.93,
+    "win_pct": 79.7
+  },
+  {
+    "symbol": "BRETT",
+    "n": 464,
+    "avg_bp": 19.76,
+    "sum_usd": 202.20000000000002,
+    "win_pct": 78.9
+  },
+  {
+    "symbol": "MITO",
+    "n": 442,
+    "avg_bp": 19.650000000000002,
+    "sum_usd": 186.19,
+    "win_pct": 78.10000000000001
+  },
+  {
+    "symbol": "TURTLE",
+    "n": 643,
+    "avg_bp": 19.6,
+    "sum_usd": 271.26,
+    "win_pct": 84.80000000000001
+  },
+  {
+    "symbol": "LUMIA",
+    "n": 849,
+    "avg_bp": 19.59,
+    "sum_usd": 398.04,
+    "win_pct": 83.9
+  },
+  {
+    "symbol": "FRAX",
+    "n": 235,
+    "avg_bp": 19.41,
+    "sum_usd": 120.16,
+    "win_pct": 85.5
+  },
+  {
+    "symbol": "ZKP",
+    "n": 178,
+    "avg_bp": 19.34,
+    "sum_usd": 73.43,
+    "win_pct": 89.9
+  },
+  {
+    "symbol": "CATI",
+    "n": 329,
+    "avg_bp": 19.27,
+    "sum_usd": 117.54,
+    "win_pct": 86.0
+  },
+  {
+    "symbol": "XVS",
+    "n": 52,
+    "avg_bp": 19.240000000000002,
+    "sum_usd": 22.5,
+    "win_pct": 82.7
+  },
+  {
+    "symbol": "F",
+    "n": 80,
+    "avg_bp": 19.240000000000002,
+    "sum_usd": 24.16,
+    "win_pct": 87.5
+  },
+  {
+    "symbol": "FOGO",
+    "n": 194,
+    "avg_bp": 19.14,
+    "sum_usd": 84.74,
+    "win_pct": 74.7
+  },
+  {
+    "symbol": "ILV",
+    "n": 129,
+    "avg_bp": 19.080000000000002,
+    "sum_usd": 56.47,
+    "win_pct": 87.60000000000001
+  },
+  {
+    "symbol": "AAVE",
+    "n": 247,
+    "avg_bp": 19.05,
+    "sum_usd": 110.86,
+    "win_pct": 89.10000000000001
+  },
+  {
+    "symbol": "CAKE",
+    "n": 85,
+    "avg_bp": 18.98,
+    "sum_usd": 28.21,
+    "win_pct": 94.10000000000001
+  },
+  {
+    "symbol": "ONG",
+    "n": 251,
+    "avg_bp": 18.86,
+    "sum_usd": 95.74000000000001,
+    "win_pct": 82.9
+  },
+  {
+    "symbol": "SQD",
+    "n": 312,
+    "avg_bp": 18.85,
+    "sum_usd": 127.08,
+    "win_pct": 80.4
+  },
+  {
+    "symbol": "BANANA",
+    "n": 132,
+    "avg_bp": 18.85,
+    "sum_usd": 65.35,
+    "win_pct": 80.30000000000001
+  },
+  {
+    "symbol": "REZ",
+    "n": 290,
+    "avg_bp": 18.84,
+    "sum_usd": 124.01,
+    "win_pct": 82.4
+  },
+  {
+    "symbol": "CGPT",
+    "n": 343,
+    "avg_bp": 18.76,
+    "sum_usd": 140.34,
+    "win_pct": 79.9
+  },
+  {
+    "symbol": "ESP",
+    "n": 171,
+    "avg_bp": 18.73,
+    "sum_usd": 65.81,
+    "win_pct": 86.0
+  },
+  {
+    "symbol": "AVAX",
+    "n": 33,
+    "avg_bp": 18.73,
+    "sum_usd": 16.78,
+    "win_pct": 78.80000000000001
+  },
+  {
+    "symbol": "SKY",
+    "n": 120,
+    "avg_bp": 18.73,
+    "sum_usd": 58.730000000000004,
+    "win_pct": 92.5
+  },
+  {
+    "symbol": "LINEA",
+    "n": 50,
+    "avg_bp": 18.72,
+    "sum_usd": 22.34,
+    "win_pct": 92.0
+  },
+  {
+    "symbol": "AWE",
+    "n": 77,
+    "avg_bp": 18.67,
+    "sum_usd": 37.95,
+    "win_pct": 71.4
+  },
+  {
+    "symbol": "NIGHT",
+    "n": 145,
+    "avg_bp": 18.650000000000002,
+    "sum_usd": 57.28,
+    "win_pct": 86.9
+  },
+  {
+    "symbol": "AKT",
+    "n": 242,
+    "avg_bp": 18.6,
+    "sum_usd": 91.66,
+    "win_pct": 84.30000000000001
+  },
+  {
+    "symbol": "SSV",
+    "n": 291,
+    "avg_bp": 18.6,
+    "sum_usd": 152.76,
+    "win_pct": 81.4
+  },
+  {
+    "symbol": "ALPINE",
+    "n": 160,
+    "avg_bp": 18.55,
+    "sum_usd": 62.85,
+    "win_pct": 85.0
+  },
+  {
+    "symbol": "RESOLV",
+    "n": 478,
+    "avg_bp": 18.490000000000002,
+    "sum_usd": 165.96,
+    "win_pct": 80.80000000000001
+  },
+  {
+    "symbol": "RUNE",
+    "n": 164,
+    "avg_bp": 18.47,
+    "sum_usd": 89.94,
+    "win_pct": 90.9
+  },
+  {
+    "symbol": "BANK",
+    "n": 1106,
+    "avg_bp": 18.38,
+    "sum_usd": 464.1,
+    "win_pct": 81.60000000000001
+  },
+  {
+    "symbol": "A",
+    "n": 101,
+    "avg_bp": 18.35,
+    "sum_usd": 46.19,
+    "win_pct": 90.10000000000001
+  },
+  {
+    "symbol": "ASTER",
+    "n": 34,
+    "avg_bp": 18.27,
+    "sum_usd": 12.17,
+    "win_pct": 100.0
+  },
+  {
+    "symbol": "MON",
+    "n": 654,
+    "avg_bp": 18.12,
+    "sum_usd": 256.48,
+    "win_pct": 87.30000000000001
+  },
+  {
+    "symbol": "TNSR",
+    "n": 167,
+    "avg_bp": 18.04,
+    "sum_usd": 65.38,
+    "win_pct": 84.4
+  },
+  {
+    "symbol": "KITE",
+    "n": 261,
+    "avg_bp": 17.89,
+    "sum_usd": 102.98,
+    "win_pct": 87.4
+  },
+  {
+    "symbol": "AVA",
+    "n": 263,
+    "avg_bp": 17.85,
+    "sum_usd": 123.03,
+    "win_pct": 84.80000000000001
+  },
+  {
+    "symbol": "SCRT",
+    "n": 805,
+    "avg_bp": 17.62,
+    "sum_usd": 389.65000000000003,
+    "win_pct": 80.7
+  },
+  {
+    "symbol": "JELLYJELLY",
+    "n": 318,
+    "avg_bp": 17.580000000000002,
+    "sum_usd": 105.12,
+    "win_pct": 83.30000000000001
+  },
+  {
+    "symbol": "SOPH",
+    "n": 63,
+    "avg_bp": 17.41,
+    "sum_usd": 21.44,
+    "win_pct": 87.30000000000001
+  },
+  {
+    "symbol": "ANKR",
+    "n": 35,
+    "avg_bp": 17.35,
+    "sum_usd": 13.52,
+    "win_pct": 88.60000000000001
+  },
+  {
+    "symbol": "PHA",
+    "n": 284,
+    "avg_bp": 17.3,
+    "sum_usd": 109.0,
+    "win_pct": 82.0
+  },
+  {
+    "symbol": "DEGO",
+    "n": 909,
+    "avg_bp": 17.17,
+    "sum_usd": 429.32,
+    "win_pct": 73.4
+  },
+  {
+    "symbol": "MASK",
+    "n": 123,
+    "avg_bp": 17.12,
+    "sum_usd": 47.63,
+    "win_pct": 86.2
+  },
+  {
+    "symbol": "ELSA",
+    "n": 433,
+    "avg_bp": 17.09,
+    "sum_usd": 141.16,
+    "win_pct": 78.30000000000001
+  },
+  {
+    "symbol": "TOWNS",
+    "n": 574,
+    "avg_bp": 16.96,
+    "sum_usd": 189.83,
+    "win_pct": 82.4
+  },
+  {
+    "symbol": "HYPE",
+    "n": 79,
+    "avg_bp": 16.94,
+    "sum_usd": 32.35,
+    "win_pct": 84.80000000000001
+  },
+  {
+    "symbol": "SONIC",
+    "n": 176,
+    "avg_bp": 16.9,
+    "sum_usd": 58.57,
+    "win_pct": 92.60000000000001
+  },
+  {
+    "symbol": "BTR",
+    "n": 1672,
+    "avg_bp": 16.79,
+    "sum_usd": 672.14,
+    "win_pct": 75.4
+  },
+  {
+    "symbol": "APE",
+    "n": 61,
+    "avg_bp": 16.77,
+    "sum_usd": 27.650000000000002,
+    "win_pct": 59.0
+  },
+  {
+    "symbol": "BIRB",
+    "n": 336,
+    "avg_bp": 16.740000000000002,
+    "sum_usd": 145.11,
+    "win_pct": 77.7
+  },
+  {
+    "symbol": "BABY",
+    "n": 275,
+    "avg_bp": 16.72,
+    "sum_usd": 103.51,
+    "win_pct": 69.10000000000001
+  },
+  {
+    "symbol": "BICO",
+    "n": 371,
+    "avg_bp": 16.64,
+    "sum_usd": 151.3,
+    "win_pct": 81.7
+  },
+  {
+    "symbol": "SOMI",
+    "n": 84,
+    "avg_bp": 16.54,
+    "sum_usd": 25.11,
+    "win_pct": 84.5
+  },
+  {
+    "symbol": "GLM",
+    "n": 57,
+    "avg_bp": 16.52,
+    "sum_usd": 21.3,
+    "win_pct": 84.2
+  },
+  {
+    "symbol": "PENDLE",
+    "n": 130,
+    "avg_bp": 16.5,
+    "sum_usd": 56.730000000000004,
+    "win_pct": 83.10000000000001
+  },
+  {
+    "symbol": "SPELL",
+    "n": 47,
+    "avg_bp": 16.47,
+    "sum_usd": 16.94,
+    "win_pct": 68.10000000000001
+  },
+  {
+    "symbol": "CLANKER",
+    "n": 215,
+    "avg_bp": 16.16,
+    "sum_usd": 66.6,
+    "win_pct": 79.5
+  },
+  {
+    "symbol": "WAL",
+    "n": 53,
+    "avg_bp": 16.09,
+    "sum_usd": 23.62,
+    "win_pct": 79.2
+  },
+  {
+    "symbol": "SPACE",
+    "n": 734,
+    "avg_bp": 16.06,
+    "sum_usd": 268.99,
+    "win_pct": 82.0
+  },
+  {
+    "symbol": "CFX",
+    "n": 74,
+    "avg_bp": 15.92,
+    "sum_usd": 29.53,
+    "win_pct": 81.10000000000001
+  },
+  {
+    "symbol": "DOGE",
+    "n": 51,
+    "avg_bp": 15.9,
+    "sum_usd": 18.92,
+    "win_pct": 84.30000000000001
+  },
+  {
+    "symbol": "ZRO",
+    "n": 407,
+    "avg_bp": 15.89,
+    "sum_usd": 173.53,
+    "win_pct": 82.60000000000001
+  },
+  {
+    "symbol": "DEEP",
+    "n": 148,
+    "avg_bp": 15.74,
+    "sum_usd": 52.050000000000004,
+    "win_pct": 77.7
+  },
+  {
+    "symbol": "OPN",
+    "n": 480,
+    "avg_bp": 15.72,
+    "sum_usd": 175.82,
+    "win_pct": 75.8
+  },
+  {
+    "symbol": "FHE",
+    "n": 1344,
+    "avg_bp": 15.69,
+    "sum_usd": 389.74,
+    "win_pct": 71.7
+  },
+  {
+    "symbol": "SAPIEN",
+    "n": 1024,
+    "avg_bp": 15.67,
+    "sum_usd": 428.37,
+    "win_pct": 76.5
+  },
+  {
+    "symbol": "CHZ",
+    "n": 395,
+    "avg_bp": 15.67,
+    "sum_usd": 149.91,
+    "win_pct": 85.60000000000001
+  },
+  {
+    "symbol": "FIO",
+    "n": 1368,
+    "avg_bp": 15.64,
+    "sum_usd": 396.88,
+    "win_pct": 73.60000000000001
+  },
+  {
+    "symbol": "AIXBT",
+    "n": 213,
+    "avg_bp": 15.58,
+    "sum_usd": 73.52,
+    "win_pct": 82.60000000000001
+  },
+  {
+    "symbol": "US",
+    "n": 1572,
+    "avg_bp": 15.530000000000001,
+    "sum_usd": 417.33,
+    "win_pct": 74.3
+  },
+  {
+    "symbol": "HAEDAL",
+    "n": 787,
+    "avg_bp": 15.5,
+    "sum_usd": 305.21,
+    "win_pct": 77.5
+  },
+  {
+    "symbol": "FF",
+    "n": 297,
+    "avg_bp": 15.41,
+    "sum_usd": 85.24,
+    "win_pct": 83.5
+  },
+  {
+    "symbol": "COS",
+    "n": 197,
+    "avg_bp": 15.39,
+    "sum_usd": 73.32000000000001,
+    "win_pct": 71.60000000000001
+  },
+  {
+    "symbol": "ALLO",
+    "n": 1407,
+    "avg_bp": 15.370000000000001,
+    "sum_usd": 530.44,
+    "win_pct": 75.2
+  },
+  {
+    "symbol": "PYTH",
+    "n": 162,
+    "avg_bp": 15.36,
+    "sum_usd": 54.52,
+    "win_pct": 79.0
+  },
+  {
+    "symbol": "AR",
+    "n": 162,
+    "avg_bp": 15.35,
+    "sum_usd": 53.86,
+    "win_pct": 79.60000000000001
+  },
+  {
+    "symbol": "METIS",
+    "n": 648,
+    "avg_bp": 15.21,
+    "sum_usd": 266.13,
+    "win_pct": 81.0
+  },
+  {
+    "symbol": "SAGA",
+    "n": 529,
+    "avg_bp": 15.17,
+    "sum_usd": 219.96,
+    "win_pct": 73.2
+  },
+  {
+    "symbol": "MAGIC",
+    "n": 59,
+    "avg_bp": 15.09,
+    "sum_usd": 13.11,
+    "win_pct": 69.5
+  },
+  {
+    "symbol": "MAV",
+    "n": 447,
+    "avg_bp": 14.94,
+    "sum_usd": 152.28,
+    "win_pct": 71.60000000000001
+  },
+  {
+    "symbol": "ICNT",
+    "n": 1892,
+    "avg_bp": 14.93,
+    "sum_usd": 530.3,
+    "win_pct": 72.4
+  },
+  {
+    "symbol": "VELODROME",
+    "n": 376,
+    "avg_bp": 14.93,
+    "sum_usd": 120.23,
+    "win_pct": 70.5
+  },
+  {
+    "symbol": "ETHFI",
+    "n": 57,
+    "avg_bp": 14.870000000000001,
+    "sum_usd": 16.93,
+    "win_pct": 84.2
+  },
+  {
+    "symbol": "HUMA",
+    "n": 1183,
+    "avg_bp": 14.86,
+    "sum_usd": 422.83,
+    "win_pct": 77.60000000000001
+  },
+  {
+    "symbol": "EUL",
+    "n": 2359,
+    "avg_bp": 14.85,
+    "sum_usd": 829.14,
+    "win_pct": 75.9
+  },
+  {
+    "symbol": "THE",
+    "n": 264,
+    "avg_bp": 14.790000000000001,
+    "sum_usd": 95.2,
+    "win_pct": 69.3
+  },
+  {
+    "symbol": "CROSS",
+    "n": 1576,
+    "avg_bp": 14.780000000000001,
+    "sum_usd": 540.7,
+    "win_pct": 73.9
+  },
+  {
+    "symbol": "MANTRA",
+    "n": 48,
+    "avg_bp": 14.75,
+    "sum_usd": 12.56,
+    "win_pct": 60.400000000000006
+  },
+  {
+    "symbol": "LAYER",
+    "n": 55,
+    "avg_bp": 14.74,
+    "sum_usd": 16.06,
+    "win_pct": 81.80000000000001
+  },
+  {
+    "symbol": "LIT",
+    "n": 755,
+    "avg_bp": 14.72,
+    "sum_usd": 200.85,
+    "win_pct": 84.5
+  },
+  {
+    "symbol": "KAS",
+    "n": 65,
+    "avg_bp": 14.68,
+    "sum_usd": 23.05,
+    "win_pct": 86.2
+  },
+  {
+    "symbol": "THETA",
+    "n": 153,
+    "avg_bp": 14.64,
+    "sum_usd": 59.85,
+    "win_pct": 75.8
+  },
+  {
+    "symbol": "KAITO",
+    "n": 196,
+    "avg_bp": 14.61,
+    "sum_usd": 52.33,
+    "win_pct": 85.7
+  },
+  {
+    "symbol": "SIGN",
+    "n": 633,
+    "avg_bp": 14.6,
+    "sum_usd": 159.96,
+    "win_pct": 79.80000000000001
+  },
+  {
+    "symbol": "POLYX",
+    "n": 195,
+    "avg_bp": 14.540000000000001,
+    "sum_usd": 54.410000000000004,
+    "win_pct": 85.10000000000001
+  },
+  {
+    "symbol": "SAHARA",
+    "n": 60,
+    "avg_bp": 14.48,
+    "sum_usd": 17.14,
+    "win_pct": 86.7
+  },
+  {
+    "symbol": "TAO",
+    "n": 103,
+    "avg_bp": 14.46,
+    "sum_usd": 27.25,
+    "win_pct": 82.5
+  },
+  {
+    "symbol": "KMNO",
+    "n": 264,
+    "avg_bp": 14.43,
+    "sum_usd": 94.10000000000001,
+    "win_pct": 78.80000000000001
+  },
+  {
+    "symbol": "AEVO",
+    "n": 98,
+    "avg_bp": 14.43,
+    "sum_usd": 36.15,
+    "win_pct": 76.5
+  },
+  {
+    "symbol": "VVV",
+    "n": 877,
+    "avg_bp": 14.39,
+    "sum_usd": 266.12,
+    "win_pct": 81.4
+  },
+  {
+    "symbol": "FORM",
+    "n": 1691,
+    "avg_bp": 14.35,
+    "sum_usd": 460.75,
+    "win_pct": 67.9
+  },
+  {
+    "symbol": "NOM",
+    "n": 1116,
+    "avg_bp": 14.35,
+    "sum_usd": 325.77,
+    "win_pct": 77.4
+  },
+  {
+    "symbol": "VIC",
+    "n": 331,
+    "avg_bp": 14.32,
+    "sum_usd": 122.32000000000001,
+    "win_pct": 75.2
+  },
+  {
+    "symbol": "YGG",
+    "n": 49,
+    "avg_bp": 14.27,
+    "sum_usd": 13.92,
+    "win_pct": 73.5
+  },
+  {
+    "symbol": "BARD",
+    "n": 76,
+    "avg_bp": 14.27,
+    "sum_usd": 22.13,
+    "win_pct": 89.5
+  },
+  {
+    "symbol": "WLD",
+    "n": 161,
+    "avg_bp": 14.26,
+    "sum_usd": 44.47,
+    "win_pct": 84.5
+  },
+  {
+    "symbol": "4",
+    "n": 4245,
+    "avg_bp": 14.25,
+    "sum_usd": 1195.91,
+    "win_pct": 72.2
+  },
+  {
+    "symbol": "CVC",
+    "n": 33,
+    "avg_bp": 14.200000000000001,
+    "sum_usd": 12.06,
+    "win_pct": 84.80000000000001
+  },
+  {
+    "symbol": "ACT",
+    "n": 670,
+    "avg_bp": 14.19,
+    "sum_usd": 188.04,
+    "win_pct": 73.4
+  },
+  {
+    "symbol": "HMSTR",
+    "n": 184,
+    "avg_bp": 14.120000000000001,
+    "sum_usd": 53.9,
+    "win_pct": 70.10000000000001
+  },
+  {
+    "symbol": "TRIA",
+    "n": 4125,
+    "avg_bp": 14.06,
+    "sum_usd": 1122.1100000000001,
+    "win_pct": 74.9
+  },
+  {
+    "symbol": "S",
+    "n": 74,
+    "avg_bp": 14.05,
+    "sum_usd": 25.12,
+    "win_pct": 75.7
+  },
+  {
+    "symbol": "PROVE",
+    "n": 64,
+    "avg_bp": 14.040000000000001,
+    "sum_usd": 24.43,
+    "win_pct": 84.4
+  },
+  {
+    "symbol": "JOE",
+    "n": 820,
+    "avg_bp": 14.02,
+    "sum_usd": 225.79,
+    "win_pct": 76.3
+  },
+  {
+    "symbol": "GRASS",
+    "n": 1010,
+    "avg_bp": 13.91,
+    "sum_usd": 347.29,
+    "win_pct": 77.2
+  },
+  {
+    "symbol": "TRUMP",
+    "n": 49,
+    "avg_bp": 13.91,
+    "sum_usd": 15.97,
+    "win_pct": 83.7
+  },
+  {
+    "symbol": "0G",
+    "n": 285,
+    "avg_bp": 13.89,
+    "sum_usd": 68.53,
+    "win_pct": 80.7
+  },
+  {
+    "symbol": "POPCAT",
+    "n": 190,
+    "avg_bp": 13.870000000000001,
+    "sum_usd": 68.3,
+    "win_pct": 77.4
+  },
+  {
+    "symbol": "B3",
+    "n": 783,
+    "avg_bp": 13.86,
+    "sum_usd": 282.24,
+    "win_pct": 71.8
+  },
+  {
+    "symbol": "USELESS",
+    "n": 1213,
+    "avg_bp": 13.81,
+    "sum_usd": 329.36,
+    "win_pct": 80.2
+  },
+  {
+    "symbol": "AERO",
+    "n": 229,
+    "avg_bp": 13.76,
+    "sum_usd": 79.41,
+    "win_pct": 86.0
+  },
+  {
+    "symbol": "COLLECT",
+    "n": 4859,
+    "avg_bp": 13.72,
+    "sum_usd": 1409.71,
+    "win_pct": 65.60000000000001
+  },
+  {
+    "symbol": "AVAAI",
+    "n": 2867,
+    "avg_bp": 13.71,
+    "sum_usd": 819.64,
+    "win_pct": 64.2
+  },
+  {
+    "symbol": "TOSHI",
+    "n": 96,
+    "avg_bp": 13.71,
+    "sum_usd": 32.47,
+    "win_pct": 68.8
+  },
+  {
+    "symbol": "TA",
+    "n": 827,
+    "avg_bp": 13.700000000000001,
+    "sum_usd": 300.48,
+    "win_pct": 71.8
+  },
+  {
+    "symbol": "VANRY",
+    "n": 79,
+    "avg_bp": 13.68,
+    "sum_usd": 23.38,
+    "win_pct": 77.2
+  },
+  {
+    "symbol": "SUI",
+    "n": 34,
+    "avg_bp": 13.66,
+    "sum_usd": 12.65,
+    "win_pct": 82.4
+  },
+  {
+    "symbol": "DOT",
+    "n": 45,
+    "avg_bp": 13.59,
+    "sum_usd": 10.26,
+    "win_pct": 82.2
+  },
+  {
+    "symbol": "CARV",
+    "n": 190,
+    "avg_bp": 13.56,
+    "sum_usd": 65.74,
+    "win_pct": 73.7
+  },
+  {
+    "symbol": "ZEC",
+    "n": 370,
+    "avg_bp": 13.450000000000001,
+    "sum_usd": 114.77,
+    "win_pct": 75.4
+  },
+  {
+    "symbol": "C",
+    "n": 2095,
+    "avg_bp": 13.36,
+    "sum_usd": 546.1800000000001,
+    "win_pct": 74.8
+  },
+  {
+    "symbol": "AGLD",
+    "n": 132,
+    "avg_bp": 13.34,
+    "sum_usd": 29.47,
+    "win_pct": 69.7
+  },
+  {
+    "symbol": "TAG",
+    "n": 1739,
+    "avg_bp": 13.32,
+    "sum_usd": 430.12,
+    "win_pct": 64.3
+  },
+  {
+    "symbol": "VINE",
+    "n": 212,
+    "avg_bp": 13.21,
+    "sum_usd": 72.17,
+    "win_pct": 74.5
+  },
+  {
+    "symbol": "ALGO",
+    "n": 65,
+    "avg_bp": 13.15,
+    "sum_usd": 17.35,
+    "win_pct": 70.8
+  },
+  {
+    "symbol": "IMX",
+    "n": 138,
+    "avg_bp": 13.14,
+    "sum_usd": 39.24,
+    "win_pct": 72.5
+  },
+  {
+    "symbol": "OXT",
+    "n": 50,
+    "avg_bp": 13.11,
+    "sum_usd": 10.74,
+    "win_pct": 64.0
+  },
+  {
+    "symbol": "XNY",
+    "n": 6790,
+    "avg_bp": 13.05,
+    "sum_usd": 1827.8500000000001,
+    "win_pct": 66.5
+  },
+  {
+    "symbol": "POL",
+    "n": 32,
+    "avg_bp": 13.02,
+    "sum_usd": 12.46,
+    "win_pct": 75.0
+  },
+  {
+    "symbol": "STG",
+    "n": 284,
+    "avg_bp": 13.0,
+    "sum_usd": 81.37,
+    "win_pct": 75.7
+  },
+  {
+    "symbol": "BIGTIME",
+    "n": 73,
+    "avg_bp": 12.97,
+    "sum_usd": 12.68,
+    "win_pct": 60.300000000000004
+  },
+  {
+    "symbol": "USUAL",
+    "n": 175,
+    "avg_bp": 12.93,
+    "sum_usd": 58.35,
+    "win_pct": 69.7
+  },
+  {
+    "symbol": "ARB",
+    "n": 44,
+    "avg_bp": 12.92,
+    "sum_usd": 13.47,
+    "win_pct": 72.7
+  },
+  {
+    "symbol": "ESPORTS",
+    "n": 1228,
+    "avg_bp": 12.86,
+    "sum_usd": 394.67,
+    "win_pct": 74.7
+  },
+  {
+    "symbol": "MEW",
+    "n": 161,
+    "avg_bp": 12.85,
+    "sum_usd": 53.58,
+    "win_pct": 78.30000000000001
+  },
+  {
+    "symbol": "NFP",
+    "n": 120,
+    "avg_bp": 12.700000000000001,
+    "sum_usd": 36.61,
+    "win_pct": 76.7
+  },
+  {
+    "symbol": "ROBO",
+    "n": 621,
+    "avg_bp": 12.69,
+    "sum_usd": 163.66,
+    "win_pct": 74.7
+  },
+  {
+    "symbol": "ARC",
+    "n": 916,
+    "avg_bp": 12.66,
+    "sum_usd": 190.92000000000002,
+    "win_pct": 66.2
+  },
+  {
+    "symbol": "IO",
+    "n": 191,
+    "avg_bp": 12.65,
+    "sum_usd": 57.660000000000004,
+    "win_pct": 65.4
+  },
+  {
+    "symbol": "HFT",
+    "n": 232,
+    "avg_bp": 12.57,
+    "sum_usd": 71.95,
+    "win_pct": 69.4
+  },
+  {
+    "symbol": "LA",
+    "n": 78,
+    "avg_bp": 12.48,
+    "sum_usd": 17.27,
+    "win_pct": 73.10000000000001
+  },
+  {
+    "symbol": "DYM",
+    "n": 530,
+    "avg_bp": 12.43,
+    "sum_usd": 106.9,
+    "win_pct": 71.10000000000001
+  },
+  {
+    "symbol": "BEAT",
+    "n": 3733,
+    "avg_bp": 12.4,
+    "sum_usd": 1007.15,
+    "win_pct": 77.10000000000001
+  },
+  {
+    "symbol": "NOT",
+    "n": 129,
+    "avg_bp": 12.370000000000001,
+    "sum_usd": 38.86,
+    "win_pct": 85.30000000000001
+  },
+  {
+    "symbol": "CETUS",
+    "n": 928,
+    "avg_bp": 12.36,
+    "sum_usd": 323.06,
+    "win_pct": 69.9
+  },
+  {
+    "symbol": "MOODENG",
+    "n": 230,
+    "avg_bp": 12.280000000000001,
+    "sum_usd": 77.71000000000001,
+    "win_pct": 84.30000000000001
+  },
+  {
+    "symbol": "SEI",
+    "n": 35,
+    "avg_bp": 12.280000000000001,
+    "sum_usd": 12.84,
+    "win_pct": 85.7
+  },
+  {
+    "symbol": "AI",
+    "n": 106,
+    "avg_bp": 12.280000000000001,
+    "sum_usd": 33.3,
+    "win_pct": 78.30000000000001
+  },
+  {
+    "symbol": "LDO",
+    "n": 437,
+    "avg_bp": 12.26,
+    "sum_usd": 117.64,
+    "win_pct": 84.7
+  },
+  {
+    "symbol": "GMT",
+    "n": 37,
+    "avg_bp": 12.25,
+    "sum_usd": 11.63,
+    "win_pct": 64.9
+  },
+  {
+    "symbol": "TUT",
+    "n": 1481,
+    "avg_bp": 12.24,
+    "sum_usd": 361.16,
+    "win_pct": 64.3
+  },
+  {
+    "symbol": "BMT",
+    "n": 340,
+    "avg_bp": 12.21,
+    "sum_usd": 110.25,
+    "win_pct": 65.60000000000001
+  },
+  {
+    "symbol": "TURBO",
+    "n": 324,
+    "avg_bp": 12.15,
+    "sum_usd": 60.06,
+    "win_pct": 75.60000000000001
+  },
+  {
+    "symbol": "YB",
+    "n": 657,
+    "avg_bp": 12.06,
+    "sum_usd": 156.93,
+    "win_pct": 64.10000000000001
+  },
+  {
+    "symbol": "COOKIE",
+    "n": 182,
+    "avg_bp": 11.89,
+    "sum_usd": 42.46,
+    "win_pct": 77.5
+  },
+  {
+    "symbol": "SENT",
+    "n": 447,
+    "avg_bp": 11.82,
+    "sum_usd": 140.83,
+    "win_pct": 70.7
+  },
+  {
+    "symbol": "CFG",
+    "n": 1064,
+    "avg_bp": 11.81,
+    "sum_usd": 319.07,
+    "win_pct": 73.60000000000001
+  },
+  {
+    "symbol": "PROMPT",
+    "n": 712,
+    "avg_bp": 11.78,
+    "sum_usd": 171.86,
+    "win_pct": 72.9
+  },
+  {
+    "symbol": "DEGEN",
+    "n": 759,
+    "avg_bp": 11.58,
+    "sum_usd": 240.11,
+    "win_pct": 63.400000000000006
+  },
+  {
+    "symbol": "ACU",
+    "n": 2921,
+    "avg_bp": 11.540000000000001,
+    "sum_usd": 708.99,
+    "win_pct": 69.7
+  },
+  {
+    "symbol": "FLOCK",
+    "n": 1632,
+    "avg_bp": 11.53,
+    "sum_usd": 387.19,
+    "win_pct": 69.2
+  },
+  {
+    "symbol": "POWER",
+    "n": 1396,
+    "avg_bp": 11.5,
+    "sum_usd": 342.62,
+    "win_pct": 70.60000000000001
+  },
+  {
+    "symbol": "IP",
+    "n": 123,
+    "avg_bp": 11.4,
+    "sum_usd": 35.82,
+    "win_pct": 83.7
+  },
+  {
+    "symbol": "PENGU",
+    "n": 235,
+    "avg_bp": 11.31,
+    "sum_usd": 69.06,
+    "win_pct": 80.9
+  },
+  {
+    "symbol": "FOLKS",
+    "n": 5022,
+    "avg_bp": 11.28,
+    "sum_usd": 1083.85,
+    "win_pct": 60.900000000000006
+  },
+  {
+    "symbol": "DOOD",
+    "n": 512,
+    "avg_bp": 11.28,
+    "sum_usd": 119.87,
+    "win_pct": 70.7
+  },
+  {
+    "symbol": "BAND",
+    "n": 86,
+    "avg_bp": 11.21,
+    "sum_usd": 25.86,
+    "win_pct": 77.9
+  },
+  {
+    "symbol": "ENA",
+    "n": 181,
+    "avg_bp": 11.1,
+    "sum_usd": 44.01,
+    "win_pct": 78.5
+  },
+  {
+    "symbol": "ERA",
+    "n": 149,
+    "avg_bp": 10.950000000000001,
+    "sum_usd": 35.44,
+    "win_pct": 61.1
+  },
+  {
+    "symbol": "CTK",
+    "n": 92,
+    "avg_bp": 10.73,
+    "sum_usd": 21.32,
+    "win_pct": 64.10000000000001
+  },
+  {
+    "symbol": "ACE",
+    "n": 315,
+    "avg_bp": 10.73,
+    "sum_usd": 78.96000000000001,
+    "win_pct": 59.0
+  },
+  {
+    "symbol": "ARPA",
+    "n": 141,
+    "avg_bp": 10.71,
+    "sum_usd": 39.67,
+    "win_pct": 62.400000000000006
+  },
+  {
+    "symbol": "SUSHI",
+    "n": 57,
+    "avg_bp": 10.71,
+    "sum_usd": 18.13,
+    "win_pct": 73.7
+  },
+  {
+    "symbol": "WOO",
+    "n": 92,
+    "avg_bp": 10.44,
+    "sum_usd": 19.48,
+    "win_pct": 75.0
+  },
+  {
+    "symbol": "VIRTUAL",
+    "n": 60,
+    "avg_bp": 10.4,
+    "sum_usd": 14.36,
+    "win_pct": 71.7
+  },
+  {
+    "symbol": "NEWT",
+    "n": 1637,
+    "avg_bp": 10.39,
+    "sum_usd": 408.39,
+    "win_pct": 65.5
+  },
+  {
+    "symbol": "TON",
+    "n": 41,
+    "avg_bp": 10.38,
+    "sum_usd": 9.78,
+    "win_pct": 73.2
+  },
+  {
+    "symbol": "PIPPIN",
+    "n": 1089,
+    "avg_bp": 10.33,
+    "sum_usd": 234.89000000000001,
+    "win_pct": 70.0
+  },
+  {
+    "symbol": "GOAT",
+    "n": 364,
+    "avg_bp": 10.27,
+    "sum_usd": 78.23,
+    "win_pct": 69.5
+  },
+  {
+    "symbol": "EIGEN",
+    "n": 144,
+    "avg_bp": 10.25,
+    "sum_usd": 38.1,
+    "win_pct": 66.7
+  },
+  {
+    "symbol": "MERL",
+    "n": 3683,
+    "avg_bp": 10.25,
+    "sum_usd": 854.08,
+    "win_pct": 69.8
+  },
+  {
+    "symbol": "KERNEL",
+    "n": 1024,
+    "avg_bp": 10.25,
+    "sum_usd": 276.71,
+    "win_pct": 67.5
+  },
+  {
+    "symbol": "FARTCOIN",
+    "n": 461,
+    "avg_bp": 10.23,
+    "sum_usd": 97.94,
+    "win_pct": 75.5
+  },
+  {
+    "symbol": "ZRX",
+    "n": 76,
+    "avg_bp": 10.17,
+    "sum_usd": 19.98,
+    "win_pct": 64.5
+  },
+  {
+    "symbol": "EDGE",
+    "n": 1636,
+    "avg_bp": 10.16,
+    "sum_usd": 403.95,
+    "win_pct": 73.9
+  },
+  {
+    "symbol": "XAI",
+    "n": 147,
+    "avg_bp": 10.11,
+    "sum_usd": 31.17,
+    "win_pct": 61.2
+  },
+  {
+    "symbol": "SOON",
+    "n": 1672,
+    "avg_bp": 10.08,
+    "sum_usd": 360.66,
+    "win_pct": 68.9
+  },
+  {
+    "symbol": "FIDA",
+    "n": 338,
+    "avg_bp": 10.05,
+    "sum_usd": 52.06,
+    "win_pct": 66.60000000000001
+  },
+  {
+    "symbol": "MBOX",
+    "n": 1533,
+    "avg_bp": 10.040000000000001,
+    "sum_usd": 264.06,
+    "win_pct": 59.400000000000006
+  },
+  {
+    "symbol": "JST",
+    "n": 441,
+    "avg_bp": 10.03,
+    "sum_usd": 112.73,
+    "win_pct": 56.7
+  },
+  {
+    "symbol": "PUNDIX",
+    "n": 41,
+    "avg_bp": 9.94,
+    "sum_usd": 11.51,
+    "win_pct": 68.3
+  },
+  {
+    "symbol": "MUBARAK",
+    "n": 1344,
+    "avg_bp": 9.870000000000001,
+    "sum_usd": 242.67000000000002,
+    "win_pct": 64.10000000000001
+  },
+  {
+    "symbol": "APT",
+    "n": 59,
+    "avg_bp": 9.82,
+    "sum_usd": 13.030000000000001,
+    "win_pct": 81.4
+  },
+  {
+    "symbol": "CYS",
+    "n": 5456,
+    "avg_bp": 9.77,
+    "sum_usd": 1039.72,
+    "win_pct": 70.0
+  },
+  {
+    "symbol": "TIA",
+    "n": 61,
+    "avg_bp": 9.76,
+    "sum_usd": 16.740000000000002,
+    "win_pct": 75.4
+  },
+  {
+    "symbol": "STRK",
+    "n": 607,
+    "avg_bp": 9.67,
+    "sum_usd": 168.17000000000002,
+    "win_pct": 74.3
+  },
+  {
+    "symbol": "IR",
+    "n": 3456,
+    "avg_bp": 9.59,
+    "sum_usd": 750.76,
+    "win_pct": 62.1
+  },
+  {
+    "symbol": "INJ",
+    "n": 37,
+    "avg_bp": 9.57,
+    "sum_usd": 5.47,
+    "win_pct": 73.0
+  },
+  {
+    "symbol": "JCT",
+    "n": 5055,
+    "avg_bp": 9.47,
+    "sum_usd": 1173.07,
+    "win_pct": 64.8
+  },
+  {
+    "symbol": "BSV",
+    "n": 39,
+    "avg_bp": 9.22,
+    "sum_usd": 7.45,
+    "win_pct": 66.7
+  },
+  {
+    "symbol": "BANANAS31",
+    "n": 1127,
+    "avg_bp": 9.16,
+    "sum_usd": 236.81,
+    "win_pct": 64.0
+  },
+  {
+    "symbol": "DEXE",
+    "n": 3637,
+    "avg_bp": 9.16,
+    "sum_usd": 820.59,
+    "win_pct": 62.7
+  },
+  {
+    "symbol": "AVNT",
+    "n": 245,
+    "avg_bp": 9.14,
+    "sum_usd": 66.86,
+    "win_pct": 60.800000000000004
+  },
+  {
+    "symbol": "ASR",
+    "n": 234,
+    "avg_bp": 9.09,
+    "sum_usd": 44.68,
+    "win_pct": 62.0
+  },
+  {
+    "symbol": "NXPC",
+    "n": 68,
+    "avg_bp": 8.98,
+    "sum_usd": 15.84,
+    "win_pct": 72.10000000000001
+  },
+  {
+    "symbol": "BOB",
+    "n": 3464,
+    "avg_bp": 8.97,
+    "sum_usd": 568.8100000000001,
+    "win_pct": 61.2
+  },
+  {
+    "symbol": "H",
+    "n": 2096,
+    "avg_bp": 8.9,
+    "sum_usd": 471.71000000000004,
+    "win_pct": 69.3
+  },
+  {
+    "symbol": "ATH",
+    "n": 240,
+    "avg_bp": 8.89,
+    "sum_usd": 41.5,
+    "win_pct": 72.5
+  },
+  {
+    "symbol": "API3",
+    "n": 252,
+    "avg_bp": 8.89,
+    "sum_usd": 66.47,
+    "win_pct": 72.60000000000001
+  },
+  {
+    "symbol": "COMP",
+    "n": 348,
+    "avg_bp": 8.870000000000001,
+    "sum_usd": 67.91,
+    "win_pct": 64.10000000000001
+  },
+  {
+    "symbol": "ZEREBRO",
+    "n": 4902,
+    "avg_bp": 8.81,
+    "sum_usd": 1030.91,
+    "win_pct": 57.900000000000006
+  },
+  {
+    "symbol": "WCT",
+    "n": 780,
+    "avg_bp": 8.78,
+    "sum_usd": 108.61,
+    "win_pct": 70.10000000000001
+  },
+  {
+    "symbol": "MOVE",
+    "n": 170,
+    "avg_bp": 8.74,
+    "sum_usd": 43.01,
+    "win_pct": 75.3
+  },
+  {
+    "symbol": "PROM",
+    "n": 5554,
+    "avg_bp": 8.73,
+    "sum_usd": 1145.21,
+    "win_pct": 61.0
+  },
+  {
+    "symbol": "IRYS",
+    "n": 7082,
+    "avg_bp": 8.700000000000001,
+    "sum_usd": 1370.15,
+    "win_pct": 64.9
+  },
+  {
+    "symbol": "ADA",
+    "n": 34,
+    "avg_bp": 8.69,
+    "sum_usd": 7.43,
+    "win_pct": 64.7
+  },
+  {
+    "symbol": "VELVET",
+    "n": 4810,
+    "avg_bp": 8.61,
+    "sum_usd": 1003.21,
+    "win_pct": 62.1
+  },
+  {
+    "symbol": "W",
+    "n": 102,
+    "avg_bp": 8.56,
+    "sum_usd": 19.0,
+    "win_pct": 58.800000000000004
+  },
+  {
+    "symbol": "STORJ",
+    "n": 43,
+    "avg_bp": 8.55,
+    "sum_usd": 6.13,
+    "win_pct": 60.5
+  },
+  {
+    "symbol": "ONT",
+    "n": 191,
+    "avg_bp": 8.51,
+    "sum_usd": 37.34,
+    "win_pct": 55.0
+  },
+  {
+    "symbol": "CHILLGUY",
+    "n": 2654,
+    "avg_bp": 8.5,
+    "sum_usd": 530.26,
+    "win_pct": 64.7
+  },
+  {
+    "symbol": "MOCA",
+    "n": 56,
+    "avg_bp": 8.370000000000001,
+    "sum_usd": 9.92,
+    "win_pct": 62.5
+  },
+  {
+    "symbol": "SAFE",
+    "n": 318,
+    "avg_bp": 8.33,
+    "sum_usd": 54.550000000000004,
+    "win_pct": 59.7
+  },
+  {
+    "symbol": "STO",
+    "n": 2165,
+    "avg_bp": 8.3,
+    "sum_usd": 365.77,
+    "win_pct": 64.3
+  },
+  {
+    "symbol": "PNUT",
+    "n": 830,
+    "avg_bp": 8.290000000000001,
+    "sum_usd": 183.01,
+    "win_pct": 68.9
+  },
+  {
+    "symbol": "BB",
+    "n": 2024,
+    "avg_bp": 8.27,
+    "sum_usd": 384.15000000000003,
+    "win_pct": 62.400000000000006
+  },
+  {
+    "symbol": "ZETA",
+    "n": 112,
+    "avg_bp": 8.27,
+    "sum_usd": 24.54,
+    "win_pct": 75.0
+  },
+  {
+    "symbol": "GUA",
+    "n": 7116,
+    "avg_bp": 8.14,
+    "sum_usd": 1386.4,
+    "win_pct": 57.400000000000006
+  },
+  {
+    "symbol": "ARKM",
+    "n": 153,
+    "avg_bp": 8.11,
+    "sum_usd": 38.01,
+    "win_pct": 58.800000000000004
+  },
+  {
+    "symbol": "GIGGLE",
+    "n": 8797,
+    "avg_bp": 8.02,
+    "sum_usd": 1221.44,
+    "win_pct": 63.300000000000004
+  },
+  {
+    "symbol": "ETHW",
+    "n": 460,
+    "avg_bp": 7.95,
+    "sum_usd": 74.71000000000001,
+    "win_pct": 63.5
+  },
+  {
+    "symbol": "BAN",
+    "n": 4821,
+    "avg_bp": 7.890000000000001,
+    "sum_usd": 779.0,
+    "win_pct": 63.800000000000004
+  },
+  {
+    "symbol": "XPL",
+    "n": 213,
+    "avg_bp": 7.890000000000001,
+    "sum_usd": 32.480000000000004,
+    "win_pct": 60.6
+  },
+  {
+    "symbol": "OG",
+    "n": 2221,
+    "avg_bp": 7.87,
+    "sum_usd": 205.68,
+    "win_pct": 62.400000000000006
+  },
+  {
+    "symbol": "NAORIS",
+    "n": 5618,
+    "avg_bp": 7.83,
+    "sum_usd": 1064.49,
+    "win_pct": 59.800000000000004
+  },
+  {
+    "symbol": "GENIUS",
+    "n": 727,
+    "avg_bp": 7.69,
+    "sum_usd": 158.61,
+    "win_pct": 85.0
+  },
+  {
+    "symbol": "RARE",
+    "n": 1626,
+    "avg_bp": 7.65,
+    "sum_usd": 358.97,
+    "win_pct": 63.300000000000004
+  },
+  {
+    "symbol": "HEMI",
+    "n": 2503,
+    "avg_bp": 7.54,
+    "sum_usd": 427.74,
+    "win_pct": 58.6
+  },
+  {
+    "symbol": "TREE",
+    "n": 1986,
+    "avg_bp": 7.51,
+    "sum_usd": 292.61,
+    "win_pct": 63.900000000000006
+  },
+  {
+    "symbol": "MEME",
+    "n": 654,
+    "avg_bp": 7.47,
+    "sum_usd": 144.0,
+    "win_pct": 64.7
+  },
+  {
+    "symbol": "ZORA",
+    "n": 35,
+    "avg_bp": 7.45,
+    "sum_usd": 7.0,
+    "win_pct": 57.1
+  },
+  {
+    "symbol": "MMT",
+    "n": 803,
+    "avg_bp": 7.29,
+    "sum_usd": 115.99000000000001,
+    "win_pct": 62.0
+  },
+  {
+    "symbol": "CC",
+    "n": 548,
+    "avg_bp": 7.22,
+    "sum_usd": 73.0,
+    "win_pct": 68.8
+  },
+  {
+    "symbol": "GWEI",
+    "n": 6278,
+    "avg_bp": 7.0600000000000005,
+    "sum_usd": 1141.77,
+    "win_pct": 58.1
+  },
+  {
+    "symbol": "HIGH",
+    "n": 7383,
+    "avg_bp": 6.8,
+    "sum_usd": 1446.05,
+    "win_pct": 63.5
+  },
+  {
+    "symbol": "OPEN",
+    "n": 1164,
+    "avg_bp": 6.78,
+    "sum_usd": 172.43,
+    "win_pct": 60.900000000000006
+  },
+  {
+    "symbol": "RED",
+    "n": 1777,
+    "avg_bp": 6.7700000000000005,
+    "sum_usd": 138.76,
+    "win_pct": 60.900000000000006
+  },
+  {
+    "symbol": "ZK",
+    "n": 53,
+    "avg_bp": 6.73,
+    "sum_usd": 9.22,
+    "win_pct": 66.0
+  },
+  {
+    "symbol": "ENSO",
+    "n": 221,
+    "avg_bp": 6.7,
+    "sum_usd": 25.42,
+    "win_pct": 64.3
+  },
+  {
+    "symbol": "EGLD",
+    "n": 43,
+    "avg_bp": 6.41,
+    "sum_usd": 5.34,
+    "win_pct": 72.10000000000001
+  },
+  {
+    "symbol": "JTO",
+    "n": 537,
+    "avg_bp": 6.390000000000001,
+    "sum_usd": 80.08,
+    "win_pct": 67.0
+  },
+  {
+    "symbol": "UNI",
+    "n": 37,
+    "avg_bp": 6.37,
+    "sum_usd": 5.0600000000000005,
+    "win_pct": 70.3
+  },
+  {
+    "symbol": "BLUR",
+    "n": 2654,
+    "avg_bp": 6.36,
+    "sum_usd": 448.2,
+    "win_pct": 68.7
+  },
+  {
+    "symbol": "MAGMA",
+    "n": 5304,
+    "avg_bp": 6.29,
+    "sum_usd": 721.1,
+    "win_pct": 58.2
+  },
+  {
+    "symbol": "STX",
+    "n": 37,
+    "avg_bp": 6.2700000000000005,
+    "sum_usd": 2.68,
+    "win_pct": 67.60000000000001
+  },
+  {
+    "symbol": "UAI",
+    "n": 9123,
+    "avg_bp": 6.26,
+    "sum_usd": 1408.96,
+    "win_pct": 59.5
+  },
+  {
+    "symbol": "FLUID",
+    "n": 1068,
+    "avg_bp": 6.16,
+    "sum_usd": 182.3,
+    "win_pct": 63.300000000000004
+  },
+  {
+    "symbol": "VANA",
+    "n": 101,
+    "avg_bp": 6.13,
+    "sum_usd": 14.9,
+    "win_pct": 60.400000000000006
+  },
+  {
+    "symbol": "WIF",
+    "n": 62,
+    "avg_bp": 6.07,
+    "sum_usd": 8.81,
+    "win_pct": 69.4
+  },
+  {
+    "symbol": "ATOM",
+    "n": 33,
+    "avg_bp": 6.0600000000000005,
+    "sum_usd": 4.96,
+    "win_pct": 63.6
+  },
+  {
+    "symbol": "ORDI",
+    "n": 3557,
+    "avg_bp": 6.04,
+    "sum_usd": 487.54,
+    "win_pct": 64.2
+  },
+  {
+    "symbol": "BNT",
+    "n": 410,
+    "avg_bp": 5.98,
+    "sum_usd": 67.26,
+    "win_pct": 56.800000000000004
+  },
+  {
+    "symbol": "ETH",
+    "n": 53,
+    "avg_bp": 5.72,
+    "sum_usd": 6.63,
+    "win_pct": 84.9
+  },
+  {
+    "symbol": "RENDER",
+    "n": 39,
+    "avg_bp": 5.55,
+    "sum_usd": 5.37,
+    "win_pct": 61.5
+  },
+  {
+    "symbol": "ALCH",
+    "n": 1999,
+    "avg_bp": 5.53,
+    "sum_usd": 199.59,
+    "win_pct": 55.1
+  },
+  {
+    "symbol": "FIGHT",
+    "n": 8098,
+    "avg_bp": 5.34,
+    "sum_usd": 873.63,
+    "win_pct": 57.400000000000006
+  },
+  {
+    "symbol": "BASED",
+    "n": 8355,
+    "avg_bp": 5.32,
+    "sum_usd": 1303.02,
+    "win_pct": 58.400000000000006
+  },
+  {
+    "symbol": "ZAMA",
+    "n": 5013,
+    "avg_bp": 5.2,
+    "sum_usd": 494.82,
+    "win_pct": 58.400000000000006
+  },
+  {
+    "symbol": "TRUST",
+    "n": 2716,
+    "avg_bp": 4.95,
+    "sum_usd": 191.15,
+    "win_pct": 57.0
+  },
+  {
+    "symbol": "MET",
+    "n": 2534,
+    "avg_bp": 4.88,
+    "sum_usd": 350.95,
+    "win_pct": 59.0
+  },
+  {
+    "symbol": "INX",
+    "n": 8279,
+    "avg_bp": 4.57,
+    "sum_usd": 724.32,
+    "win_pct": 55.1
+  },
+  {
+    "symbol": "BOME",
+    "n": 3162,
+    "avg_bp": 4.16,
+    "sum_usd": 387.32,
+    "win_pct": 57.1
+  },
+  {
+    "symbol": "AZTEC",
+    "n": 118,
+    "avg_bp": 3.44,
+    "sum_usd": 5.99,
+    "win_pct": 61.900000000000006
+  },
+  {
+    "symbol": "STABLE",
+    "n": 4134,
+    "avg_bp": 3.25,
+    "sum_usd": 261.65,
+    "win_pct": 57.5
+  },
+  {
+    "symbol": "SPK",
+    "n": 9151,
+    "avg_bp": 3.16,
+    "sum_usd": 810.4,
+    "win_pct": 55.5
+  },
+  {
+    "symbol": "BIO",
+    "n": 5288,
+    "avg_bp": 3.04,
+    "sum_usd": 401.8,
+    "win_pct": 55.300000000000004
+  }
+]

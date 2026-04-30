@@ -14,12 +14,17 @@ struct ExecResp {
     dataset: Vec<Vec<serde_json::Value>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct LatestBook {
+    pub bid: f64,
+    pub ask: f64,
+    pub bid_size: f64,
+    pub ask_size: f64,
+    pub age_s: f64,
+}
+
 /// Returns the latest (bid, ask) for `symbol` in `table`, or None.
-pub async fn fetch_latest_mid(
-    http: &Client,
-    table: &str,
-    symbol: &str,
-) -> Option<(f64, f64)> {
+pub async fn fetch_latest_mid(http: &Client, table: &str, symbol: &str) -> Option<(f64, f64)> {
     let sql = format!(
         "SELECT bid_price, ask_price FROM {table} \
          WHERE symbol='{symbol}' ORDER BY timestamp DESC LIMIT 1"
@@ -56,14 +61,36 @@ pub async fn fetch_latest_mid_age(
     Some((bid, ask, age))
 }
 
-async fn run_query(
-    http: &Client,
-    sql: &str,
-) -> Option<Vec<Vec<serde_json::Value>>> {
-    let url = format!(
-        "{QUESTDB_URL}/exec?query={}",
-        urlencoding::encode(sql)
+/// Returns the latest top-of-book price + size + age for `symbol`, or None.
+pub async fn fetch_latest_book_age(http: &Client, table: &str, symbol: &str) -> Option<LatestBook> {
+    let sql = format!(
+        "SELECT bid_price, ask_price, bid_size, ask_size, timestamp FROM {table} \
+         WHERE symbol='{symbol}' ORDER BY timestamp DESC LIMIT 1"
     );
+    let rows = run_query(http, &sql).await?;
+    let row = rows.into_iter().next()?;
+    let bid = value_as_f64(row.get(0)?)?;
+    let ask = value_as_f64(row.get(1)?)?;
+    let bid_size = value_as_f64(row.get(2)?)?;
+    let ask_size = value_as_f64(row.get(3)?)?;
+    let ts_str = row.get(4)?.as_str()?;
+    let ts: DateTime<Utc> = ts_str
+        .replace('Z', "+00:00")
+        .parse::<DateTime<chrono::FixedOffset>>()
+        .ok()?
+        .with_timezone(&Utc);
+    let age_s = (Utc::now() - ts).num_milliseconds() as f64 / 1000.0;
+    Some(LatestBook {
+        bid,
+        ask,
+        bid_size,
+        ask_size,
+        age_s,
+    })
+}
+
+async fn run_query(http: &Client, sql: &str) -> Option<Vec<Vec<serde_json::Value>>> {
+    let url = format!("{QUESTDB_URL}/exec?query={}", urlencoding::encode(sql));
     let resp = http.get(&url).send().await.ok()?;
     let parsed: ExecResp = resp.json().await.ok()?;
     Some(parsed.dataset)

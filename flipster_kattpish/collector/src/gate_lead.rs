@@ -68,6 +68,10 @@ pub struct GateLeadParams {
     /// whitelist). Use for symbols with confirmed anti-edge or excessive
     /// spread cost.
     pub blacklist: Vec<String>,
+    /// Mode tag written to position_log.mode. Default "paper" for live
+    /// shadow runs. Backtest replay sweeps override this with the
+    /// `BACKTEST_TAG` value so summaries can group/filter cleanly.
+    pub mode_tag: String,
 }
 
 impl Default for GateLeadParams {
@@ -96,14 +100,37 @@ impl Default for GateLeadParams {
             // some added (D, ON, BOB, FIGHT, INX, BAS, AAVE, MASK,
             // PENDLE, BRETT, INTC, etc).
             whitelist: vec![
-                "AAVE".into(), "BAS".into(), "BEAT".into(), "BOB".into(),
-                "BRETT".into(), "CGPT".into(), "CROSS".into(), "CYS".into(),
-                "D".into(), "ENSO".into(), "FIGHT".into(), "FLUID".into(),
-                "GENIUS".into(), "GRIFFAIN".into(), "GUA".into(), "H".into(),
-                "INTC".into(), "INX".into(), "JCT".into(), "KITE".into(),
-                "MAGMA".into(), "MASK".into(), "ON".into(), "OPEN".into(),
-                "PENDLE".into(), "PENGU".into(), "POPCAT".into(), "SNDK".into(),
-                "TAG".into(), "TURTLE".into(), "UAI".into(),
+                "AAVE".into(),
+                "BAS".into(),
+                "BEAT".into(),
+                "BOB".into(),
+                "BRETT".into(),
+                "CGPT".into(),
+                "CROSS".into(),
+                "CYS".into(),
+                "D".into(),
+                "ENSO".into(),
+                "FIGHT".into(),
+                "FLUID".into(),
+                "GENIUS".into(),
+                "GRIFFAIN".into(),
+                "GUA".into(),
+                "H".into(),
+                "INTC".into(),
+                "INX".into(),
+                "JCT".into(),
+                "KITE".into(),
+                "MAGMA".into(),
+                "MASK".into(),
+                "ON".into(),
+                "OPEN".into(),
+                "PENDLE".into(),
+                "PENGU".into(),
+                "POPCAT".into(),
+                "SNDK".into(),
+                "TAG".into(),
+                "TURTLE".into(),
+                "UAI".into(),
             ],
             // Confirmed losers from live runs:
             //   M      — anti-edge: Binance moves invert on Flipster (1/15 win, -8.3 bp)
@@ -111,12 +138,8 @@ impl Default for GateLeadParams {
             //   SWARMS — 0/8 win in v20 ($-0.33), execution path consistently
             //            adverse despite TP signal
             //   ORCA   — 4/11 win in v20 ($-0.36), highest-loss-volume symbol
-            blacklist: vec![
-                "M".into(),
-                "BSB".into(),
-                "SWARMS".into(),
-                "ORCA".into(),
-            ],
+            blacklist: vec!["M".into(), "BSB".into(), "SWARMS".into(), "ORCA".into()],
+            mode_tag: "paper".to_string(),
         }
     }
 }
@@ -127,25 +150,46 @@ impl GateLeadParams {
         if let Ok(v) = std::env::var("GL_ACCOUNT_ID") {
             p.account_id = v;
         }
-        if let Some(v) = std::env::var("GL_SIZE_USD").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("GL_SIZE_USD")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.size_usd = v;
         }
-        if let Some(v) = std::env::var("GL_MIN_MOVE_BP").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("GL_MIN_MOVE_BP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.min_move_bp = v;
         }
-        if let Some(v) = std::env::var("GL_ANCHOR_S").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("GL_ANCHOR_S")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.anchor_s = v;
         }
-        if let Some(v) = std::env::var("GL_HOLD_MAX_S").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("GL_HOLD_MAX_S")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.hold_max_s = v;
         }
-        if let Some(v) = std::env::var("GL_EXIT_BP").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("GL_EXIT_BP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.exit_bp = v;
         }
-        if let Some(v) = std::env::var("GL_STOP_BP").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("GL_STOP_BP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.stop_bp = v;
         }
-        if let Some(v) = std::env::var("GL_COOLDOWN_S").ok().and_then(|s| s.parse().ok()) {
+        if let Some(v) = std::env::var("GL_COOLDOWN_S")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             p.cooldown_s = v;
         }
         if let Ok(v) = std::env::var("GL_WHITELIST") {
@@ -170,6 +214,10 @@ impl GateLeadParams {
 #[derive(Default)]
 struct BaseState {
     gate_mids: VecDeque<(DateTime<Utc>, f64)>,
+    /// Rolling Flipster mid history. Used by the velocity filter:
+    /// if Flipster's already moving in the signal direction at signal
+    /// time, our fill (300ms+ proxy RTT) lands after the lag is gone.
+    flip_mids: VecDeque<(DateTime<Utc>, f64)>,
     flipster_bid: f64,
     flipster_ask: f64,
     flipster_ts: Option<DateTime<Utc>>,
@@ -305,163 +353,264 @@ async fn on_tick(
     let mut open_act: Option<OpenAction> = None;
     let mut close_act: Option<CloseAction> = None;
     {
-    let mut s = state.lock().await;
-    let entry = s.entry(base.clone()).or_default();
+        let mut s = state.lock().await;
+        let entry = s.entry(base.clone()).or_default();
 
-    match tick.exchange {
-        // Leader exchange (Binance) updates rolling history + may trigger
-        // entry. Was Gate originally; switched to Binance because it has
-        // tighter price discovery and the same ~36 alts are available.
-        ExchangeName::Binance => {
-            entry.gate_mids.push_back((now, mid));
-            // Keep `2 * anchor_s` of history so the anchor lookup always
-            // has at least one tick old enough (when ticks are sparse, the
-            // tighter buffer used to drop the only candidate).
-            let cutoff = now - Duration::seconds((params.anchor_s * 2.0) as i64);
-            while let Some((t, _)) = entry.gate_mids.front() {
-                if *t < cutoff {
-                    entry.gate_mids.pop_front();
-                } else {
-                    break;
-                }
-            }
-
-            // Cooldown / open check — never re-enter while one is open or
-            // we're cooling down on this base.
-            if entry.open.is_some() {
-                return Ok(());
-            }
-            if let Some(cd) = entry.cooldown_until {
-                if now < cd {
-                    return Ok(());
-                }
-            }
-
-            // Anchor = first tick STRICTLY NEWER than (now - anchor_s).
-            // This matches the Python backtest: it walks back the slice
-            // while the predecessor is still > (t - anchor_s) and stops at
-            // the first tick whose predecessor is <= (t - anchor_s) — i.e.
-            // anchor is the closest tick at-or-just-after (t - anchor_s).
-            //
-            // During warmup (no tick old enough yet) we use the oldest
-            // tick we have, mirroring backtest's k=0 fallback.
-            let target = now - Duration::milliseconds((params.anchor_s * 1000.0) as i64);
-            let anchor = entry
-                .gate_mids
-                .iter()
-                .find(|(t, _)| *t > target)
-                .map(|(_, m)| *m)
-                .or_else(|| entry.gate_mids.front().map(|(_, m)| *m));
-            let Some(anchor) = anchor else {
-                return Ok(());
-            };
-            if anchor <= 0.0 {
-                return Ok(());
-            }
-            let move_bp = (mid - anchor) / anchor * 1e4;
-            if move_bp.abs() < params.min_move_bp {
-                return Ok(());
-            }
-
-            // Need a fresh Flipster quote to actually trade against.
-            let f_ts = entry.flipster_ts;
-            let stale = f_ts
-                .map(|t| (now - t).num_milliseconds() > 2000)
-                .unwrap_or(true);
-            if stale || entry.flipster_bid <= 0.0 || entry.flipster_ask <= 0.0 {
-                return Ok(());
-            }
-
-            let side: i8 = if move_bp > 0.0 { 1 } else { -1 };
-            // Long: pay ask. Short: pay bid.
-            let entry_price = if side == 1 {
-                entry.flipster_ask
-            } else {
-                entry.flipster_bid
-            };
-            let ref_mid = (entry.flipster_bid + entry.flipster_ask) * 0.5;
-            let pos_id = pairs_core::pos_id::global().next();
-            let pos = OpenPos {
-                id: pos_id,
-                side,
-                entry_ts: now,
-                entry_price,
-                ref_mid,
-                deadline: now + Duration::milliseconds((params.hold_max_s * 1000.0) as i64),
-                gate_move_bp: move_bp,
-            };
-            entry.open = Some(pos);
-            entry.cooldown_until =
-                Some(now + Duration::milliseconds((params.cooldown_s * 1000.0) as i64));
-
-            info!(
-                base = %base,
-                side = if side == 1 { "long" } else { "short" },
-                gate_move_bp = format!("{:+.1}", move_bp),
-                f_entry = entry_price,
-                pos_id,
-                "[gate_lead] OPEN"
-            );
-            // Defer the write_trade_signal + publish to AFTER we drop the
-            // lock — async I/O in here would starve other tick handlers.
-            // BBO snapshot for the executor: Flipster comes from
-            // BaseState (known fresh — we just gated on staleness above);
-            // Binance comes from the trigger tick we're currently
-            // dispatching, which is the latest BBO by definition.
-            open_act = Some(OpenAction {
-                base: base.clone(),
-                pos_id,
-                side_s: if side == 1 { "long" } else { "short" },
-                size_usd: params.size_usd,
-                ref_mid,
-                gate_mid: mid,
-                flipster_bid: Some(entry.flipster_bid),
-                flipster_ask: Some(entry.flipster_ask),
-                binance_bid: Some(bid),
-                binance_ask: Some(ask),
-                ts: now,
-            });
-        }
-        // Flipster updates the latest quote + may trigger exit.
-        e if matches!(e, ExchangeName::Flipster) => {
-            entry.flipster_bid = bid;
-            entry.flipster_ask = ask;
-            entry.flipster_ts = Some(now);
-
-            // Check exit on open position. Three triggers (in order):
-            // (a) Flipster mid moved exit_bp in our favor (TP)
-            // (b) Flipster mid moved stop_bp against us (stop)
-            // (c) deadline passed (timeout) — checked here too so we don't
-            //     rely solely on the 100ms sweeper which can fall behind
-            //     under tick load.
-            if let Some(pos) = entry.open.clone() {
-                let mut exit_pick: Option<(&'static str, f64)> = None;
-                if pos.ref_mid > 0.0 {
-                    let move_signed = ((mid - pos.ref_mid) / pos.ref_mid * 1e4)
-                        * (pos.side as f64);
-                    if move_signed >= params.exit_bp {
-                        exit_pick = Some(("tp", if pos.side == 1 { bid } else { ask }));
-                    } else if move_signed <= -params.stop_bp {
-                        exit_pick = Some(("stop", if pos.side == 1 { bid } else { ask }));
+        match tick.exchange {
+            // Leader exchange (Binance) updates rolling history + may trigger
+            // entry. Was Gate originally; switched to Binance because it has
+            // tighter price discovery and the same ~36 alts are available.
+            ExchangeName::Binance => {
+                entry.gate_mids.push_back((now, mid));
+                // Keep `2 * anchor_s` of history so the anchor lookup always
+                // has at least one tick old enough (when ticks are sparse, the
+                // tighter buffer used to drop the only candidate).
+                let cutoff = now - Duration::seconds((params.anchor_s * 2.0) as i64);
+                while let Some((t, _)) = entry.gate_mids.front() {
+                    if *t < cutoff {
+                        entry.gate_mids.pop_front();
+                    } else {
+                        break;
                     }
                 }
-                if exit_pick.is_none() && now >= pos.deadline {
-                    exit_pick = Some(("timeout", if pos.side == 1 { bid } else { ask }));
+
+                // Cooldown / open check — never re-enter while one is open or
+                // we're cooling down on this base.
+                if entry.open.is_some() {
+                    return Ok(());
                 }
-                if let Some((reason, exit_price)) = exit_pick {
-                    entry.open = None;
-                    close_act = Some(CloseAction {
-                        base: base.clone(),
-                        pos,
-                        exit_price,
-                        reason,
-                        exit_ts: now,
-                    });
+                if let Some(cd) = entry.cooldown_until {
+                    if now < cd {
+                        return Ok(());
+                    }
+                }
+
+                // Anchor = median of ticks within ±half_window of
+                // (now - anchor_s). Single-tick anchors were getting
+                // fooled by transient spikes — e.g. SOMI 11:17:28 took
+                // a 1ms spike to 0.1905 as the anchor while the price
+                // was actually oscillating around 0.1898, fabricating a
+                // -36bp move. The median over ~1s window suppresses
+                // outlier ticks while still tracking real moves at the
+                // sub-second level.
+                //
+                // Window is configurable via GL_ANCHOR_WINDOW_MS
+                // (default 1000ms = ±500ms). Setting it to 0 falls
+                // back to the original single-tick behavior.
+                let target = now - Duration::milliseconds((params.anchor_s * 1000.0) as i64);
+                let win_ms: i64 = std::env::var("GL_ANCHOR_WINDOW_MS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(1000);
+                let half = Duration::milliseconds(win_ms / 2);
+                let lo = target - half;
+                let hi = target + half;
+                let mut window: Vec<f64> = entry
+                    .gate_mids
+                    .iter()
+                    .filter(|(t, _)| *t >= lo && *t <= hi)
+                    .map(|(_, m)| *m)
+                    .collect();
+                let anchor = if !window.is_empty() {
+                    window.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    window[window.len() / 2]
+                } else {
+                    // Window empty (warmup or sparse ticks) — fall back
+                    // to closest-tick logic from before.
+                    let closest = entry
+                        .gate_mids
+                        .iter()
+                        .find(|(t, _)| *t > target)
+                        .map(|(_, m)| *m)
+                        .or_else(|| entry.gate_mids.front().map(|(_, m)| *m));
+                    let Some(c) = closest else { return Ok(()); };
+                    c
+                };
+                if anchor <= 0.0 {
+                    return Ok(());
+                }
+                let move_bp = (mid - anchor) / anchor * 1e4;
+                if move_bp.abs() < params.min_move_bp {
+                    return Ok(());
+                }
+
+                // Need a fresh Flipster quote to actually trade against.
+                let f_ts = entry.flipster_ts;
+                let stale = f_ts
+                    .map(|t| (now - t).num_milliseconds() > 2000)
+                    .unwrap_or(true);
+                if stale || entry.flipster_bid <= 0.0 || entry.flipster_ask <= 0.0 {
+                    return Ok(());
+                }
+
+                let side: i8 = if move_bp > 0.0 { 1 } else { -1 };
+
+                // Lag filter: only enter when Flipster is BEHIND Binance in
+                // the move's direction (i.e. there's still lag to capture).
+                // Without this we kept entering after Flipster had already
+                // overshot Binance, immediately reverting against us
+                // (e.g. GWEI 10:46:10 -9.55bp, 10:46:02 -16.47bp). Compute
+                // signed lag in bp where positive = Flipster is in the
+                // direction the strategy wants to ride; negative = Flipster
+                // already past Binance, lag inverted, do not trade.
+                let flip_mid = (entry.flipster_bid + entry.flipster_ask) * 0.5;
+                let raw_lag_bp = (mid - flip_mid) / flip_mid * 1e4;
+                let lag_bp = raw_lag_bp * (side as f64); // sign-aligned to trade direction
+                let min_lag_bp: f64 = std::env::var("GL_MIN_LAG_BP")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0.0);
+                if lag_bp < min_lag_bp {
+                    info!(
+                        base = %base,
+                        side = if side == 1 { "long" } else { "short" },
+                        gate_move_bp = format!("{:+.1}", move_bp),
+                        flip_lag_bp = format!("{:+.1}", lag_bp),
+                        min_lag_bp,
+                        "[gate_lead] SKIP — Flipster already ahead of Binance"
+                    );
+                    return Ok(());
+                }
+
+                // Velocity filter: if Flipster's already moving in the
+                // signal direction over the last GL_FLIP_VEL_WINDOW_MS,
+                // it's catching up — by the time our order lands the lag
+                // will be gone. Compare current mid to mid `vel_window`
+                // ago. If Flipster move (signed by side) > max_vel_bp,
+                // skip. Default vel_window=500ms, max_vel=8bp.
+                let vel_window_ms: i64 = std::env::var("GL_FLIP_VEL_WINDOW_MS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(500);
+                let max_vel_bp: f64 = std::env::var("GL_FLIP_VEL_MAX_BP")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(8.0);
+                let flip_anchor_ts = now - Duration::milliseconds(vel_window_ms);
+                let flip_anchor_mid = entry.flip_mids
+                    .iter()
+                    .find(|(t, _)| *t > flip_anchor_ts)
+                    .map(|(_, m)| *m)
+                    .or_else(|| entry.flip_mids.front().map(|(_, m)| *m));
+                if let Some(fa) = flip_anchor_mid {
+                    if fa > 0.0 {
+                        let raw_flip_move = (flip_mid - fa) / fa * 1e4;
+                        let flip_move_bp = raw_flip_move * (side as f64);
+                        if flip_move_bp > max_vel_bp {
+                            info!(
+                                base = %base,
+                                side = if side == 1 { "long" } else { "short" },
+                                gate_move_bp = format!("{:+.1}", move_bp),
+                                flip_vel_bp = format!("{:+.1}", flip_move_bp),
+                                max_vel_bp,
+                                vel_window_ms,
+                                "[gate_lead] SKIP — Flipster already catching up"
+                            );
+                            return Ok(());
+                        }
+                    }
+                }
+
+                // Long: pay ask. Short: pay bid.
+                let entry_price = if side == 1 {
+                    entry.flipster_ask
+                } else {
+                    entry.flipster_bid
+                };
+                let ref_mid = (entry.flipster_bid + entry.flipster_ask) * 0.5;
+                let pos_id = pairs_core::pos_id::global().next();
+                let pos = OpenPos {
+                    id: pos_id,
+                    side,
+                    entry_ts: now,
+                    entry_price,
+                    ref_mid,
+                    deadline: now + Duration::milliseconds((params.hold_max_s * 1000.0) as i64),
+                    gate_move_bp: move_bp,
+                };
+                entry.open = Some(pos);
+                entry.cooldown_until =
+                    Some(now + Duration::milliseconds((params.cooldown_s * 1000.0) as i64));
+
+                info!(
+                    base = %base,
+                    side = if side == 1 { "long" } else { "short" },
+                    gate_move_bp = format!("{:+.1}", move_bp),
+                    f_entry = entry_price,
+                    pos_id,
+                    "[gate_lead] OPEN"
+                );
+                // Defer the write_trade_signal + publish to AFTER we drop the
+                // lock — async I/O in here would starve other tick handlers.
+                // BBO snapshot for the executor: Flipster comes from
+                // BaseState (known fresh — we just gated on staleness above);
+                // Binance comes from the trigger tick we're currently
+                // dispatching, which is the latest BBO by definition.
+                open_act = Some(OpenAction {
+                    base: base.clone(),
+                    pos_id,
+                    side_s: if side == 1 { "long" } else { "short" },
+                    size_usd: params.size_usd,
+                    ref_mid,
+                    gate_mid: mid,
+                    flipster_bid: Some(entry.flipster_bid),
+                    flipster_ask: Some(entry.flipster_ask),
+                    binance_bid: Some(bid),
+                    binance_ask: Some(ask),
+                    ts: now,
+                });
+            }
+            // Flipster updates the latest quote + may trigger exit.
+            e if matches!(e, ExchangeName::Flipster) => {
+                entry.flipster_bid = bid;
+                entry.flipster_ask = ask;
+                entry.flipster_ts = Some(now);
+
+                // Track Flipster mid history for the velocity filter.
+                // Keep ~3s of history (matches anchor_s window).
+                let flip_mid = (bid + ask) * 0.5;
+                if flip_mid > 0.0 {
+                    entry.flip_mids.push_back((now, flip_mid));
+                    let cutoff = now - Duration::seconds(3);
+                    while let Some((t, _)) = entry.flip_mids.front() {
+                        if *t < cutoff { entry.flip_mids.pop_front(); } else { break; }
+                    }
+                }
+
+                // Check exit on open position. Three triggers (in order):
+                // (a) Flipster mid moved exit_bp in our favor (TP)
+                // (b) Flipster mid moved stop_bp against us (stop)
+                // (c) deadline passed (timeout) — checked here too so we don't
+                //     rely solely on the 100ms sweeper which can fall behind
+                //     under tick load.
+                if let Some(pos) = entry.open.clone() {
+                    let mut exit_pick: Option<(&'static str, f64)> = None;
+                    if pos.ref_mid > 0.0 {
+                        let move_signed =
+                            ((mid - pos.ref_mid) / pos.ref_mid * 1e4) * (pos.side as f64);
+                        if move_signed >= params.exit_bp {
+                            exit_pick = Some(("tp", if pos.side == 1 { bid } else { ask }));
+                        } else if move_signed <= -params.stop_bp {
+                            exit_pick = Some(("stop", if pos.side == 1 { bid } else { ask }));
+                        }
+                    }
+                    if exit_pick.is_none() && now >= pos.deadline {
+                        exit_pick = Some(("timeout", if pos.side == 1 { bid } else { ask }));
+                    }
+                    if let Some((reason, exit_price)) = exit_pick {
+                        entry.open = None;
+                        close_act = Some(CloseAction {
+                            base: base.clone(),
+                            pos,
+                            exit_price,
+                            reason,
+                            exit_ts: now,
+                        });
+                    }
                 }
             }
+            _ => {}
         }
-        _ => {}
-    }
     } // release state mutex before any async I/O
 
     if let Some(o) = open_act {
@@ -518,22 +667,28 @@ async fn sweep_exits(
         let bases: Vec<String> = s
             .iter()
             .filter_map(|(k, v)| {
-                v.open
-                    .as_ref()
-                    .and_then(|p| {
-                        if p.deadline <= now {
-                            Some(k.clone())
-                        } else {
-                            None
-                        }
-                    })
+                v.open.as_ref().and_then(|p| {
+                    if p.deadline <= now {
+                        Some(k.clone())
+                    } else {
+                        None
+                    }
+                })
             })
             .collect();
         for base in bases {
-            let Some(entry) = s.get_mut(&base) else { continue };
-            let Some(pos) = entry.open.clone() else { continue };
+            let Some(entry) = s.get_mut(&base) else {
+                continue;
+            };
+            let Some(pos) = entry.open.clone() else {
+                continue;
+            };
             let exit_price = if entry.flipster_bid > 0.0 && entry.flipster_ask > 0.0 {
-                if pos.side == 1 { entry.flipster_bid } else { entry.flipster_ask }
+                if pos.side == 1 {
+                    entry.flipster_bid
+                } else {
+                    entry.flipster_ask
+                }
             } else {
                 pos.ref_mid
             };
@@ -559,11 +714,7 @@ async fn sweep_exits(
 
 /// Persist close + emit ZMQ. Caller must have already cleared `entry.open`
 /// inside the lock to release it before this point.
-async fn log_close(
-    c: CloseAction,
-    writer: &IlpWriter,
-    params: &GateLeadParams,
-) {
+async fn log_close(c: CloseAction, writer: &IlpWriter, params: &GateLeadParams) {
     let pnl_bp = single_leg_pnl_bp(c.pos.entry_price, c.exit_price, c.pos.side as i32);
     let net_bp = pnl_bp - 2.0 * params.fee_bp_per_side;
 
@@ -594,7 +745,7 @@ async fn log_close(
             c.exit_ts,
             "gate_lead",
             c.reason,
-            "paper",
+            &params.mode_tag,
         )
         .await
     {

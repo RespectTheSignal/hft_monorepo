@@ -217,6 +217,7 @@ start_chrome() {
       --disable-features=TranslateUI \
       --remote-debugging-port="$port" \
       --remote-debugging-address=0.0.0.0 \
+      --remote-allow-origins=* \
       --user-data-dir="/tmp/chrome-$name" \
       --window-size=1920,1080 "$url" \
       >/dev/null 2>&1 &
@@ -265,6 +266,12 @@ case "${1:-status}" in
   paper-start)
     start_paper
     ;;
+  collector-start)
+    start_collector
+    ;;
+  collector-stop)
+    stop_one collector "$RUN/collector.pid"
+    ;;
   gl-start)
     start_gl
     ;;
@@ -288,6 +295,63 @@ case "${1:-status}" in
     ;;
   cookies-now)
     python3 "$PROJECT/scripts/dump_cookies.py" || exit $?
+    ;;
+  proxy-rotator-start)
+    if is_running "$RUN/proxy_rotator.pid"; then
+      echo "[proxy-rotator] already running"; exit 0
+    fi
+    nohup python3 -u "$PROJECT/scripts/proxy_rotator.py" --watch \
+      >"$LOGS/proxy_rotator.log" 2>&1 &
+    echo $! > "$RUN/proxy_rotator.pid"
+    echo "[proxy-rotator] pid=$! (watch mode, scan every 30s)"
+    ;;
+  proxy-rotator-stop)
+    stop_one proxy-rotator "$RUN/proxy_rotator.pid"
+    ;;
+  proxy-rotator-status)
+    python3 "$PROJECT/scripts/proxy_rotator.py" --status
+    ;;
+  nrt-rotator-start)
+    if is_running "$RUN/nrt_rotator.pid"; then
+      echo "[nrt-rotator] already running"; exit 0
+    fi
+    nohup python3 -u "$PROJECT/scripts/nrt_rotator.py" --watch \
+      >"$LOGS/nrt_rotator.log" 2>&1 &
+    echo $! > "$RUN/nrt_rotator.pid"
+    echo "[nrt-rotator] pid=$! (watch mode, scan every 60s)"
+    ;;
+  nrt-rotator-stop)
+    stop_one nrt-rotator "$RUN/nrt_rotator.pid"
+    ;;
+  nrt-rotator-status)
+    python3 "$PROJECT/scripts/nrt_rotator.py" --status
+    ;;
+  balance-tracker-start)
+    if is_running "$RUN/balance_tracker.pid"; then
+      echo "[balance-tracker] already running"; exit 0
+    fi
+    nohup python3 -u "$PROJECT/scripts/balance_tracker.py" --watch \
+      >"$LOGS/balance_tracker.log" 2>&1 &
+    echo $! > "$RUN/balance_tracker.pid"
+    echo "[balance-tracker] pid=$! (watch every 60s)"
+    ;;
+  balance-tracker-stop)
+    stop_one balance-tracker "$RUN/balance_tracker.pid"
+    ;;
+  balance-tracker-summary)
+    python3 "$PROJECT/scripts/balance_tracker.py" --summary
+    ;;
+  dashboard-start)
+    if is_running "$RUN/dashboard.pid"; then
+      echo "[dashboard] already running on :8090"; exit 0
+    fi
+    nohup python3 -u "$PROJECT/scripts/debug_dashboard.py" --port 8090 \
+      >"$LOGS/dashboard.log" 2>&1 &
+    echo $! > "$RUN/dashboard.pid"
+    echo "[dashboard] pid=$! → http://gate1:8090"
+    ;;
+  dashboard-stop)
+    stop_one dashboard "$RUN/dashboard.pid"
     ;;
   stop)
     stop_one executor-sr     "$RUN/executor_sr.pid"
@@ -313,5 +377,5 @@ case "${1:-status}" in
     done
     ;;
   *)
-    echo "usage: $0 {start|stop|restart|status|paper-start|gl-start|gl-stop|sr-start|sr-stop|vnc-start|chrome-start|chrome-stop|cookies-now}"; exit 1 ;;
+    echo "usage: $0 {start|stop|restart|status|paper-start|collector-start|collector-stop|gl-start|gl-stop|sr-start|sr-stop|vnc-start|chrome-start|chrome-stop|cookies-now}"; exit 1 ;;
 esac

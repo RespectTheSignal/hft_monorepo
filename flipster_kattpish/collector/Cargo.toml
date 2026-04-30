@@ -35,3 +35,7 @@ path = "src/bin/main.rs"
 [[bin]]
 name = "funding_poller"
 path = "src/bin/funding_poller.rs"
+
+[[bin]]
+name = "live_dashboard"
+path = "src/bin/live_dashboard.rs"

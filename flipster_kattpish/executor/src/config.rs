@@ -45,6 +45,8 @@ pub const TP_DRAWDOWN_BP: f64 = 3.0;
 pub const TP_MIN_HOLD_SEC: f64 = 5.0;
 pub const TP_MAX_MID_AGE_SEC: f64 = 5.0;
 
-/// Per-leg fee (rebate-aware): Flipster taker 0.425 bp + Gate taker 0.45 bp
-/// → 0.875 bp/side. Round-trip fee = 4 × this on notional.
-pub const TAKER_FEE_FRAC: f64 = 0.0000875;
+/// VIP11 Flipster taker fee per leg, effective rate after MM-tier
+/// adjustment + 85% rebate: 0.425 bp/leg. flipster_only single-leg
+/// trades: round-trip = 0.85 bp. approx_fee_usd in trade_log = size ×
+/// this × 2 so net_after_fees_usd matches Flipster's actual debit.
+pub const TAKER_FEE_FRAC: f64 = 0.0000425;

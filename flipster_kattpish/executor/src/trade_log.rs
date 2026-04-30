@@ -32,6 +32,28 @@ pub struct TradeRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signal_lag_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub f_entry_order_rtt_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub f_entry_total_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub f_maker_exit_order_rtt_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub f_maker_cancel_rtt_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub f_exit_order_rtt_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_bbo_recheck_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_bbo_adverse_bp: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_topbook_qty: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_order_qty_before_topbook: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_size_before_topbook_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_size_after_topbook_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub paper_f_entry: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub paper_g_entry: Option<f64>,

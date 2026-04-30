@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -30,7 +31,13 @@ pub struct FlipsterConfig {
 }
 
 pub struct FlipsterClient {
-    http: reqwest::Client,
+    /// Pool of reqwest clients. If FLIPSTER_PROXY_POOL is set, each comma
+    /// separated entry gets its own client (different exit IPs). Calls
+    /// round-robin across the pool, distributing load and avoiding
+    /// per-IP CF rate limits. Always non-empty (single entry = no proxy
+    /// or single-proxy mode).
+    clients: Vec<reqwest::Client>,
+    next_idx: AtomicUsize,
     jar: Arc<Jar>,
     cf_bm: Arc<RwLock<String>>,
     dry_run: bool,
@@ -62,18 +69,17 @@ impl FlipsterClient {
             );
         }
 
-        let mut builder = reqwest::Client::builder()
-            .cookie_provider(jar.clone())
-            .default_headers(Self::default_headers())
-            .gzip(true)
-            .https_only(true);
-
-        if let Some(proxy_url) = &config.proxy {
-            builder = builder.proxy(reqwest::Proxy::all(proxy_url).expect("invalid proxy URL"));
-        }
+        let proxy_list: Vec<String> = config
+            .proxy
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(|s| vec![s.clone()])
+            .unwrap_or_default();
+        let clients = build_clients(&jar, &proxy_list);
 
         FlipsterClient {
-            http: builder.build().expect("failed to build HTTP client"),
+            clients,
+            next_idx: AtomicUsize::new(0),
             jar,
             cf_bm: Arc::new(RwLock::new(config.cf_bm)),
             dry_run: config.dry_run,
@@ -118,26 +124,32 @@ impl FlipsterClient {
             );
         }
 
-        let mut builder = reqwest::Client::builder()
-            .cookie_provider(jar.clone())
-            .default_headers(Self::default_headers())
-            .gzip(true)
-            .https_only(true);
-
-        if let Ok(proxy_url) = std::env::var("FLIPSTER_PROXY_URL") {
-            if !proxy_url.is_empty() {
-                builder = builder.proxy(
-                    reqwest::Proxy::all(&proxy_url).expect("invalid FLIPSTER_PROXY_URL"),
-                );
-            }
-        }
+        // FLIPSTER_PROXY_POOL takes precedence: comma-separated proxy URLs,
+        // one reqwest::Client per entry, calls round-robin. Falls back to
+        // single-proxy FLIPSTER_PROXY_URL, or direct if neither set.
+        let proxy_list = read_proxy_pool();
+        let clients = build_clients(&jar, &proxy_list);
 
         FlipsterClient {
-            http: builder.build().expect("failed to build HTTP client"),
+            clients,
+            next_idx: AtomicUsize::new(0),
             jar,
             cf_bm: Arc::new(RwLock::new(cf_bm)),
             dry_run: false,
         }
+    }
+
+    /// Round-robin pick across the reqwest::Client pool. Each pick advances
+    /// next_idx atomically; concurrent callers naturally spread across
+    /// pool entries.
+    fn pick_client(&self) -> &reqwest::Client {
+        let idx = self.next_idx.fetch_add(1, Ordering::Relaxed) % self.clients.len();
+        &self.clients[idx]
+    }
+
+    /// Number of clients in the proxy pool (1 = direct or single proxy).
+    pub fn pool_size(&self) -> usize {
+        self.clients.len()
     }
 
     /// Reload all cookies from a HashMap (e.g. after refresh_cookies).
@@ -157,7 +169,7 @@ impl FlipsterClient {
         }
     }
 
-    fn default_headers() -> HeaderMap {
+    pub(crate) fn default_headers() -> HeaderMap {
         let mut h = HeaderMap::new();
         h.insert("User-Agent", HeaderValue::from_static("Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:149.0) Gecko/20100101 Firefox/149.0"));
         h.insert("Accept", HeaderValue::from_static("application/json, text/plain, */*"));
@@ -219,7 +231,7 @@ impl FlipsterClient {
             return Ok(OrderResponse { raw: json });
         }
 
-        let resp = self.http.post(&url).json(&body).send().await?;
+        let resp = self.pick_client().post(&url).json(&body).send().await?;
         let status = resp.status().as_u16();
 
         if status == 401 || status == 403 {
@@ -270,7 +282,7 @@ impl FlipsterClient {
             return Ok(OrderResponse { raw: body });
         }
 
-        let resp = self.http.put(&url).json(&body).send().await?;
+        let resp = self.pick_client().put(&url).json(&body).send().await?;
         let status = resp.status().as_u16();
 
         if status == 401 || status == 403 {
@@ -366,7 +378,7 @@ impl FlipsterClient {
             return Ok(serde_json::json!({"dry_run": true, "body": body}));
         }
 
-        let resp = self.http.post(&url).json(&body).send().await?;
+        let resp = self.pick_client().post(&url).json(&body).send().await?;
         let status = resp.status().as_u16();
         if status == 401 || status == 403 {
             return Err(FlipsterError::Auth);
@@ -408,7 +420,7 @@ impl FlipsterClient {
             return Ok(serde_json::json!({"dry_run": true, "body": body}));
         }
 
-        let resp = self.http.delete(&url).json(&body).send().await?;
+        let resp = self.pick_client().delete(&url).json(&body).send().await?;
         let status = resp.status().as_u16();
         if status == 401 || status == 403 {
             return Err(FlipsterError::Auth);
@@ -435,7 +447,7 @@ impl FlipsterClient {
             return Ok(OrderResponse { raw: body });
         }
 
-        let resp = self.http.post(&url).json(&body).send().await?;
+        let resp = self.pick_client().post(&url).json(&body).send().await?;
         let status = resp.status().as_u16();
 
         if status == 401 || status == 403 {
@@ -455,4 +467,49 @@ impl FlipsterClient {
             serde_json::from_str(&text).unwrap_or(serde_json::Value::String(text));
         Ok(OrderResponse { raw: parsed })
     }
+}
+
+/// Parse FLIPSTER_PROXY_POOL (comma-separated) → list. Falls back to
+/// FLIPSTER_PROXY_URL as a single-entry list. Empty list = no proxy.
+fn read_proxy_pool() -> Vec<String> {
+    if let Ok(pool) = std::env::var("FLIPSTER_PROXY_POOL") {
+        let entries: Vec<String> = pool
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        if !entries.is_empty() {
+            return entries;
+        }
+    }
+    if let Ok(url) = std::env::var("FLIPSTER_PROXY_URL") {
+        if !url.is_empty() {
+            return vec![url];
+        }
+    }
+    Vec::new()
+}
+
+/// Build one reqwest::Client per proxy URL. Empty list → single direct
+/// client. All clients share the same cookie jar so set-cookie updates
+/// from any entry propagate to the rest.
+fn build_clients(jar: &Arc<Jar>, proxy_urls: &[String]) -> Vec<reqwest::Client> {
+    let mk = |proxy: Option<&str>| {
+        let mut b = reqwest::Client::builder()
+            .cookie_provider(jar.clone())
+            .default_headers(FlipsterClient::default_headers())
+            .gzip(true)
+            .https_only(true);
+        if let Some(url) = proxy {
+            b = b
+                .proxy(reqwest::Proxy::all(url).expect("invalid proxy URL"))
+                .danger_accept_invalid_certs(false);
+        }
+        b.build().expect("failed to build HTTP client")
+    };
+    if proxy_urls.is_empty() {
+        return vec![mk(None)];
+    }
+    proxy_urls.iter().map(|u| mk(Some(u.as_str()))).collect()
 }

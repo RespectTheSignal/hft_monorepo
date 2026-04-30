@@ -6,8 +6,8 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use clap::Parser;
 use dashmap::{DashMap, DashSet};
@@ -21,11 +21,11 @@ mod cookies;
 mod executor;
 mod fill_publisher;
 mod flipster_account;
+mod flipster_contracts;
 mod flipster_helpers;
 mod flipster_ws;
 mod gate_contracts;
 mod gate_helpers;
-mod flipster_contracts;
 mod questdb;
 mod symbol_stats;
 mod trade_log;
@@ -35,7 +35,10 @@ use crate::executor::{Executor, Stats};
 use crate::trade_log::TradeLog;
 
 #[derive(Parser, Debug)]
-#[command(name = "executor", about = "Rust live executor for the pairs paper bot")]
+#[command(
+    name = "executor",
+    about = "Rust live executor for the pairs paper bot"
+)]
 struct Cli {
     /// Variant account_id to follow (e.g. T04_es35).
     #[arg(long)]
@@ -94,8 +97,7 @@ struct Cli {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -135,7 +137,9 @@ async fn main() -> anyhow::Result<()> {
     if !cli.trade_mode.is_empty() {
         match flipster_account::set_trade_mode(&cli.trade_mode).await {
             Ok(()) => tracing::info!(mode = %cli.trade_mode, "[init] flipster trade-mode applied"),
-            Err(e) => tracing::warn!(error = %e, mode = %cli.trade_mode, "[init] flipster trade-mode failed"),
+            Err(e) => {
+                tracing::warn!(error = %e, mode = %cli.trade_mode, "[init] flipster trade-mode failed")
+            }
         }
     }
 
@@ -151,13 +155,15 @@ async fn main() -> anyhow::Result<()> {
     // Build clients.
     let flipster_client = Arc::new(FlipsterClient::from_all_cookies(&bundle.flipster));
     let gate_client = Arc::new(
-        GateClient::from_cookies(&bundle.gate)
-            .map_err(|e| anyhow::anyhow!("gate client: {e}"))?,
+        GateClient::from_cookies(&bundle.gate).map_err(|e| anyhow::anyhow!("gate client: {e}"))?,
     );
-    if !gate_client.is_logged_in().await {
+    if cli.flipster_only {
+        tracing::info!("[init] --flipster-only — skipping Gate cookie validation");
+    } else if !gate_client.is_logged_in().await {
         anyhow::bail!("gate cookies do not authenticate — re-run dump_cookies.py");
+    } else {
+        tracing::info!("[init] gate cookies validated");
     }
-    tracing::info!("[init] gate cookies validated");
 
     // Public-API client for QuestDB queries + Gate contract specs.
     let qdb_http = reqwest::Client::builder()
@@ -238,6 +244,8 @@ async fn main() -> anyhow::Result<()> {
         shutting_down: AtomicBool::new(false),
         unmatched_first_seen: DashMap::new(),
         order_first_seen: DashMap::new(),
+        cancel_failure_count: Arc::new(DashMap::new()),
+        abandoned_orders: Arc::new(DashMap::new()),
         last_signal: DashMap::new(),
         sym_stats: sym_stats.clone(),
         flip_contracts,
