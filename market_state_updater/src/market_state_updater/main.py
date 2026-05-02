@@ -35,6 +35,7 @@ from market_state_updater.jobs import (
     price_change_gap_corr,
     return_autocorr,
     spread_pair,
+    trade_outcomes,
     variance_ratio,
 )
 from market_state_updater.jobs.common import (
@@ -141,6 +142,25 @@ def build_schedules(
                     ),
                 )
             )
+
+    # 3c) gate_sub_account_trades win/loss outcomes : window × lookahead_seconds
+    if cfg.include_trade_outcomes:
+        for w in gap_windows:
+            for la in cfg.trade_outcomes_lookahead_seconds:
+                out.append(
+                    Schedule(
+                        name=f"trade_outcomes:gate:{w}m:{la}s",
+                        cadence_secs=cad(w),
+                        run=partial(
+                            trade_outcomes.run,
+                            cfg.questdb_url,
+                            redis_client,
+                            cfg.market_gap_prefix,
+                            w,
+                            la,
+                        ),
+                    )
+                )
 
     # 4) price change : source × window
     if cfg.include_price_change:

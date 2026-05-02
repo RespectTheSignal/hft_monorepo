@@ -12,7 +12,13 @@ from __future__ import annotations
 
 import pytest
 
-from market_state_updater.jobs import flipster_gap, gap, gate_web_gap, spread_pair
+from market_state_updater.jobs import (
+    flipster_gap,
+    gap,
+    gate_web_gap,
+    spread_pair,
+    trade_outcomes,
+)
 
 
 # ---- gap.parse_dataset ----
@@ -174,3 +180,79 @@ def test_flipster_gap_parse_empty_dataset() -> None:
     assert gaps == {}
     assert f_sp == {}
     assert b_sp == {}
+
+
+# ---- trade_outcomes.parse_dataset ----
+
+
+def _trade_outcomes_columns() -> list[dict[str, str]]:
+    return [
+        {"name": "symbol"},
+        {"name": "long_win_count"},
+        {"name": "long_loss_count"},
+        {"name": "long_win_volume"},
+        {"name": "long_loss_volume"},
+        {"name": "short_win_count"},
+        {"name": "short_loss_count"},
+        {"name": "short_win_volume"},
+        {"name": "short_loss_volume"},
+    ]
+
+
+def test_trade_outcomes_parse_full_payload() -> None:
+    payload = {
+        "columns": _trade_outcomes_columns(),
+        "dataset": [
+            ["BTC_USDT", 3, 2, 412.3, 280.1, 1, 4, 80.0, 320.5],
+            ["ETH_USDT", 0, 0, 0.0, 0.0, 5, 1, 1500.0, 200.0],
+        ],
+    }
+    out = trade_outcomes.parse_dataset(payload)
+    assert set(out.keys()) == {"BTC_USDT", "ETH_USDT"}
+    btc = out["BTC_USDT"]
+    # count 류는 int
+    assert btc["long_win_count"] == 3 and isinstance(btc["long_win_count"], int)
+    assert btc["short_loss_count"] == 4 and isinstance(btc["short_loss_count"], int)
+    # volume 류는 float
+    assert btc["long_win_volume"] == 412.3
+    assert btc["short_loss_volume"] == 320.5
+
+
+def test_trade_outcomes_parse_skip_blank_symbol() -> None:
+    payload = {
+        "columns": _trade_outcomes_columns(),
+        "dataset": [
+            ["", 1, 0, 100.0, 0.0, 0, 0, 0.0, 0.0],
+            ["BTC_USDT", 2, 1, 200.0, 50.0, 0, 0, 0.0, 0.0],
+        ],
+    }
+    out = trade_outcomes.parse_dataset(payload)
+    assert list(out.keys()) == ["BTC_USDT"]
+
+
+def test_trade_outcomes_parse_none_treated_as_zero() -> None:
+    payload = {
+        "columns": _trade_outcomes_columns(),
+        "dataset": [
+            ["FOO_USDT", None, 1, None, 50.0, 0, 0, 0.0, 0.0],
+        ],
+    }
+    out = trade_outcomes.parse_dataset(payload)
+    foo = out["FOO_USDT"]
+    assert foo["long_win_count"] == 0
+    assert foo["long_win_volume"] == 0.0
+    assert foo["long_loss_count"] == 1
+    assert foo["long_loss_volume"] == 50.0
+
+
+def test_trade_outcomes_parse_missing_column_raises() -> None:
+    cols = _trade_outcomes_columns()
+    cols.pop()  # short_loss_volume drop
+    payload = {"columns": cols, "dataset": []}
+    with pytest.raises(ValueError):
+        trade_outcomes.parse_dataset(payload)
+
+
+def test_trade_outcomes_parse_empty_dataset() -> None:
+    payload = {"columns": _trade_outcomes_columns(), "dataset": []}
+    assert trade_outcomes.parse_dataset(payload) == {}

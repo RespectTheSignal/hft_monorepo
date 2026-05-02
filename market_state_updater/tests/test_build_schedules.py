@@ -35,6 +35,8 @@ def _cfg(window_mode: str, *, include_corr: bool = True) -> AppConfig:
         include_spread_pair=True,
         include_gate_gate_web_gap=True,
         include_flipster_gap=False,
+        include_trade_outcomes=False,
+        trade_outcomes_lookahead_seconds=(30, 60),
         include_price_change=True,
         price_change_prefix="pc",
         price_change_sources=("gate", "binance"),
@@ -161,6 +163,36 @@ def test_flipster_gap_schedule_name_format() -> None:
         assert parts[1] == "flipster"
         assert parts[2] == "binance"
         assert int(parts[3].rstrip("m")) in FAST_WINDOWS
+
+
+def test_trade_outcomes_adds_window_x_lookahead_schedules() -> None:
+    """include_trade_outcomes=True 면 gap_windows × len(lookahead_seconds) 만큼 추가."""
+    base = _cfg("all")
+    with_to = replace(
+        base, include_trade_outcomes=True, trade_outcomes_lookahead_seconds=(30, 60)
+    )
+    diff = len(build_schedules(with_to, MagicMock())) - len(
+        build_schedules(base, MagicMock())
+    )
+    assert diff == len(WINDOW_MINUTES) * 2
+
+
+def test_trade_outcomes_schedule_name_format() -> None:
+    cfg_to = replace(
+        _cfg("fast"),
+        include_trade_outcomes=True,
+        trade_outcomes_lookahead_seconds=(30, 60),
+    )
+    schedules = build_schedules(cfg_to, MagicMock())
+    to_names = [s.name for s in schedules if s.name.startswith("trade_outcomes:")]
+    # fast = (1, 5) windows × 2 lookaheads
+    assert len(to_names) == len(FAST_WINDOWS) * 2
+    expected = {
+        f"trade_outcomes:gate:{w}m:{la}s"
+        for w in FAST_WINDOWS
+        for la in (30, 60)
+    }
+    assert set(to_names) == expected
 
 
 def test_corr_disabled_drops_schedules() -> None:

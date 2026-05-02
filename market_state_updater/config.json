@@ -35,6 +35,7 @@
     "spread_pair": true,
     "gate_gate_web_gap": true,
     "flipster_gap": true,
+    "trade_outcomes": true,
     "price_change": true,
     "price_change_gap_corr": false,
     "mid_corr": true,
@@ -64,6 +65,10 @@
       "240": 120,
       "720": 300
     }
+  },
+  "trade_outcomes": {
+    "$comment": "gate_sub_account_trades 의 win/loss 집계. 각 trade 의 lookahead_seconds 뒤 gate_web mid 와 비교 (long: future_mid > price = win, short 반대, tie = loss). |usdt_size| <= 10 dust trade 는 jobs/trade_outcomes.py:MIN_NOTIONAL_USDT 로 제외.",
+    "lookahead_seconds": [30, 60]
   },
   "mid_corr": {
     "$comment": "원본 update_market_mid_correlation.py 패턴. Pearson corr(base_mid, quote_mid). 한 cycle 호출이 gate, gate_web 두 base 모두 처리해서 blob 1개에 묶음.",

@@ -64,6 +64,8 @@ class AppConfig:
     include_spread_pair: bool
     include_gate_gate_web_gap: bool
     include_flipster_gap: bool
+    include_trade_outcomes: bool
+    trade_outcomes_lookahead_seconds: tuple[int, ...]
 
     include_price_change: bool
     price_change_prefix: str
@@ -267,6 +269,7 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
     pc = _section(file_cfg, "price_change")
     corr = _section(file_cfg, "corr")
     mc = _section(file_cfg, "mid_corr")
+    to = _section(file_cfg, "trade_outcomes")
     ra = _section(file_cfg, "return_autocorr")
     vr = _section(file_cfg, "variance_ratio")
     md = _section(file_cfg, "market_dangerous")
@@ -380,6 +383,12 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
         ),
         include_flipster_gap=_bool_from(
             "MARKET_GAP_INCLUDE_FLIPSTER_GAP", inc.get("flipster_gap"), True
+        ),
+        include_trade_outcomes=_bool_from(
+            "MARKET_GAP_INCLUDE_TRADE_OUTCOMES", inc.get("trade_outcomes"), True
+        ),
+        trade_outcomes_lookahead_seconds=tuple(
+            int(x) for x in (to.get("lookahead_seconds") or [30, 60])
         ),
         include_price_change=_bool_from(
             "MARKET_GAP_INCLUDE_PRICE_CHANGE", inc.get("price_change"), True

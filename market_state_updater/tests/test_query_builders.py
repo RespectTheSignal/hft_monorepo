@@ -11,6 +11,7 @@ from market_state_updater.jobs import (
     gate_web_gap,
     price_change,
     spread_pair,
+    trade_outcomes,
 )
 
 
@@ -119,3 +120,46 @@ def test_price_change_table_for_source() -> None:
     assert price_change.table_for_source("gate") == "gate_bookticker"
     assert price_change.table_for_source("binance") == "binance_bookticker"
     assert price_change.table_for_source("gate_web") == "gate_webbookticker"
+
+
+# ---- trade_outcomes.build_query ----
+
+
+def test_trade_outcomes_query_basic() -> None:
+    sql = trade_outcomes.build_query(window_minutes=10, lookahead_seconds=30)
+    # 두 source 다 들어가야
+    assert "gate_sub_account_trades" in sql
+    assert "gate_webbookticker" in sql
+    # mid sample 1s + FILL(PREV)
+    assert "SAMPLE BY 1s FILL(PREV)" in sql
+    # lookahead shift via dateadd + date_trunc('second', ...)
+    assert "dateadd('s', 30, t.timestamp)" in sql
+    assert "date_trunc('second'" in sql
+    # window filter
+    assert "dateadd('m', -10, now())" in sql
+    # tie-as-loss: long uses '<=', short uses '>='
+    assert "m.mid <= t.price" in sql
+    assert "m.mid >= t.price" in sql
+    # 8 aggregate columns
+    for col in (
+        "long_win_count", "long_loss_count",
+        "long_win_volume", "long_loss_volume",
+        "short_win_count", "short_loss_count",
+        "short_win_volume", "short_loss_volume",
+    ):
+        assert col in sql
+    # dust filter
+    assert "abs(t.usdt_size) > 10" in sql
+
+
+def test_trade_outcomes_query_lookahead_60s() -> None:
+    sql = trade_outcomes.build_query(window_minutes=5, lookahead_seconds=60)
+    assert "dateadd('s', 60, t.timestamp)" in sql
+    assert "dateadd('s', -60, now())" in sql
+    assert "dateadd('m', -5, now())" in sql
+
+
+def test_trade_outcomes_query_volume_uses_abs_usdt_size() -> None:
+    sql = trade_outcomes.build_query(window_minutes=10, lookahead_seconds=30)
+    # volume 컬럼은 |usdt_size| 합
+    assert "abs(t.usdt_size)" in sql
