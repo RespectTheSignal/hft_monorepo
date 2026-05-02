@@ -9,6 +9,7 @@ Win/loss 정의 (tie = loss):
 
 Volume 단위: |usdt_size| (테이블에 이미 signed USDT notional 로 저장돼 있음).
 |usdt_size| <= MIN_NOTIONAL_USDT 인 dust trade 는 SQL 단계에서 제외 (default 10).
+fee < 0 (rebate / 환불 등 비정상) trade 도 SQL 단계에서 제외.
 
 Redis key: {prefix}:trade_outcomes:gate:{window_minutes}m:{lookahead_seconds}s
 
@@ -100,6 +101,7 @@ agg AS (
     WHERE t.timestamp > dateadd('m', -{window_minutes}, now())
       AND t.timestamp <= dateadd('s', -{lookahead_seconds}, now())
       AND abs(t.usdt_size) > {MIN_NOTIONAL_USDT}
+      AND t.fee >= 0
     GROUP BY symbol
 )
 SELECT * FROM agg ORDER BY symbol;

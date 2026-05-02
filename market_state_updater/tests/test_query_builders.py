@@ -148,8 +148,9 @@ def test_trade_outcomes_query_basic() -> None:
         "short_win_volume", "short_loss_volume",
     ):
         assert col in sql
-    # dust filter
+    # dust filter + negative-fee skip
     assert "abs(t.usdt_size) > 10" in sql
+    assert "t.fee >= 0" in sql
 
 
 def test_trade_outcomes_query_lookahead_60s() -> None:
