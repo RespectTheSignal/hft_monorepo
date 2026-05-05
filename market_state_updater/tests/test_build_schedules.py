@@ -20,7 +20,9 @@ from market_state_updater.main import build_schedules
 def _cfg(window_mode: str, *, include_corr: bool = True) -> AppConfig:
     return AppConfig(
         questdb_url="http://q",
+        questdb_backup_url=None,
         redis_url="redis://r",
+        redis_backup_url=None,
         interval_secs=10,
         once=False,
         window_mode=window_mode,  # type: ignore[arg-type]

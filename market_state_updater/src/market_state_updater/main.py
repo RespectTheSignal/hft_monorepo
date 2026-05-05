@@ -45,6 +45,7 @@ from market_state_updater.jobs.common import (
     windows_for_mode,
 )
 from market_state_updater.notifier import TelegramNotifier  # noqa: F401  (TYPE_CHECKING used in build_schedules)
+from market_state_updater.redis_failover import RedisFailover
 from market_state_updater.scheduler import Schedule, stagger_initial_runs, tick
 
 logger = structlog.get_logger(__name__)
@@ -62,7 +63,7 @@ def _configure_logging() -> None:
 
 def build_schedules(
     cfg: AppConfig,
-    redis_client: redis.Redis,
+    redis_client: redis.Redis | RedisFailover,
     notifier: "TelegramNotifier | None" = None,
 ) -> list[Schedule]:
     """활성 job × 윈도우 × 거래소를 평면화해서 list[Schedule]."""
@@ -82,7 +83,7 @@ def build_schedules(
                         cadence_secs=cad(w),
                         run=partial(
                             gap.run,
-                            cfg.questdb_url,
+                            cfg.questdb_urls,
                             redis_client,
                             cfg.market_gap_prefix,
                             base,
@@ -101,7 +102,7 @@ def build_schedules(
                     cadence_secs=cad(w),
                     run=partial(
                         spread_pair.run,
-                        cfg.questdb_url,
+                        cfg.questdb_urls,
                         redis_client,
                         cfg.market_gap_prefix,
                         w,
@@ -118,7 +119,7 @@ def build_schedules(
                     cadence_secs=cad(w),
                     run=partial(
                         gate_web_gap.run,
-                        cfg.questdb_url,
+                        cfg.questdb_urls,
                         redis_client,
                         cfg.market_gap_prefix,
                         w,
@@ -135,7 +136,7 @@ def build_schedules(
                     cadence_secs=cad(w),
                     run=partial(
                         flipster_gap.run,
-                        cfg.questdb_url,
+                        cfg.questdb_urls,
                         redis_client,
                         cfg.market_gap_prefix,
                         w,
@@ -153,7 +154,7 @@ def build_schedules(
                         cadence_secs=cad(w),
                         run=partial(
                             trade_outcomes.run,
-                            cfg.questdb_url,
+                            cfg.questdb_urls,
                             redis_client,
                             cfg.market_gap_prefix,
                             w,
@@ -172,7 +173,7 @@ def build_schedules(
                         cadence_secs=cad(w),
                         run=partial(
                             price_change.run,
-                            cfg.questdb_url,
+                            cfg.questdb_urls,
                             redis_client,
                             cfg.price_change_prefix,
                             src,
@@ -191,7 +192,7 @@ def build_schedules(
                         cadence_secs=cad(w),
                         run=partial(
                             mid_corr.run,
-                            cfg.questdb_url,
+                            cfg.questdb_urls,
                             redis_client,
                             cfg.mid_corr_prefix,
                             quote,
@@ -212,7 +213,7 @@ def build_schedules(
                         cadence_secs=cad(w),
                         run=partial(
                             return_autocorr.run,
-                            cfg.questdb_url,
+                            cfg.questdb_urls,
                             redis_client,
                             cfg.return_autocorr_prefix,
                             ex,
@@ -240,7 +241,7 @@ def build_schedules(
                         cadence_secs=cad(w),
                         run=partial(
                             variance_ratio.run,
-                            cfg.questdb_url,
+                            cfg.questdb_urls,
                             redis_client,
                             cfg.variance_ratio_prefix,
                             ex,
@@ -267,7 +268,7 @@ def build_schedules(
             Schedule(
                 name="market_dangerous",
                 cadence_secs=cfg.market_dangerous_cadence_secs,
-                run=partial(md_job.run, cfg.questdb_url, redis_client),
+                run=partial(md_job.run, cfg.questdb_urls, redis_client),
             )
         )
 
@@ -282,7 +283,7 @@ def build_schedules(
                         cadence_secs=cad(w),
                         run=partial(
                             price_change_gap_corr.run,
-                            cfg.questdb_url,
+                            cfg.questdb_urls,
                             redis_client,
                             cfg.market_gap_prefix,
                             quote,
@@ -296,7 +297,7 @@ def build_schedules(
 
 
 def _write_heartbeat(
-    redis_client: redis.Redis,
+    redis_client: redis.Redis | RedisFailover,
     cfg: AppConfig,
     *,
     schedules_total: int,
@@ -333,8 +334,8 @@ def main() -> int:
     cfg = load_config()
 
     try:
-        r = redis.from_url(cfg.redis_url)
-        r.ping()
+        r = RedisFailover.from_urls(cfg.redis_urls)
+        r.ping_any()
     except Exception as e:  # noqa: BLE001
         logger.error("redis_connection_failed", error=str(e))
         return 1

@@ -1,5 +1,7 @@
 {
   "$comment": "market_state_updater 설정. secret (DB URL with auth, telegram token) 은 .env 에 두고 나머지 모두 여기. gitignore 안 됨 — 변경 시 커밋.",
+  "$questdb_url_comment": "QuestDB URL 은 QUESTDB_URL env 또는 questdb_url 로 설정. backup 은 QUESTDB_BACKUP_URL env 또는 questdb_backup_url 로 설정하면 primary 실패 시 즉시 재시도.",
+  "$redis_url_comment": "Redis URL 은 REDIS_URL env 또는 redis_url 로 설정. backup 은 REDIS_BACKUP_URL env 또는 redis_backup_url 로 설정하면 업데이트 명령(set 등)을 양쪽에 모두 시도.",
   "interval_secs": 1,
   "window_mode": "all",
   "alert_after_consecutive_failures": 5,

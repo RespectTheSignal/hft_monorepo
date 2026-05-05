@@ -96,8 +96,10 @@ gate_hft:_meta:market_state_updater:slow
 | key | default | 설명 |
 |---|---|---|
 | `QUESTDB_URL` | `http://localhost:9000` | `http://user:pass@host:port` 형태로 인증 가능 |
+| `QUESTDB_BACKUP_URL` | (none) | primary QuestDB 쿼리 실패 시 같은 SQL 을 즉시 재시도할 backup URL |
 | `QUESTDB_QUERY_TIMEOUT_SECS` | 120 | |
 | `REDIS_URL` | `redis://localhost:6379` | |
+| `REDIS_BACKUP_URL` | (none) | `set` 등 업데이트 명령을 primary/backup 양쪽 Redis 에 모두 시도 |
 | `UPDATE_INTERVAL_SECS` | 10 | cycle 간 sleep |
 | `WINDOW_MODE` | `all` | `fast` / `slow` / `all`. CLI `--windows` 와 동등 |
 | `HEARTBEAT_REDIS_PREFIX` | `gate_hft:_meta:market_state_updater` | heartbeat 키 prefix |

@@ -46,7 +46,9 @@ def _split_csv(s: str) -> tuple[str, ...]:
 @dataclass(frozen=True, slots=True)
 class AppConfig:
     questdb_url: str
+    questdb_backup_url: str | None
     redis_url: str
+    redis_backup_url: str | None
     interval_secs: int   # tick poll interval (default 1s)
     once: bool
 
@@ -113,6 +115,18 @@ class AppConfig:
         if self.include_gate_web and self.base_exchange != "gate_web":
             return (self.base_exchange, "gate_web")
         return (self.base_exchange,)
+
+    @property
+    def questdb_urls(self) -> tuple[str, ...]:
+        if self.questdb_backup_url:
+            return (self.questdb_url, self.questdb_backup_url)
+        return (self.questdb_url,)
+
+    @property
+    def redis_urls(self) -> tuple[str, ...]:
+        if self.redis_backup_url:
+            return (self.redis_url, self.redis_backup_url)
+        return (self.redis_url,)
 
 
 # ---------- config.json 파일 로딩 ----------
@@ -245,7 +259,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="윈도우 모드. fast=≤5m, slow=>5m, all=전부.",
     )
     parser.add_argument("--questdb-url", default=None)
+    parser.add_argument("--questdb-backup-url", default=None)
     parser.add_argument("--redis-url", default=None)
+    parser.add_argument("--redis-backup-url", default=None)
     parser.add_argument("--prefix", default=None, help="market_gap redis key prefix.")
     parser.add_argument("--base-exchange", dest="base_exchange", default=None)
     parser.add_argument(
@@ -279,10 +295,26 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
         args.questdb_url
         or _str_from("QUESTDB_URL", file_cfg.get("questdb_url"), DEFAULT_QUESTDB_URL)
     )
+    questdb_backup_url = (
+        args.questdb_backup_url
+        or os.environ.get("QUESTDB_BACKUP_URL")
+        or file_cfg.get("questdb_backup_url")
+        or None
+    )
+    if questdb_backup_url is not None:
+        questdb_backup_url = str(questdb_backup_url).strip() or None
     redis_url = (
         args.redis_url
         or _str_from("REDIS_URL", file_cfg.get("redis_url"), DEFAULT_REDIS_URL)
     )
+    redis_backup_url = (
+        args.redis_backup_url
+        or os.environ.get("REDIS_BACKUP_URL")
+        or file_cfg.get("redis_backup_url")
+        or None
+    )
+    if redis_backup_url is not None:
+        redis_backup_url = str(redis_backup_url).strip() or None
     interval = (
         args.interval
         if args.interval is not None
@@ -361,7 +393,9 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
 
     return AppConfig(
         questdb_url=questdb_url,
+        questdb_backup_url=questdb_backup_url,
         redis_url=redis_url,
+        redis_backup_url=redis_backup_url,
         interval_secs=interval_secs,
         once=args.once,
         window_mode=window_mode,

@@ -11,7 +11,9 @@ from market_state_updater.config import load_config
 # config.json / env 둘 다 영향 주는 키 — fixture 에서 다 비움.
 _KEYS = [
     "QUESTDB_URL",
+    "QUESTDB_BACKUP_URL",
     "REDIS_URL",
+    "REDIS_BACKUP_URL",
     "UPDATE_INTERVAL_SECS",
     "WINDOW_MODE",
     "MARKET_GAP_REDIS_PREFIX",
@@ -62,7 +64,11 @@ def _write_cfg(dir_: Path, cfg: dict) -> Path:
 def test_load_config_pure_defaults(clean_env: Path) -> None:
     cfg = load_config([])
     assert cfg.questdb_url == "http://localhost:9000"
+    assert cfg.questdb_backup_url is None
+    assert cfg.questdb_urls == ("http://localhost:9000",)
     assert cfg.redis_url == "redis://localhost:6379"
+    assert cfg.redis_backup_url is None
+    assert cfg.redis_urls == ("redis://localhost:6379",)
     assert cfg.window_mode == "all"
     assert cfg.base_exchange == "gate"
     assert cfg.quote_exchanges == ("binance",)
@@ -83,6 +89,10 @@ def test_config_json_loaded_from_cwd(clean_env: Path) -> None:
     _write_cfg(
         clean_env,
         {
+            "questdb_url": "http://primary:9000",
+            "questdb_backup_url": "http://backup:9000",
+            "redis_url": "redis://primary:6379",
+            "redis_backup_url": "redis://backup:6379",
             "interval_secs": 33,
             "window_mode": "fast",
             "market_gap": {
@@ -99,6 +109,12 @@ def test_config_json_loaded_from_cwd(clean_env: Path) -> None:
         },
     )
     cfg = load_config([])
+    assert cfg.questdb_url == "http://primary:9000"
+    assert cfg.questdb_backup_url == "http://backup:9000"
+    assert cfg.questdb_urls == ("http://primary:9000", "http://backup:9000")
+    assert cfg.redis_url == "redis://primary:6379"
+    assert cfg.redis_backup_url == "redis://backup:6379"
+    assert cfg.redis_urls == ("redis://primary:6379", "redis://backup:6379")
     assert cfg.interval_secs == 33
     assert cfg.window_mode == "fast"
     assert cfg.market_gap_prefix == "test:mg"
