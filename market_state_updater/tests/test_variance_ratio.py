@@ -15,10 +15,10 @@ def test_build_query_uses_correct_table() -> None:
 
 
 def test_build_query_two_sample_intervals() -> None:
-    """SAMPLE BY base_seconds 와 SAMPLE BY (k * base_seconds) 두 CTE."""
+    """raw SAMPLE BY 는 base_seconds 한 번만 하고 k step 은 self-shift."""
     sql = variance_ratio.build_query("gate", 30, 10, 5)  # base=10s, k=5 → 50s
     assert "SAMPLE BY 10s FILL(PREV)" in sql
-    assert "SAMPLE BY 50s FILL(PREV)" in sql
+    assert "SAMPLE BY 50s FILL(PREV)" not in sql
     # vr ratio 식 확인
     assert "/ (5 * v1.sd * v1.sd)" in sql
 
@@ -32,6 +32,16 @@ def test_build_query_dateadd_for_both_levels() -> None:
 def test_build_query_min_samples_filter() -> None:
     sql = variance_ratio.build_query("gate", 5, 5, 2, min_samples=50)
     assert "n >= 50" in sql
+
+
+def test_build_multi_k_query_scans_raw_once() -> None:
+    sql = variance_ratio.build_multi_k_query("gate", 30, 10, (2, 5, 10))
+    assert sql.count("FROM gate_bookticker") == 1
+    assert "SELECT 2 AS k" in sql
+    assert "SELECT 5 AS k" in sql
+    assert "SELECT 10 AS k" in sql
+    assert "GROUP BY k, symbol" in sql
+    assert "ORDER BY symbol, k" in sql
 
 
 # ---- parser ----
@@ -69,3 +79,23 @@ def test_parse_dataset_missing_columns_raises() -> None:
     payload = {"columns": [{"name": "symbol"}, {"name": "vr"}], "dataset": []}
     with pytest.raises(ValueError):
         variance_ratio.parse_dataset(payload)
+
+
+def test_parse_multi_k_dataset_full() -> None:
+    payload = {
+        "columns": [
+            {"name": "symbol"},
+            {"name": "k"},
+            {"name": "vr"},
+            {"name": "n"},
+        ],
+        "dataset": [
+            ["BTC_USDT", 2, 0.95, 60],
+            ["BTC_USDT", 5, 1.20, 30],
+            ["ETH_USDT", 2, None, 60],
+            ["", 2, 1.0, 30],
+        ],
+    }
+    vrs, counts = variance_ratio.parse_multi_k_dataset(payload)
+    assert vrs == {2: {"BTC_USDT": 0.95}, 5: {"BTC_USDT": 1.20}}
+    assert counts == {2: {"BTC_USDT": 60}, 5: {"BTC_USDT": 30}}

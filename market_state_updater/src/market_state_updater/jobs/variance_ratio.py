@@ -71,7 +71,7 @@ def build_query(
 ) -> str:
     """한 k 에 대한 VR(k) SQL.
 
-    r_1 = SAMPLE BY base_seconds, r_k = SAMPLE BY (k * base_seconds).
+    r_1 과 r_k 모두 base_seconds sampled mid 를 재사용한다.
     var_pop = stddev_pop(r)^2 (QuestDB var_pop 안 쓰고 일관성 위해 stddev_pop 합성).
     """
     window_minutes = max(int(window_minutes), 1)
@@ -87,31 +87,23 @@ WITH ex_base AS (
     WHERE timestamp > dateadd('m', -{window_minutes}, now())
     SAMPLE BY {base_seconds}s FILL(PREV)
 ),
-ex_base_prev AS (
-    SELECT symbol, mid AS prev_mid,
-           dateadd('s', {base_seconds}, timestamp) AS timestamp
-    FROM ex_base
-),
 r1 AS (
     SELECT s.symbol, (s.mid - p.prev_mid) / p.prev_mid AS r
     FROM ex_base s
-    JOIN ex_base_prev p ON s.symbol = p.symbol AND s.timestamp = p.timestamp
-),
-ex_k AS (
-    SELECT symbol, last((ask_price + bid_price) / 2.0) AS mid, timestamp
-    FROM {table}
-    WHERE timestamp > dateadd('m', -{window_minutes}, now())
-    SAMPLE BY {k_seconds}s FILL(PREV)
-),
-ex_k_prev AS (
-    SELECT symbol, mid AS prev_mid,
-           dateadd('s', {k_seconds}, timestamp) AS timestamp
-    FROM ex_k
+    JOIN (
+        SELECT symbol, mid AS prev_mid,
+               dateadd('s', {base_seconds}, timestamp) AS timestamp
+        FROM ex_base
+    ) p ON s.symbol = p.symbol AND s.timestamp = p.timestamp
 ),
 rk AS (
     SELECT s.symbol, (s.mid - p.prev_mid) / p.prev_mid AS r
-    FROM ex_k s
-    JOIN ex_k_prev p ON s.symbol = p.symbol AND s.timestamp = p.timestamp
+    FROM ex_base s
+    JOIN (
+        SELECT symbol, mid AS prev_mid,
+               dateadd('s', {k_seconds}, timestamp) AS timestamp
+        FROM ex_base
+    ) p ON s.symbol = p.symbol AND s.timestamp = p.timestamp
 ),
 v1 AS (
     SELECT symbol, stddev_pop(r) AS sd FROM r1 GROUP BY symbol
@@ -132,6 +124,82 @@ agg AS (
 SELECT symbol, vr, n FROM agg
 WHERE n >= {min_samples}
 ORDER BY symbol;
+""".strip()
+
+
+def build_multi_k_query(
+    exchange: str,
+    window_minutes: int,
+    base_seconds: int,
+    k_values: tuple[int, ...] = DEFAULT_K_VALUES,
+    min_samples: int = DEFAULT_MIN_SAMPLES,
+) -> str:
+    """여러 k 의 VR(k)를 한 SQL 로 계산.
+
+    raw bookticker → ex_base 는 1번만 읽고, 각 k 는 ex_base self-shift 로 계산한다.
+    """
+    window_minutes = max(int(window_minutes), 1)
+    base_seconds = max(int(base_seconds), 1)
+    min_samples = max(int(min_samples), 2)
+    table = _table_for_exchange(exchange)
+    clean_k_values = tuple(sorted({max(int(k), 2) for k in k_values}))
+    if not clean_k_values:
+        clean_k_values = DEFAULT_K_VALUES
+    rk_parts = []
+    for k in clean_k_values:
+        k_seconds = k * base_seconds
+        rk_parts.append(
+            f"""
+    SELECT {k} AS k, s.symbol, (s.mid - p.prev_mid) / p.prev_mid AS r
+    FROM ex_base s
+    JOIN (
+        SELECT symbol, mid AS prev_mid,
+               dateadd('s', {k_seconds}, timestamp) AS timestamp
+        FROM ex_base
+    ) p ON s.symbol = p.symbol AND s.timestamp = p.timestamp
+""".strip()
+        )
+    rk_sql = "\n    UNION ALL\n    ".join(rk_parts)
+    return f"""
+WITH ex_base AS (
+    SELECT symbol, last((ask_price + bid_price) / 2.0) AS mid, timestamp
+    FROM {table}
+    WHERE timestamp > dateadd('m', -{window_minutes}, now())
+    SAMPLE BY {base_seconds}s FILL(PREV)
+),
+r1 AS (
+    SELECT s.symbol, (s.mid - p.prev_mid) / p.prev_mid AS r
+    FROM ex_base s
+    JOIN (
+        SELECT symbol, mid AS prev_mid,
+               dateadd('s', {base_seconds}, timestamp) AS timestamp
+        FROM ex_base
+    ) p ON s.symbol = p.symbol AND s.timestamp = p.timestamp
+),
+rk AS (
+    {rk_sql}
+),
+v1 AS (
+    SELECT symbol, stddev_pop(r) AS sd FROM r1 GROUP BY symbol
+),
+vk AS (
+    SELECT k,
+           symbol,
+           stddev_pop(r) AS sd,
+           count() AS n
+    FROM rk GROUP BY k, symbol
+),
+agg AS (
+    SELECT vk.symbol,
+           vk.k,
+           (vk.sd * vk.sd) / (vk.k * v1.sd * v1.sd) AS vr,
+           vk.n
+    FROM vk JOIN v1 ON vk.symbol = v1.symbol
+    WHERE v1.sd > 0
+)
+SELECT symbol, k, vr, n FROM agg
+WHERE n >= {min_samples}
+ORDER BY symbol, k;
 """.strip()
 
 
@@ -179,6 +247,56 @@ def parse_dataset(
     return vrs, counts
 
 
+def parse_multi_k_dataset(
+    payload: dict[str, Any],
+) -> tuple[dict[int, dict[str, float]], dict[int, dict[str, int]]]:
+    """QuestDB 응답 → (k → symbol → vr, k → symbol → n)."""
+    columns = payload.get("columns") or []
+    dataset = payload.get("dataset") or []
+    sym_idx: int | None = None
+    k_idx: int | None = None
+    vr_idx: int | None = None
+    n_idx: int | None = None
+    for i, col in enumerate(columns):
+        name = (col or {}).get("name") if isinstance(col, dict) else None
+        if name == "symbol":
+            sym_idx = i
+        elif name == "k":
+            k_idx = i
+        elif name == "vr":
+            vr_idx = i
+        elif name == "n":
+            n_idx = i
+    if sym_idx is None or k_idx is None or vr_idx is None or n_idx is None:
+        raise ValueError("QuestDB response missing symbol/k/vr/n column")
+    vr_by_k: dict[int, dict[str, float]] = {}
+    n_by_k: dict[int, dict[str, int]] = {}
+    for row in dataset:
+        if not isinstance(row, list):
+            continue
+        sym = str(row[sym_idx] or "").strip()
+        if not sym:
+            continue
+        v = row[vr_idx]
+        n = row[n_idx]
+        k_raw = row[k_idx]
+        if v is None or n is None or k_raw is None:
+            continue
+        try:
+            k = int(k_raw)
+            vv = float(v)
+        except (TypeError, ValueError):
+            continue
+        if vv != vv:  # NaN
+            continue
+        try:
+            vr_by_k.setdefault(k, {})[sym] = vv
+            n_by_k.setdefault(k, {})[sym] = int(n)
+        except (TypeError, ValueError):
+            continue
+    return vr_by_k, n_by_k
+
+
 def fetch_one_k(
     questdb_url: str,
     exchange: str,
@@ -192,6 +310,21 @@ def fetch_one_k(
     return parse_dataset(payload)
 
 
+def fetch_k_values(
+    questdb_url: str,
+    exchange: str,
+    window_minutes: int,
+    base_seconds: int,
+    k_values: tuple[int, ...] = DEFAULT_K_VALUES,
+    min_samples: int = DEFAULT_MIN_SAMPLES,
+) -> tuple[dict[int, dict[str, float]], dict[int, dict[str, int]]]:
+    sql = build_multi_k_query(
+        exchange, window_minutes, base_seconds, k_values, min_samples
+    )
+    payload = questdb_exec(questdb_url, sql)
+    return parse_multi_k_dataset(payload)
+
+
 def run(
     questdb_url: str,
     redis_client: redis.Redis,
@@ -202,7 +335,8 @@ def run(
     k_values: tuple[int, ...] = DEFAULT_K_VALUES,
     min_samples: int = DEFAULT_MIN_SAMPLES,
 ) -> bool:
-    """k_values 각각 별도 SQL → merge → blob 1개."""
+    """k_values 를 한 SQL 로 계산 → merge → blob 1개."""
+    k_values = tuple(sorted({max(int(k), 2) for k in k_values})) or DEFAULT_K_VALUES
     log = logger.bind(
         job="variance_ratio",
         exchange=exchange,
@@ -214,12 +348,9 @@ def run(
     vr_by_k: dict[int, dict[str, float]] = {}
     n_by_k: dict[int, dict[str, int]] = {}
     try:
-        for k in k_values:
-            vrs, counts = fetch_one_k(
-                questdb_url, exchange, window_minutes, base_seconds, k, min_samples
-            )
-            vr_by_k[k] = vrs
-            n_by_k[k] = counts
+        vr_by_k, n_by_k = fetch_k_values(
+            questdb_url, exchange, window_minutes, base_seconds, k_values, min_samples
+        )
     except Exception as e:  # noqa: BLE001
         log.error(
             "questdb_failed",
@@ -238,13 +369,13 @@ def run(
     vr_by_symbol_by_k: dict[str, dict[str, float]] = {}
     n_samples_by_symbol: dict[str, int] = {}
     for s in sorted(all_syms):
-        per_k = {str(k): vr_by_k[k][s] for k in k_values if s in vr_by_k[k]}
+        per_k = {str(k): vr_by_k[k][s] for k in k_values if s in vr_by_k.get(k, {})}
         if not per_k:
             continue
         vr_by_symbol_by_k[s] = per_k
         # n_samples 는 통과한 k 들 중 가장 작은 (보수적 신뢰도)
         n_samples_by_symbol[s] = min(
-            n_by_k[k].get(s, 0) for k in k_values if s in vr_by_k[k]
+            n_by_k.get(k, {}).get(s, 0) for k in k_values if s in vr_by_k.get(k, {})
         )
 
     blob = {

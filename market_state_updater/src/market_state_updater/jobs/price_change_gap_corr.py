@@ -115,26 +115,24 @@ qt AS (
     WHERE {time_filter}{symbol_filter}
     SAMPLE BY {return_seconds}s FILL(PREV)
 ),
-gw_prev AS (
-    SELECT symbol,
-           gw_mid AS prev_gw_mid,
-           dateadd('s', {return_seconds}, timestamp) AS timestamp
-    FROM gw
-),
-qt_prev AS (
-    SELECT symbol,
-           qt_mid AS prev_qt_mid,
-           dateadd('s', {return_seconds}, timestamp) AS timestamp
-    FROM qt
-),
 returns AS (
     SELECT g.symbol,
            (g.gw_mid - gp.prev_gw_mid) / gp.prev_gw_mid AS x_gw,
            (q.qt_mid - qp.prev_qt_mid) / qp.prev_qt_mid AS x_qt
     FROM gw g
     JOIN qt q  ON g.symbol = q.symbol  AND g.timestamp = q.timestamp
-    JOIN gw_prev gp ON g.symbol = gp.symbol AND g.timestamp = gp.timestamp
-    JOIN qt_prev qp ON g.symbol = qp.symbol AND g.timestamp = qp.timestamp
+    JOIN (
+        SELECT symbol,
+               gw_mid AS prev_gw_mid,
+               dateadd('s', {return_seconds}, timestamp) AS timestamp
+        FROM gw
+    ) gp ON g.symbol = gp.symbol AND g.timestamp = gp.timestamp
+    JOIN (
+        SELECT symbol,
+               qt_mid AS prev_qt_mid,
+               dateadd('s', {return_seconds}, timestamp) AS timestamp
+        FROM qt
+    ) qp ON g.symbol = qp.symbol AND g.timestamp = qp.timestamp
 ),
 stats AS (
     SELECT symbol,
