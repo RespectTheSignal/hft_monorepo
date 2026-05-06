@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+hl_pairs = { path = "../hl_pairs" }
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
@@ -26,6 +27,8 @@ http.workspace = true
 urlencoding = "2"
 zmq.workspace = true
 dashmap.workspace = true
+once_cell = "1"
+flate2 = "1"
 pairs_core = { path = "../pairs_core" }
 
 [[bin]]
@@ -39,3 +42,7 @@ path = "src/bin/funding_poller.rs"
 [[bin]]
 name = "live_dashboard"
 path = "src/bin/live_dashboard.rs"
+
+[[bin]]
+name = "bingx_web_momentum"
+path = "src/bin/bingx_web_momentum.rs"

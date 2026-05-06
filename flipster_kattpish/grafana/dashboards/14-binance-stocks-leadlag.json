@@ -1,0 +1,134 @@
+{
+  "uid": "binance-stocks-leadlag",
+  "title": "14 · Binance Stocks → Lighter / Gate Stock Lead-Lag",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "timezone": "utc",
+  "tags": ["stocks", "binance", "lighter", "gate", "leadlag"],
+  "templating": {
+    "list": [
+      {
+        "name": "stock",
+        "type": "textbox",
+        "label": "Stock symbol",
+        "query": "NVDA",
+        "current": {"selected": true, "text": "NVDA", "value": "NVDA"}
+      }
+    ]
+  },
+  "annotations": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "${stock} — mid price across Binance / Lighter / Gate / Pyth (24/7 perps + oracle)",
+      "description": "Binance has TRADIFI_PERPETUAL stock perps (NVDA/TSLA/AAPL/AMD/MU/etc, 24/7). Compare against Lighter and Gate to find which venue leads.",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 0},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 4,
+          "custom": {"drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 1.5, "fillOpacity": 0, "spanNulls": true, "showPoints": "never"}
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "binance"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F0B90B"}}, {"id": "custom.lineWidth", "value": 2.5}]},
+          {"matcher": {"id": "byName", "options": "lighter"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#00D4FF"}}, {"id": "custom.lineWidth", "value": 2}]},
+          {"matcher": {"id": "byName", "options": "gate"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#2E91E5"}}]},
+          {"matcher": {"id": "byName", "options": "pyth"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#9D4EDD"}}, {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 6]}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min", "max"]}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "B", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"binance\" FROM binance_bookticker WHERE symbol = concat('${stock}','USDT') AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "L", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"lighter\" FROM lighter_bookticker WHERE symbol='${stock}' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "G", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"gate\" FROM gate_bookticker WHERE symbol IN (concat('${stock}','_USDT'), concat('${stock}','X_USDT')) AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "P", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"pyth\" FROM pyth_bookticker WHERE symbol='${stock}' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"}
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "${stock} — divergences in bp (Lighter-Binance / Gate-Binance / Pyth-Binance)",
+      "description": "How much does each venue trade above (positive) or below (negative) Binance's stock perp? Persistent gap = static premium. Wandering = lag.",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 14},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {"decimals": 1, "unit": "none", "custom": {"drawStyle": "line", "lineWidth": 1.5, "fillOpacity": 5, "spanNulls": true, "showPoints": "never"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "Lighter-Binance"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#00D4FF"}}]},
+          {"matcher": {"id": "byName", "options": "Gate-Binance"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#2E91E5"}}]},
+          {"matcher": {"id": "byName", "options": "Pyth-Binance"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#9D4EDD"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "mean", "min", "max"]}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "LB", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "WITH l AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM lighter_bookticker WHERE symbol='${stock}' AND timestamp > dateadd('m',-15,now())), b AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol = concat('${stock}','USDT') AND timestamp > dateadd('m',-15,now())) SELECT l.timestamp time, (l.mid - b.mid)/b.mid*10000 \"Lighter-Binance\" FROM l ASOF JOIN b ORDER BY l.timestamp"},
+        {"refId": "GB", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "WITH g AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM gate_bookticker WHERE symbol IN (concat('${stock}','_USDT'), concat('${stock}','X_USDT')) AND timestamp > dateadd('m',-15,now())), b AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol = concat('${stock}','USDT') AND timestamp > dateadd('m',-15,now())) SELECT g.timestamp time, (g.mid - b.mid)/b.mid*10000 \"Gate-Binance\" FROM g ASOF JOIN b ORDER BY g.timestamp"},
+        {"refId": "PB", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "WITH p AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pyth_bookticker WHERE symbol='${stock}' AND timestamp > dateadd('m',-15,now())), b AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol = concat('${stock}','USDT') AND timestamp > dateadd('m',-15,now())) SELECT p.timestamp time, (p.mid - b.mid)/b.mid*10000 \"Pyth-Binance\" FROM p ASOF JOIN b ORDER BY p.timestamp"}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "All stocks — Binance vs others (last 5min, mean & std of basis in bp)",
+      "description": "Pivot view across all stocks. High |mean_X-Bin| = persistent premium. High std = mean-revert candidate. ticks_<X> shows venue liquidity.",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 24},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {"defaults": {"decimals": 2}, "overrides": []},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "abs_LB", "desc": true}]},
+      "targets": [
+        {"refId": "A", "format": "table", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"},
+         "rawSql": "WITH bin AS (SELECT timestamp, replace(symbol,'USDT','') sym, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol IN ('NVDAUSDT','TSLAUSDT','AAPLUSDT','AMZNUSDT','METAUSDT','MSFTUSDT','GOOGLUSDT','AMDUSDT','MUUSDT','INTCUSDT','SPYUSDT','QQQUSDT','ORCLUSDT','AVGOUSDT','SNDKUSDT','COINUSDT','HOODUSDT','PLTRUSDT','MSTRUSDT','TSMUSDT','XAUUSDT','XAGUSDT') AND timestamp > dateadd('m',-5,now())), lh AS (SELECT timestamp, symbol sym, (bid_price+ask_price)/2.0 mid FROM lighter_bookticker WHERE symbol IN ('NVDA','TSLA','AAPL','AMZN','META','MSFT','GOOGL','AMD','MU','INTC','SPY','QQQ','ORCL','AVGO','SNDK') AND timestamp > dateadd('m',-5,now())), gt AS (SELECT timestamp, replace(replace(symbol,'_USDT',''),'X','') sym, (bid_price+ask_price)/2.0 mid FROM gate_bookticker WHERE symbol IN ('NVDAX_USDT','TSLAX_USDT','AAPLX_USDT','AMZNX_USDT','METAX_USDT','GOOGLX_USDT','MSFT_USDT','AMD_USDT','MU_USDT','INTC_USDT','ORCLX_USDT','SPYX_USDT','QQQX_USDT','ASML_USDT','XAU_USDT','XAG_USDT') AND timestamp > dateadd('m',-5,now())), lb AS (SELECT lh.sym, ((lh.mid - bin.mid)/bin.mid*10000) bp FROM lh ASOF JOIN bin ON sym), gb AS (SELECT gt.sym, ((gt.mid - bin.mid)/bin.mid*10000) bp FROM gt ASOF JOIN bin ON sym), lb_agg AS (SELECT sym, count() ticks_LB, round(avg(bp),2) mean_LB, round(stddev_samp(bp),2) std_LB FROM lb GROUP BY sym), gb_agg AS (SELECT sym, count() ticks_GB, round(avg(bp),2) mean_GB, round(stddev_samp(bp),2) std_GB FROM gb GROUP BY sym) SELECT lb_agg.sym, ticks_LB, mean_LB, std_LB, ticks_GB, mean_GB, std_GB, round(abs(mean_LB),2) abs_LB FROM lb_agg LEFT JOIN gb_agg ON lb_agg.sym=gb_agg.sym ORDER BY abs_LB DESC"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "NVDA — 4 venues (live drill-down)",
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 38},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {"decimals": 3, "custom": {"drawStyle": "line", "lineWidth": 1.4, "spanNulls": true, "showPoints": "never"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "binance"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F0B90B"}}, {"id": "custom.lineWidth", "value": 2.5}]},
+          {"matcher": {"id": "byName", "options": "lighter"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#00D4FF"}}, {"id": "custom.lineWidth", "value": 2}]},
+          {"matcher": {"id": "byName", "options": "gate"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#2E91E5"}}]},
+          {"matcher": {"id": "byName", "options": "pyth"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#9D4EDD"}}, {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 6]}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "B", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"binance\" FROM binance_bookticker WHERE symbol='NVDAUSDT' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "L", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"lighter\" FROM lighter_bookticker WHERE symbol='NVDA' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "G", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"gate\" FROM gate_bookticker WHERE symbol='NVDAX_USDT' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "P", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"pyth\" FROM pyth_bookticker WHERE symbol='NVDA' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"}
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "TSLA — 4 venues (live drill-down)",
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 38},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {"decimals": 3, "custom": {"drawStyle": "line", "lineWidth": 1.4, "spanNulls": true, "showPoints": "never"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "binance"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F0B90B"}}, {"id": "custom.lineWidth", "value": 2.5}]},
+          {"matcher": {"id": "byName", "options": "lighter"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#00D4FF"}}, {"id": "custom.lineWidth", "value": 2}]},
+          {"matcher": {"id": "byName", "options": "gate"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#2E91E5"}}]},
+          {"matcher": {"id": "byName", "options": "pyth"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#9D4EDD"}}, {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 6]}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "B", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"binance\" FROM binance_bookticker WHERE symbol='TSLAUSDT' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "L", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"lighter\" FROM lighter_bookticker WHERE symbol='TSLA' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "G", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"gate\" FROM gate_bookticker WHERE symbol='TSLAX_USDT' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "P", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"pyth\" FROM pyth_bookticker WHERE symbol='TSLA' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"}
+      ]
+    }
+  ]
+}

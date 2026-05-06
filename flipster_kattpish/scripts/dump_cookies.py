@@ -29,6 +29,7 @@ import websockets
 
 FLIPSTER_CDP_URL = "http://localhost:9230/json/version"
 GATE_CDP_URL = "http://localhost:9231/json/version"
+BINGX_CDP_URL = "http://localhost:9232/json/version"
 DEFAULT_OUT = Path.home() / ".config" / "flipster_kattpish" / "cookies.json"
 
 
@@ -50,12 +51,26 @@ def _cdp_ws_url(http_endpoint: str) -> str:
 
 
 async def _dump() -> dict:
+    # BingX is optional — only dump if its CDP endpoint is up. Avoids breaking
+    # existing Flipster/Gate flows on hosts that haven't started bingx Chrome.
     flipster_ws = _cdp_ws_url(FLIPSTER_CDP_URL)
     gate_ws = _cdp_ws_url(GATE_CDP_URL)
-    flipster, gate = await asyncio.gather(
+    bingx_ws = None
+    try:
+        bingx_ws = _cdp_ws_url(BINGX_CDP_URL)
+    except Exception as e:
+        print(f"[dump_cookies] bingx CDP not reachable, skipping: {e}", file=sys.stderr)
+
+    tasks = [
         _fetch_cookies(flipster_ws, "flipster"),
         _fetch_cookies(gate_ws, "gate.com"),
-    )
+    ]
+    if bingx_ws:
+        tasks.append(_fetch_cookies(bingx_ws, "bingx.com"))
+    results = await asyncio.gather(*tasks)
+    flipster = results[0]
+    gate = results[1]
+    bingx = results[2] if bingx_ws else {}
 
     if "session_id_bolts" not in flipster:
         raise RuntimeError(
@@ -66,11 +81,21 @@ async def _dump() -> dict:
         raise RuntimeError(
             "No Gate cookies. Log in via the VNC browser."
         )
+    if bingx_ws and not bingx:
+        # Don't fail hard — bingx may legitimately not be logged in yet on
+        # some hosts. The Rust executor will log a warning if cookies are
+        # absent when a BingX trade signal arrives.
+        print(
+            "[dump_cookies] warning: bingx Chrome up but no bingx.com cookies "
+            "found. Log in to https://bingx.com via VNC.",
+            file=sys.stderr,
+        )
 
     return {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "flipster": flipster,
         "gate": gate,
+        "bingx": bingx,
     }
 
 
@@ -110,7 +135,8 @@ def main() -> int:
     if not args.quiet:
         print(
             f"[dump_cookies] {args.out} flipster={len(data['flipster'])} "
-            f"gate={len(data['gate'])} ts={data['ts']}"
+            f"gate={len(data['gate'])} bingx={len(data.get('bingx', {}))} "
+            f"ts={data['ts']}"
         )
     return 0
 

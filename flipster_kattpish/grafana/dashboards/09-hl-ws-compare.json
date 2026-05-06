@@ -1,0 +1,259 @@
+{
+  "uid": "hl-ws-compare",
+  "title": "9 · HL WS · api vs api-ui compare",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1s",
+  "time": {
+    "from": "now-30s",
+    "to": "now"
+  },
+  "timezone": "utc",
+  "tags": [
+    "hyperliquid",
+    "ws",
+    "lag"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "coin",
+        "type": "textbox",
+        "label": "Coin (HL ticker)",
+        "query": "BTC",
+        "current": {
+          "selected": true,
+          "text": "BTC",
+          "value": "BTC"
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "${coin} — bid / ask · api.hyperliquid.xyz vs api-ui.hyperliquid.xyz",
+      "description": "Both endpoints' best bid/ask overlaid. Check whether one consistently leads or has staler quotes.",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 0},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 6,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1.4,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "api_bid"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#3274D9"}}]},
+          {"matcher": {"id": "byName", "options": "api_ask"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#1F60C4"}}]},
+          {"matcher": {"id": "byName", "options": "ui_bid"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FF780A"}}]},
+          {"matcher": {"id": "byName", "options": "ui_ask"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#E0B400"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["last"]}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "SELECT timestamp time, bid_price api_bid, ask_price api_ask FROM hyperliquid_bookticker WHERE symbol='${coin}' AND $__timeFilter(timestamp) ORDER BY timestamp"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "SELECT timestamp time, bid_price ui_bid, ask_price ui_ask FROM hyperliquid_ui_bookticker WHERE symbol='${coin}' AND $__timeFilter(timestamp) ORDER BY timestamp"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "${coin} — per-quote delivery lag (ms) · positive = api received first / ui slower",
+      "description": "For each unique (bid,ask) tuple seen on both feeds in the window, lag = ui.first_recv_ts − api.first_recv_ts (ms, local clocks). Same gate1 host so OS clock is shared. Positive ⇒ api saw it first; negative ⇒ api-ui saw it first.",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 14},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 1,
+          "custom": {
+            "drawStyle": "points",
+            "lineWidth": 0,
+            "fillOpacity": 0,
+            "showPoints": "always",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisSoftMin": -100,
+            "axisSoftMax": 100,
+            "thresholdsStyle": {"mode": "line"}
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "transparent", "value": null},
+              {"color": "#73BF69", "value": 0}
+            ]
+          }
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "lag_ms"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FF780A"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "min", "max", "lastNotNull"]}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "WITH a AS (SELECT bid_price b, ask_price k, min(recv_ts_ns) t_a FROM hyperliquid_bookticker WHERE symbol='${coin}' AND $__timeFilter(timestamp) AND recv_ts_ns IS NOT NULL GROUP BY bid_price, ask_price), u AS (SELECT bid_price b, ask_price k, min(recv_ts_ns) t_u FROM hyperliquid_ui_bookticker WHERE symbol='${coin}' AND $__timeFilter(timestamp) AND recv_ts_ns IS NOT NULL GROUP BY bid_price, ask_price) SELECT cast(a.t_a / 1000 as timestamp) time, (u.t_u - a.t_a) / 1000000.0 lag_ms FROM a INNER JOIN u ON a.b=u.b AND a.k=u.k ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "${coin} — lag stats (window aggregate)",
+      "description": "Aggregate lag stats over the visible window. Mean ≪ 0 ⇒ api-ui is consistently faster. % api_first ⇒ share of unique quotes where api received first.",
+      "gridPos": {"h": 5, "w": 24, "x": 0, "y": 26},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "blue", "value": null},
+              {"color": "green", "value": -1},
+              {"color": "yellow", "value": 0},
+              {"color": "red", "value": 1}
+            ]
+          }
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "n_quotes"},
+           "properties": [{"id": "unit", "value": "none"}, {"id": "decimals", "value": 0}]},
+          {"matcher": {"id": "byName", "options": "pct_api_first"},
+           "properties": [{"id": "unit", "value": "percent"}]}
+        ]
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "WITH a AS (SELECT bid_price b, ask_price k, min(recv_ts_ns) t_a FROM hyperliquid_bookticker WHERE symbol='${coin}' AND $__timeFilter(timestamp) AND recv_ts_ns IS NOT NULL GROUP BY bid_price, ask_price), u AS (SELECT bid_price b, ask_price k, min(recv_ts_ns) t_u FROM hyperliquid_ui_bookticker WHERE symbol='${coin}' AND $__timeFilter(timestamp) AND recv_ts_ns IS NOT NULL GROUP BY bid_price, ask_price), j AS (SELECT (u.t_u - a.t_a) / 1000000.0 lag_ms FROM a INNER JOIN u ON a.b=u.b AND a.k=u.k) SELECT count() n_quotes, round(avg(lag_ms),2) mean_ms, round(min(lag_ms),2) min_ms, round(max(lag_ms),2) max_ms, round(avg(case when lag_ms>0 then 1.0 else 0.0 end)*100,1) pct_api_first FROM j"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "${coin} — update rate (rows/s) per endpoint",
+      "description": "How often each endpoint publishes a quote update. Big gap = one feed is slower / coalesces updates.",
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 31},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1.2,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "api"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#3274D9"}}]},
+          {"matcher": {"id": "byName", "options": "ui"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FF780A"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "last"]}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "SELECT timestamp time, count() api FROM hyperliquid_bookticker WHERE symbol='${coin}' AND $__timeFilter(timestamp) SAMPLE BY 1s ORDER BY timestamp"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "SELECT timestamp time, count() ui FROM hyperliquid_ui_bookticker WHERE symbol='${coin}' AND $__timeFilter(timestamp) SAMPLE BY 1s ORDER BY timestamp"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "${coin} — spread (bp) per endpoint",
+      "description": "(ask−bid)/mid · 1e4 sampled at 100ms. Compare quoted spread; api-ui sometimes offers tighter book.",
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 31},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1.2,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "api_sp_bp"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#3274D9"}}]},
+          {"matcher": {"id": "byName", "options": "ui_sp_bp"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FF780A"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "last"]}},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "SELECT timestamp time, (last(ask_price)-last(bid_price))/((last(ask_price)+last(bid_price))/2.0) * 10000 api_sp_bp FROM hyperliquid_bookticker WHERE symbol='${coin}' AND $__timeFilter(timestamp) SAMPLE BY 100T ORDER BY timestamp"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "SELECT timestamp time, (last(ask_price)-last(bid_price))/((last(ask_price)+last(bid_price))/2.0) * 10000 ui_sp_bp FROM hyperliquid_ui_bookticker WHERE symbol='${coin}' AND $__timeFilter(timestamp) SAMPLE BY 100T ORDER BY timestamp"
+        }
+      ]
+    }
+  ]
+}

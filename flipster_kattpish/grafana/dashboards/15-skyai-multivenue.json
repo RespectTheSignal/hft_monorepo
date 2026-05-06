@@ -1,0 +1,114 @@
+{
+  "uid": "skyai-multivenue",
+  "title": "15 · SKYAI Multi-Venue Basis Arb",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-30m", "to": "now"},
+  "timezone": "utc",
+  "tags": ["skyai", "basis", "arb"],
+  "templating": {"list": []},
+  "annotations": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "SKYAI mid price across all venues — top edge: bitget↔pancake (+25bp net) and gate↔pancake (+25bp net)",
+      "description": "Pancake clearly oscillates around the CEX consensus. The gap is the alpha source.",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 0},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 6,
+          "custom": {"drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 1.5, "fillOpacity": 0, "spanNulls": true, "showPoints": "never"}
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "binance"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F0B90B"}}, {"id": "custom.lineWidth", "value": 2.5}]},
+          {"matcher": {"id": "byName", "options": "bybit"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F7A600"}}]},
+          {"matcher": {"id": "byName", "options": "bitget"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#54C1FB"}}]},
+          {"matcher": {"id": "byName", "options": "gate"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#2E91E5"}}]},
+          {"matcher": {"id": "byName", "options": "mexc"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#ADFF2F"}}]},
+          {"matcher": {"id": "byName", "options": "bingx"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#2954FE"}}]},
+          {"matcher": {"id": "byName", "options": "pancake"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#D1884F"}}, {"id": "custom.lineWidth", "value": 2.5}]},
+          {"matcher": {"id": "byName", "options": "aster"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#7B61FF"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min", "max"]}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "B", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"binance\" FROM binance_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"},
+        {"refId": "BB", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"bybit\" FROM bybit_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"},
+        {"refId": "BG", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"bitget\" FROM bitget_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"},
+        {"refId": "G", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"gate\" FROM gate_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"},
+        {"refId": "M", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"mexc\" FROM mexc_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"},
+        {"refId": "BX", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"bingx\" FROM bingx_bookticker WHERE symbol='SKYAI-USDT' AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"},
+        {"refId": "P", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"pancake\" FROM pancake_bookticker WHERE symbol='SKYAIUSDT' AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"},
+        {"refId": "A", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"aster\" FROM aster_bookticker WHERE symbol='SKYAIUSDT' AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"}
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Pancake — Bitget basis (bp). +25bp net edge after fees on this pair.",
+      "description": "When this line is +X bp, sell SKYAI on Pancake AND buy on Bitget. Wait for revert (5s half-life).",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 14},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {"decimals": 1, "unit": "none", "custom": {"drawStyle": "line", "lineWidth": 1.5, "fillOpacity": 5, "spanNulls": true, "showPoints": "never"}}
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "mean", "min", "max"]}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "A", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "WITH p AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pancake_bookticker WHERE symbol='SKYAIUSDT' AND timestamp > dateadd('m',-30,now())), bg AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM bitget_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())) SELECT p.timestamp time, (p.mid - bg.mid)/bg.mid*10000 \"Pancake-Bitget bp\" FROM p ASOF JOIN bg ORDER BY p.timestamp"},
+        {"refId": "B", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "WITH p AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pancake_bookticker WHERE symbol='SKYAIUSDT' AND timestamp > dateadd('m',-30,now())), gt AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM gate_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())) SELECT p.timestamp time, (p.mid - gt.mid)/gt.mid*10000 \"Pancake-Gate bp\" FROM p ASOF JOIN gt ORDER BY p.timestamp"},
+        {"refId": "C", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "WITH p AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pancake_bookticker WHERE symbol='SKYAIUSDT' AND timestamp > dateadd('m',-30,now())), m AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM mexc_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())) SELECT p.timestamp time, (p.mid - m.mid)/m.mid*10000 \"Pancake-MEXC bp\" FROM p ASOF JOIN m ORDER BY p.timestamp"}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Live SKYAI mid + spread per venue (last 1min)",
+      "description": "Spread shows real cost to enter. Mid shows current quote.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {"defaults": {"decimals": 6}, "overrides": []},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "spread_bp", "desc": false}]},
+      "targets": [
+        {"refId": "A", "format": "table", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"},
+         "rawSql": "SELECT 'binance' venue, last((bid_price+ask_price)/2.0) mid, round(avg((ask_price-bid_price)/((bid_price+ask_price)/2.0)*10000),2) spread_bp FROM binance_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-1,now()) UNION ALL SELECT 'bybit', last((bid_price+ask_price)/2.0), round(avg((ask_price-bid_price)/((bid_price+ask_price)/2.0)*10000),2) FROM bybit_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-1,now()) UNION ALL SELECT 'bitget', last((bid_price+ask_price)/2.0), round(avg((ask_price-bid_price)/((bid_price+ask_price)/2.0)*10000),2) FROM bitget_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-1,now()) UNION ALL SELECT 'gate', last((bid_price+ask_price)/2.0), round(avg((ask_price-bid_price)/((bid_price+ask_price)/2.0)*10000),2) FROM gate_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-1,now()) UNION ALL SELECT 'mexc', last((bid_price+ask_price)/2.0), round(avg((ask_price-bid_price)/((bid_price+ask_price)/2.0)*10000),2) FROM mexc_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-1,now()) UNION ALL SELECT 'bingx', last((bid_price+ask_price)/2.0), round(avg((ask_price-bid_price)/((bid_price+ask_price)/2.0)*10000),2) FROM bingx_bookticker WHERE symbol='SKYAI-USDT' AND timestamp > dateadd('m',-1,now()) UNION ALL SELECT 'pancake', last((bid_price+ask_price)/2.0), round(avg((ask_price-bid_price)/((bid_price+ask_price)/2.0)*10000),2) FROM pancake_bookticker WHERE symbol='SKYAIUSDT' AND timestamp > dateadd('m',-1,now()) UNION ALL SELECT 'aster', last((bid_price+ask_price)/2.0), round(avg((ask_price-bid_price)/((bid_price+ask_price)/2.0)*10000),2) FROM aster_bookticker WHERE symbol='SKYAIUSDT' AND timestamp > dateadd('m',-1,now()) ORDER BY mid"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "All pairwise SKYAI basis stats (mean/std/min/max bp, 30min)",
+      "description": "Pairs with std > 5bp + mean near 0 are best mean-revert candidates.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {"defaults": {"decimals": 2}, "overrides": []},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "std_bp", "desc": true}]},
+      "targets": [
+        {"refId": "A", "format": "table", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"},
+         "rawSql": "WITH p AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pancake_bookticker WHERE symbol='SKYAIUSDT' AND timestamp > dateadd('m',-30,now())), bg AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM bitget_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())), gt AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM gate_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())), m AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM mexc_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())), bx AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM bingx_bookticker WHERE symbol='SKYAI-USDT' AND timestamp > dateadd('m',-30,now())), bb AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM bybit_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())), bn AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())) SELECT 'pancake-bitget' pair, count() ticks, round(avg((p.mid-bg.mid)/bg.mid*10000),2) mean_bp, round(stddev_samp((p.mid-bg.mid)/bg.mid*10000),2) std_bp, round(min((p.mid-bg.mid)/bg.mid*10000),1) min_bp, round(max((p.mid-bg.mid)/bg.mid*10000),1) max_bp FROM p ASOF JOIN bg UNION ALL SELECT 'pancake-gate', count(), round(avg((p.mid-gt.mid)/gt.mid*10000),2), round(stddev_samp((p.mid-gt.mid)/gt.mid*10000),2), round(min((p.mid-gt.mid)/gt.mid*10000),1), round(max((p.mid-gt.mid)/gt.mid*10000),1) FROM p ASOF JOIN gt UNION ALL SELECT 'pancake-mexc', count(), round(avg((p.mid-m.mid)/m.mid*10000),2), round(stddev_samp((p.mid-m.mid)/m.mid*10000),2), round(min((p.mid-m.mid)/m.mid*10000),1), round(max((p.mid-m.mid)/m.mid*10000),1) FROM p ASOF JOIN m UNION ALL SELECT 'pancake-bingx', count(), round(avg((p.mid-bx.mid)/bx.mid*10000),2), round(stddev_samp((p.mid-bx.mid)/bx.mid*10000),2), round(min((p.mid-bx.mid)/bx.mid*10000),1), round(max((p.mid-bx.mid)/bx.mid*10000),1) FROM p ASOF JOIN bx UNION ALL SELECT 'pancake-bybit', count(), round(avg((p.mid-bb.mid)/bb.mid*10000),2), round(stddev_samp((p.mid-bb.mid)/bb.mid*10000),2), round(min((p.mid-bb.mid)/bb.mid*10000),1), round(max((p.mid-bb.mid)/bb.mid*10000),1) FROM p ASOF JOIN bb UNION ALL SELECT 'pancake-binance', count(), round(avg((p.mid-bn.mid)/bn.mid*10000),2), round(stddev_samp((p.mid-bn.mid)/bn.mid*10000),2), round(min((p.mid-bn.mid)/bn.mid*10000),1), round(max((p.mid-bn.mid)/bn.mid*10000),1) FROM p ASOF JOIN bn UNION ALL SELECT 'bitget-mexc', count(), round(avg((bg.mid-m.mid)/m.mid*10000),2), round(stddev_samp((bg.mid-m.mid)/m.mid*10000),2), round(min((bg.mid-m.mid)/m.mid*10000),1), round(max((bg.mid-m.mid)/m.mid*10000),1) FROM bg ASOF JOIN m UNION ALL SELECT 'binance-bybit', count(), round(avg((bn.mid-bb.mid)/bb.mid*10000),2), round(stddev_samp((bn.mid-bb.mid)/bb.mid*10000),2), round(min((bn.mid-bb.mid)/bb.mid*10000),1), round(max((bn.mid-bb.mid)/bb.mid*10000),1) FROM bn ASOF JOIN bb ORDER BY std_bp DESC"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "All pairwise SKYAI basis (bp) — visualizes which pair oscillates most",
+      "description": "The pair with biggest std (range) and crossing 0 frequently is the best basis-arb target.",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 32},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {"decimals": 1, "unit": "none", "custom": {"drawStyle": "line", "lineWidth": 1.2, "fillOpacity": 0, "spanNulls": true, "showPoints": "never"}}
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "min", "max", "stdDev"]}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "A", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "WITH p AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pancake_bookticker WHERE symbol='SKYAIUSDT' AND timestamp > dateadd('m',-30,now())), bg AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM bitget_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())) SELECT p.timestamp time, (p.mid - bg.mid)/bg.mid*10000 \"P-Bitget\" FROM p ASOF JOIN bg ORDER BY p.timestamp"},
+        {"refId": "B", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "WITH p AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pancake_bookticker WHERE symbol='SKYAIUSDT' AND timestamp > dateadd('m',-30,now())), gt AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM gate_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())) SELECT p.timestamp time, (p.mid - gt.mid)/gt.mid*10000 \"P-Gate\" FROM p ASOF JOIN gt ORDER BY p.timestamp"},
+        {"refId": "C", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "WITH p AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pancake_bookticker WHERE symbol='SKYAIUSDT' AND timestamp > dateadd('m',-30,now())), m AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM mexc_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())) SELECT p.timestamp time, (p.mid - m.mid)/m.mid*10000 \"P-MEXC\" FROM p ASOF JOIN m ORDER BY p.timestamp"},
+        {"refId": "D", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "WITH bg AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM bitget_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())), m AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM mexc_bookticker WHERE symbol='SKYAI_USDT' AND timestamp > dateadd('m',-30,now())) SELECT bg.timestamp time, (bg.mid - m.mid)/m.mid*10000 \"Bitget-MEXC\" FROM bg ASOF JOIN m ORDER BY bg.timestamp"}
+      ]
+    }
+  ]
+}

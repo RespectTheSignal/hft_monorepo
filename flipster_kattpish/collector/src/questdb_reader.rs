@@ -315,6 +315,8 @@ pub async fn replay_merged(
     end_ts: DateTime<Utc>,
     hedge_exchange: ExchangeName,
     hedge_table: &str,
+    follower_exchange: ExchangeName,
+    follower_table: &str,
     tx: broadcast::Sender<BookTick>,
 ) -> Result<u64> {
     info!(
@@ -322,6 +324,8 @@ pub async fn replay_merged(
         end = %end_ts,
         hedge = hedge_exchange.as_str(),
         hedge_table,
+        follower = follower_exchange.as_str(),
+        follower_table,
         "backtest replay: starting"
     );
     let client = reqwest::Client::builder()
@@ -343,7 +347,7 @@ pub async fn replay_merged(
         // Refill empty buffers — unless the side is already drained past end_ns.
         if fl_buf.is_empty() && !fl_done {
             let (rows, max_ts) = fetch_chunk(
-                &client, &cfg, ExchangeName::Flipster, FLIPSTER_TABLE, fl_cursor, end_ns,
+                &client, &cfg, follower_exchange, follower_table, fl_cursor, end_ns,
             )
             .await?;
             if rows.is_empty() {

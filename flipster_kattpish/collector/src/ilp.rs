@@ -1,4 +1,4 @@
-use crate::model::BookTick;
+use crate::model::{BookTick, ExchangeName};
 use anyhow::Result;
 use questdb::ingress::{Buffer, Sender, TimestampNanos};
 use std::sync::Arc;
@@ -52,11 +52,48 @@ impl IlpWriter {
         // bookticker rows (e.g. gate1's central feed), set DISABLE_TICK_WRITES=1
         // in the environment to short-circuit this write and avoid duplicate
         // rows. Position_log / funding_rate / latency_log writes are unaffected.
+        //
+        // Exception: exchanges NOT covered by the central feed (Pancake, Aster)
+        // always write — otherwise their tables would never get populated.
+        // Override the exception with TICK_WRITES_BYPASS=0.
         if std::env::var("DISABLE_TICK_WRITES")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
         {
-            return Ok(());
+            let bypass = std::env::var("TICK_WRITES_BYPASS").unwrap_or_else(|_| "1".into());
+            // Bypass list: exchanges/symbols not covered by the central feed.
+            // Binance TRADIFI_PERPETUAL stock perps (NVDAUSDT, TSLAUSDT, XAUUSDT,
+            // etc) are NOT in the central feed's universe, so when we directly
+            // subscribe via BINANCE_WS_DIRECT we must persist them ourselves.
+            // Detected by symbol shape — typical crypto majors are <8 chars
+            // ending in USDT (BTCUSDT, ETHUSDT). Stocks are 4-letter tickers
+            // followed by USDT.
+            let is_stock_or_macro = matches!(tick.exchange, ExchangeName::Binance)
+                && {
+                    let s = tick.symbol.as_str();
+                    matches!(
+                        s,
+                        "NVDAUSDT" | "TSLAUSDT" | "AAPLUSDT" | "AMZNUSDT" | "METAUSDT"
+                            | "MSFTUSDT" | "GOOGLUSDT" | "AMDUSDT" | "MUUSDT" | "INTCUSDT"
+                            | "SPYUSDT" | "QQQUSDT" | "ORCLUSDT" | "AVGOUSDT" | "SNDKUSDT"
+                            | "COINUSDT" | "HOODUSDT" | "PLTRUSDT" | "MSTRUSDT" | "QCOMUSDT"
+                            | "TSMUSDT" | "BABAUSDT" | "PAYPUSDT" | "CRCLUSDT"
+                            | "XAUUSDT" | "XAGUSDT" | "XPDUSDT" | "XPTUSDT"
+                            | "EWJUSDT" | "EWYUSDT" | "BZUSDT" | "CLUSDT" | "USARUSDT"
+                            | "COPPERUSDT" | "NATGASUSDT"
+                    )
+                };
+            let bypassed = bypass == "1"
+                && (matches!(
+                    tick.exchange,
+                    ExchangeName::Pancake
+                        | ExchangeName::Aster
+                        | ExchangeName::Lighter
+                        | ExchangeName::Variational
+                ) || is_stock_or_macro);
+            if !bypassed {
+                return Ok(());
+            }
         }
         let mut g = self.inner.lock().await;
         g.buffer

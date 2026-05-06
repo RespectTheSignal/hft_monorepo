@@ -1,0 +1,33 @@
+//! HashKey Global derivatives bookticker publisher → QuestDB `hashkey_bookticker`.
+
+use data_publisher::error::Result;
+use data_publisher::exchanges::common::{install_tracing, PublisherConfig};
+use data_publisher::exchanges::hashkey;
+use tracing::info;
+
+const TABLE: &str = "hashkey_bookticker";
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    install_tracing();
+    let cfg = PublisherConfig::from_env(50);
+    info!("config: {:?}", cfg);
+
+    let writer = cfg.writer(TABLE)?;
+    let http = reqwest::Client::builder()
+        .user_agent("data_publisher/hashkey")
+        .build()
+        .expect("reqwest client");
+
+    let mut symbols = hashkey::fetch_perp_symbols(&http).await?;
+    info!("HashKey: discovered {} perpetual contracts", symbols.len());
+    if let Some(n) = cfg.max_symbols {
+        symbols.truncate(n);
+        info!("limited to {n}");
+    }
+
+    hashkey::spawn_all(symbols, cfg.topics_per_conn, writer);
+    tokio::signal::ctrl_c().await.ok();
+    info!("shutdown");
+    Ok(())
+}

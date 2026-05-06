@@ -26,6 +26,8 @@ mod flipster_helpers;
 mod flipster_ws;
 mod gate_contracts;
 mod gate_helpers;
+mod bingx_helpers;
+mod bingx_official;
 mod questdb;
 mod symbol_stats;
 mod trade_log;

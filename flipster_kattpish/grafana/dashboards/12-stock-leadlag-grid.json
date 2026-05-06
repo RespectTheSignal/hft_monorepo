@@ -1,0 +1,130 @@
+{
+  "uid": "stock-leadlag-grid",
+  "title": "12 · Stock Perp Lead-Lag Grid (multi-symbol scan)",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "timezone": "utc",
+  "tags": ["stocks", "leadlag", "scan"],
+  "templating": {"list": []},
+  "annotations": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Top |Lighter-Pyth| divergence per symbol (last 5min mean & std)",
+      "description": "For each stock, mean and std of Lighter-Pyth basis over the last 5min. High mean = persistent mispricing. High std = volatile divergence (mean-reversion candidate).",
+      "gridPos": {"h": 12, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {"defaults": {"decimals": 2}, "overrides": []},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "abs_mean", "desc": true}]},
+      "targets": [{
+        "refId": "A",
+        "format": "table",
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+        "rawSql": "WITH l AS (SELECT timestamp, symbol, (bid_price+ask_price)/2.0 mid FROM lighter_bookticker WHERE symbol IN ('NVDA','TSLA','AAPL','AMZN','MSFT','META','GOOGL','AMD','MU','INTC','SPY','QQQ','ORCL','ASML','SNDK','MRVL') AND timestamp > dateadd('m',-5,now())), p AS (SELECT timestamp, symbol, (bid_price+ask_price)/2.0 mid FROM pyth_bookticker WHERE symbol IN ('NVDA','TSLA','AAPL','AMZN','MSFT','META','GOOGL','AMD','MU','INTC','SPY','QQQ','ORCL','ASML','SNDK','MRVL') AND timestamp > dateadd('m',-5,now())), j AS (SELECT l.symbol, (l.mid - p.mid)/p.mid*10000 bp FROM l ASOF JOIN p ON symbol) SELECT symbol, count() ticks, round(avg(bp),2) mean_bp, round(stddev_samp(bp),2) std_bp, round(min(bp),2) min_bp, round(max(bp),2) max_bp, round(abs(avg(bp)),2) abs_mean FROM j GROUP BY symbol ORDER BY abs_mean DESC"
+      }]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Top |Lighter-Gate| divergence per symbol (5min)",
+      "description": "Lighter perp vs Gate perp — same instrument on two perp DEXes. Persistent gap = sustained arb opportunity if both venues are tradeable.",
+      "gridPos": {"h": 12, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {"defaults": {"decimals": 2}, "overrides": []},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "abs_mean", "desc": true}]},
+      "targets": [{
+        "refId": "A",
+        "format": "table",
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+        "rawSql": "WITH l AS (SELECT timestamp, symbol sym, (bid_price+ask_price)/2.0 mid FROM lighter_bookticker WHERE symbol IN ('NVDA','TSLA','AAPL','AMZN','MSFT','META','GOOGL','AMD','MU','INTC','SPY','QQQ','ORCL','ASML') AND timestamp > dateadd('m',-5,now())), g AS (SELECT timestamp, replace(replace(symbol,'_USDT',''),'X','') sym, (bid_price+ask_price)/2.0 mid FROM gate_bookticker WHERE symbol IN ('NVDAX_USDT','TSLAX_USDT','AAPLX_USDT','AMZNX_USDT','MSFT_USDT','METAX_USDT','GOOGLX_USDT','AMD_USDT','MU_USDT','INTC_USDT','SPYX_USDT','QQQX_USDT','ORCLX_USDT','ASML_USDT') AND timestamp > dateadd('m',-5,now())), j AS (SELECT l.sym, (l.mid - g.mid)/g.mid*10000 bp FROM l ASOF JOIN g ON sym) SELECT sym, count() ticks, round(avg(bp),2) mean_bp, round(stddev_samp(bp),2) std_bp, round(min(bp),2) min_bp, round(max(bp),2) max_bp, round(abs(avg(bp)),2) abs_mean FROM j GROUP BY sym ORDER BY abs_mean DESC"
+      }]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "NVDA cross-venue mid (Lighter / Gate / Pyth)",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {"decimals": 3, "custom": {"drawStyle": "line", "lineWidth": 1.4, "spanNulls": true, "showPoints": "never"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "lighter"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#00D4FF"}}, {"id": "custom.lineWidth", "value": 2}]},
+          {"matcher": {"id": "byName", "options": "gate"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#2E91E5"}}]},
+          {"matcher": {"id": "byName", "options": "pyth"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#9D4EDD"}}, {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 6]}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "L", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"lighter\" FROM lighter_bookticker WHERE symbol='NVDA' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "G", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"gate\" FROM gate_bookticker WHERE symbol='NVDAX_USDT' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "P", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"pyth\" FROM pyth_bookticker WHERE symbol='NVDA' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"}
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "TSLA cross-venue mid",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {"decimals": 3, "custom": {"drawStyle": "line", "lineWidth": 1.4, "spanNulls": true, "showPoints": "never"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "lighter"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#00D4FF"}}, {"id": "custom.lineWidth", "value": 2}]},
+          {"matcher": {"id": "byName", "options": "gate"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#2E91E5"}}]},
+          {"matcher": {"id": "byName", "options": "pyth"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#9D4EDD"}}, {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 6]}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "L", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"lighter\" FROM lighter_bookticker WHERE symbol='TSLA' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "G", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"gate\" FROM gate_bookticker WHERE symbol='TSLAX_USDT' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "P", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"pyth\" FROM pyth_bookticker WHERE symbol='TSLA' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"}
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "AMD cross-venue mid",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 21},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {"decimals": 3, "custom": {"drawStyle": "line", "lineWidth": 1.4, "spanNulls": true, "showPoints": "never"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "lighter"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#00D4FF"}}, {"id": "custom.lineWidth", "value": 2}]},
+          {"matcher": {"id": "byName", "options": "gate"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#2E91E5"}}]},
+          {"matcher": {"id": "byName", "options": "pyth"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#9D4EDD"}}, {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 6]}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "L", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"lighter\" FROM lighter_bookticker WHERE symbol='AMD' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "G", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"gate\" FROM gate_bookticker WHERE symbol='AMD_USDT' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "P", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"pyth\" FROM pyth_bookticker WHERE symbol='AMD' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"}
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "MU cross-venue mid",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 21},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {"decimals": 3, "custom": {"drawStyle": "line", "lineWidth": 1.4, "spanNulls": true, "showPoints": "never"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "lighter"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#00D4FF"}}, {"id": "custom.lineWidth", "value": 2}]},
+          {"matcher": {"id": "byName", "options": "gate"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#2E91E5"}}]},
+          {"matcher": {"id": "byName", "options": "pyth"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#9D4EDD"}}, {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 6]}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "L", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"lighter\" FROM lighter_bookticker WHERE symbol='MU' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "G", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"gate\" FROM gate_bookticker WHERE symbol='MU_USDT' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "P", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"}, "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"pyth\" FROM pyth_bookticker WHERE symbol='MU' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"}
+      ]
+    }
+  ]
+}

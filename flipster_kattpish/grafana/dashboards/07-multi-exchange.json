@@ -1,0 +1,230 @@
+{
+  "uid": "multi-exchange-prices",
+  "title": "7 · Multi-Exchange Price Compare",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-5m", "to": "now" },
+  "timezone": "utc",
+  "tags": ["multi-exchange", "price-compare"],
+  "templating": {
+    "list": [
+      {
+        "name": "base",
+        "type": "textbox",
+        "label": "Base coin (e.g. BTC, ETH, SOL)",
+        "query": "BTC",
+        "current": { "selected": true, "text": "BTC", "value": "BTC" }
+      },
+      {
+        "name": "interval",
+        "type": "custom",
+        "label": "Sample interval",
+        "query": "15s,30s,1m,2m,5m,15m,30m",
+        "options": [
+          { "selected": false, "text": "15s", "value": "15s" },
+          { "selected": false, "text": "30s", "value": "30s" },
+          { "selected": true,  "text": "1m",  "value": "1m" },
+          { "selected": false, "text": "2m",  "value": "2m" },
+          { "selected": false, "text": "5m",  "value": "5m" },
+          { "selected": false, "text": "15m", "value": "15m" },
+          { "selected": false, "text": "30m", "value": "30m" }
+        ],
+        "current": { "selected": true, "text": "1m", "value": "1m" }
+      }
+    ]
+  },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "${base} mid price — all exchanges (click legend to toggle)",
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 6,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1.5,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never",
+            "pointSize": 3
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "binance" },  "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#F0B90B" } }] },
+          { "matcher": { "id": "byName", "options": "bybit" },    "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#F7A600" } }] },
+          { "matcher": { "id": "byName", "options": "bitget" },   "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#54C1FB" } }] },
+          { "matcher": { "id": "byName", "options": "gate" },     "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#2E91E5" } }] },
+          { "matcher": { "id": "byName", "options": "okx" },      "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#FFFFFF" } }] },
+          { "matcher": { "id": "byName", "options": "kucoin" },   "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#24AE8F" } }] },
+          { "matcher": { "id": "byName", "options": "bingx" },    "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#2954FE" } }] },
+          { "matcher": { "id": "byName", "options": "mexc" },     "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#ADFF2F" } }] },
+          { "matcher": { "id": "byName", "options": "backpack" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#9D4EDD" } }] },
+          { "matcher": { "id": "byName", "options": "hashkey" },  "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#FF6B6B" } }] },
+          { "matcher": { "id": "byName", "options": "kraken" },   "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#5741D9" } }] },
+          { "matcher": { "id": "byName", "options": "flipster" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#FF3366" } }] },
+          { "matcher": { "id": "byName", "options": "pyth_fair" }, "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "#00FFFF" } },
+            { "id": "custom.lineWidth", "value": 2.5 },
+            { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 6] } }
+          ] }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min", "max"] },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"binance\" FROM binance_bookticker WHERE symbol = '${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "M", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"pyth_fair\" FROM pyth_bookticker WHERE symbol = concat('${base}', '/USD') AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "B", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"bybit\" FROM bybit_bookticker WHERE symbol = '${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "C", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"bitget\" FROM bitget_bookticker WHERE symbol = '${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "D", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"gate\" FROM gate_bookticker WHERE symbol = '${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "E", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"okx\" FROM okx_bookticker WHERE symbol = '${base}-USDT-SWAP' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "F", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"kucoin\" FROM kucoin_bookticker WHERE symbol = CASE WHEN '${base}' = 'BTC' THEN 'XBTUSDTM' ELSE concat('${base}', 'USDTM') END AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "G", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"bingx\" FROM bingx_bookticker WHERE symbol = '${base}-USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "H", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"mexc\" FROM mexc_bookticker WHERE symbol = '${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "I", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"backpack\" FROM backpack_bookticker WHERE symbol = concat('${base}', '_USDC_PERP') AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "J", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"hashkey\" FROM hashkey_bookticker WHERE symbol = concat('${base}', 'USDT-PERPETUAL') AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "K", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"kraken\" FROM kraken_bookticker WHERE symbol = CASE WHEN '${base}' = 'BTC' THEN 'PF_XBTUSD' ELSE concat('PF_', '${base}', 'USD') END AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        },
+        {
+          "refId": "L", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT timestamp time, avg((bid_price+ask_price)/2.0) \"flipster\" FROM flipster_bookticker WHERE symbol = concat('${base}', 'USDT.PERP') AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(NULL) ORDER BY timestamp"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "${base} spread vs Binance (bp)",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1.2,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min", "max", "mean"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM bybit_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"bybit_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        },
+        {
+          "refId": "B", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM bitget_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"bitget_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        },
+        {
+          "refId": "C", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM gate_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"gate_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        },
+        {
+          "refId": "D", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM okx_bookticker WHERE symbol='${base}-USDT-SWAP' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"okx_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        },
+        {
+          "refId": "E", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM kucoin_bookticker WHERE symbol = CASE WHEN '${base}'='BTC' THEN 'XBTUSDTM' ELSE concat('${base}', 'USDTM') END AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"kucoin_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        },
+        {
+          "refId": "F", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM bingx_bookticker WHERE symbol='${base}-USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"bingx_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        },
+        {
+          "refId": "G", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM mexc_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"mexc_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        },
+        {
+          "refId": "H", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM backpack_bookticker WHERE symbol = concat('${base}', '_USDC_PERP') AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"backpack_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        },
+        {
+          "refId": "I", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM hashkey_bookticker WHERE symbol = concat('${base}', 'USDT-PERPETUAL') AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"hashkey_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        },
+        {
+          "refId": "J", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM kraken_bookticker WHERE symbol = CASE WHEN '${base}'='BTC' THEN 'PF_XBTUSD' ELSE concat('PF_', '${base}', 'USD') END AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"kraken_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        },
+        {
+          "refId": "K", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM flipster_bookticker WHERE symbol = concat('${base}', 'USDT.PERP') AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"flipster_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        },
+        {
+          "refId": "L", "format": "time_series", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "WITH base AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM binance_bookticker WHERE symbol='${base}_USDT' AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)), x AS (SELECT timestamp t, avg((bid_price+ask_price)/2.0) m FROM pyth_bookticker WHERE symbol = concat('${base}', '/USD') AND $__timeFilter(timestamp) SAMPLE BY ${interval} FILL(LINEAR)) SELECT base.t time, (x.m - base.m)/base.m * 10000 \"pyth_fair_bp\" FROM base JOIN x ON base.t = x.t ORDER BY base.t"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "${base} latest snapshot (per exchange)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+      "fieldConfig": {
+        "defaults": { "decimals": 6 }
+      },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A", "format": "table", "datasource": { "type": "grafana-postgresql-datasource", "uid": "questdb" },
+          "rawSql": "SELECT 'binance' exchange, '${base}_USDT' symbol, last(bid_price) bid, last(ask_price) ask, last((bid_price+ask_price)/2.0) mid, last(timestamp) latest_ts FROM binance_bookticker WHERE symbol='${base}_USDT' AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'bybit', '${base}_USDT', last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM bybit_bookticker WHERE symbol='${base}_USDT' AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'bitget', '${base}_USDT', last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM bitget_bookticker WHERE symbol='${base}_USDT' AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'gate', '${base}_USDT', last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM gate_bookticker WHERE symbol='${base}_USDT' AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'okx', '${base}-USDT-SWAP', last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM okx_bookticker WHERE symbol='${base}-USDT-SWAP' AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'kucoin', CASE WHEN '${base}'='BTC' THEN 'XBTUSDTM' ELSE concat('${base}', 'USDTM') END, last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM kucoin_bookticker WHERE symbol = CASE WHEN '${base}'='BTC' THEN 'XBTUSDTM' ELSE concat('${base}', 'USDTM') END AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'bingx', '${base}-USDT', last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM bingx_bookticker WHERE symbol='${base}-USDT' AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'mexc', '${base}_USDT', last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM mexc_bookticker WHERE symbol='${base}_USDT' AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'backpack', concat('${base}', '_USDC_PERP'), last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM backpack_bookticker WHERE symbol = concat('${base}', '_USDC_PERP') AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'hashkey', concat('${base}', 'USDT-PERPETUAL'), last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM hashkey_bookticker WHERE symbol = concat('${base}', 'USDT-PERPETUAL') AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'kraken', CASE WHEN '${base}'='BTC' THEN 'PF_XBTUSD' ELSE concat('PF_', '${base}', 'USD') END, last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM kraken_bookticker WHERE symbol = CASE WHEN '${base}'='BTC' THEN 'PF_XBTUSD' ELSE concat('PF_', '${base}', 'USD') END AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'flipster', concat('${base}', 'USDT.PERP'), last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM flipster_bookticker WHERE symbol = concat('${base}', 'USDT.PERP') AND timestamp > dateadd('m', -10, now()) UNION ALL SELECT 'pyth_fair', concat('${base}', '/USD'), last(bid_price), last(ask_price), last((bid_price+ask_price)/2.0), last(timestamp) FROM pyth_bookticker WHERE symbol = concat('${base}', '/USD') AND timestamp > dateadd('m', -10, now()) ORDER BY mid"
+        }
+      ]
+    }
+  ]
+}

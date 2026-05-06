@@ -103,6 +103,7 @@ async fn main() -> Result<()> {
         let hedge_table = match base.hedge_venue {
             ExchangeName::Gate => "gate_bookticker",
             ExchangeName::Binance => "binance_bookticker",
+            ExchangeName::Hyperliquid => "hyperliquid_bookticker",
             _ => "gate_bookticker",
         };
         let questdb_url =
@@ -416,6 +417,222 @@ async fn main() -> Result<()> {
             }
         }
 
+        // HL-lead strategy: gate_lead clone with Hyperliquid as the follower
+        // leg (Binance still leader). Enable with HL_LEAD=1.
+        if std::env::var("HL_LEAD").unwrap_or_else(|_| "0".into()) != "0" {
+            let mut p = collector::hl_lead::GateLeadParams::from_env();
+            p.backtest_mode = is_backtest;
+            if is_backtest {
+                p.mode_tag = backtest_tag.clone();
+            }
+            tracing::info!(
+                account_id = %p.account_id,
+                min_move_bp = p.min_move_bp,
+                whitelist_len = p.whitelist.len(),
+                backtest = p.backtest_mode,
+                "hl_lead strategy enabled"
+            );
+            let writer_h = writer.clone();
+            let rx_h = tx.subscribe();
+            tokio::spawn(async move {
+                collector::hl_lead::run(writer_h, rx_h, p).await;
+            });
+        }
+
+        // MEXC-lead strategy: gate_lead clone with MEXC as the follower
+        // leg (Binance still leader, same lead-lag detection logic). Enable
+        // with MEXC_LEAD=1. In backtest replay, this also flips the follower
+        // table to mexc_bookticker (see replay_merged caller above).
+        //
+        // BACKTEST_MEXC_SWEEP=1 spawns 4 variants over min_move_bp ∈
+        // {15,20,25,30}, mirroring the gate_lead sweep — fastest way to find
+        // the bp threshold that survives MEXC's bid-ask + fees on alts.
+        if std::env::var("MEXC_LEAD").unwrap_or_else(|_| "0".into()) != "0" {
+            let mexc_sweep = is_backtest
+                && std::env::var("BACKTEST_MEXC_SWEEP")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+            let mm_grid_m: Vec<f64> = if mexc_sweep {
+                vec![15.0, 20.0, 25.0, 30.0]
+            } else {
+                vec![]
+            };
+            let mut m_variants: Vec<collector::mexc_lead::GateLeadParams> = Vec::new();
+            if mexc_sweep {
+                for mm in &mm_grid_m {
+                    let mut p = collector::mexc_lead::GateLeadParams::from_env();
+                    p.backtest_mode = true;
+                    p.min_move_bp = *mm;
+                    p.account_id = format!("ML_BT_mm{}", *mm as i32);
+                    p.mode_tag = backtest_tag.clone();
+                    p.whitelist = Vec::new();
+                    m_variants.push(p);
+                }
+            } else {
+                let mut p = collector::mexc_lead::GateLeadParams::from_env();
+                p.backtest_mode = is_backtest;
+                if is_backtest {
+                    p.mode_tag = backtest_tag.clone();
+                }
+                m_variants.push(p);
+            }
+            for ml_params in m_variants {
+                tracing::info!(
+                    account_id = %ml_params.account_id,
+                    min_move_bp = ml_params.min_move_bp,
+                    whitelist_len = ml_params.whitelist.len(),
+                    backtest = ml_params.backtest_mode,
+                    mode_tag = %ml_params.mode_tag,
+                    "mexc_lead strategy enabled"
+                );
+                let writer_m = writer.clone();
+                let rx_m = tx.subscribe();
+                tokio::spawn(async move {
+                    collector::mexc_lead::run(writer_m, rx_m, ml_params).await;
+                });
+            }
+        }
+
+        // BingX-lead strategy: gate_lead clone with BingX as the follower
+        // leg (Binance still leader). Same logic as mexc_lead, different
+        // follower exchange. Enable with BINGX_LEAD=1.
+        // BACKTEST_BINGX_SWEEP=1 spawns 4 variants over min_move_bp ∈
+        // {15,20,25,30} for the same gate_lead-style sweep.
+        if std::env::var("BINGX_LEAD").unwrap_or_else(|_| "0".into()) != "0" {
+            let bingx_sweep = is_backtest
+                && std::env::var("BACKTEST_BINGX_SWEEP")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+            // BACKTEST_BINGX_GRID=1 sweeps anchor_s × exit_bp at fixed mm30.
+            // 9 variants in parallel: anchor ∈ {2,3,5}, exit ∈ {3,5,7}.
+            let bingx_grid = is_backtest
+                && std::env::var("BACKTEST_BINGX_GRID")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+            let mm_grid_b: Vec<f64> = if bingx_sweep {
+                vec![15.0, 20.0, 25.0, 30.0]
+            } else {
+                vec![]
+            };
+            let mut b_variants: Vec<collector::bingx_lead::GateLeadParams> = Vec::new();
+            if bingx_grid {
+                for a in [2.0_f64, 3.0, 5.0] {
+                    for e in [3.0_f64, 5.0, 7.0] {
+                        let mut p = collector::bingx_lead::GateLeadParams::from_env();
+                        p.backtest_mode = true;
+                        p.min_move_bp = 30.0;
+                        p.anchor_s = a;
+                        p.exit_bp = e;
+                        p.account_id = format!("BX_BT_a{}e{}", a as i32, e as i32);
+                        p.mode_tag = backtest_tag.clone();
+                        p.whitelist = Vec::new();
+                        b_variants.push(p);
+                    }
+                }
+            } else if bingx_sweep {
+                for mm in &mm_grid_b {
+                    let mut p = collector::bingx_lead::GateLeadParams::from_env();
+                    p.backtest_mode = true;
+                    p.min_move_bp = *mm;
+                    p.account_id = format!("BX_BT_mm{}", *mm as i32);
+                    p.mode_tag = backtest_tag.clone();
+                    p.whitelist = Vec::new();
+                    b_variants.push(p);
+                }
+            } else {
+                let mut p = collector::bingx_lead::GateLeadParams::from_env();
+                p.backtest_mode = is_backtest;
+                if is_backtest {
+                    p.mode_tag = backtest_tag.clone();
+                }
+                b_variants.push(p);
+            }
+            for bx_params in b_variants {
+                tracing::info!(
+                    account_id = %bx_params.account_id,
+                    min_move_bp = bx_params.min_move_bp,
+                    whitelist_len = bx_params.whitelist.len(),
+                    backtest = bx_params.backtest_mode,
+                    mode_tag = %bx_params.mode_tag,
+                    "bingx_lead strategy enabled"
+                );
+                let writer_b = writer.clone();
+                let rx_b = tx.subscribe();
+                // Live mode: feed executor → collector fills back into the
+                // strategy so ref_mid is the actual maker fill price, not
+                // the signal-time mid. Backtest variants (multiple parallel
+                // params) intentionally don't share — the fill_events_tx is
+                // single-source and routing per-account is handled inside
+                // bingx_lead's filter on `f.account_id == account_id`.
+                let fill_rx_b = if bx_params.backtest_mode {
+                    None
+                } else {
+                    Some(fill_events_tx.subscribe())
+                };
+                tokio::spawn(async move {
+                    collector::bingx_lead::run(writer_b, rx_b, fill_rx_b, bx_params).await;
+                });
+            }
+        }
+
+        // LIGHTER_LEAD=1 spawns a parallel bingx_lead variant whose follower
+        // venue is Lighter instead of BingX. Reuses the same Binance leader,
+        // same lead-lag detection, but follower=Lighter (175 majors). All
+        // tunable params via GL_LH_* envs (separate from the BingX variant
+        // so both can run side-by-side). Lighter has 0/0 fees so smaller
+        // alpha thresholds (lower min_move_bp + exit_bp) are viable here.
+        if std::env::var("LIGHTER_LEAD").unwrap_or_else(|_| "0".into()) != "0" {
+            let mut lh = collector::bingx_lead::GateLeadParams::default();
+            lh.account_id = std::env::var("GL_LH_ACCOUNT_ID")
+                .unwrap_or_else(|_| "LH_PAPER_v1".into());
+            lh.size_usd = std::env::var("GL_LH_SIZE_USD")
+                .ok().and_then(|v| v.parse().ok()).unwrap_or(20.0);
+            // Lighter universe = majors. Lower thresholds because:
+            //   - 30bp Binance moves on majors are rare; 10bp common.
+            //   - 0/0 fees → small mean-revert alpha is profitable.
+            lh.min_move_bp = std::env::var("GL_LH_MIN_MOVE_BP")
+                .ok().and_then(|v| v.parse().ok()).unwrap_or(10.0);
+            lh.exit_bp = std::env::var("GL_LH_EXIT_BP")
+                .ok().and_then(|v| v.parse().ok()).unwrap_or(3.0);
+            lh.stop_bp = std::env::var("GL_LH_STOP_BP")
+                .ok().and_then(|v| v.parse().ok()).unwrap_or(5.0);
+            lh.anchor_s = std::env::var("GL_LH_ANCHOR_S")
+                .ok().and_then(|v| v.parse().ok()).unwrap_or(2.0);
+            lh.hold_max_s = std::env::var("GL_LH_HOLD_MAX_S")
+                .ok().and_then(|v| v.parse().ok()).unwrap_or(2.0);
+            lh.cooldown_s = std::env::var("GL_LH_COOLDOWN_S")
+                .ok().and_then(|v| v.parse().ok()).unwrap_or(3.0);
+            lh.fee_bp_per_side = 0.0;  // Lighter Standard = 0/0
+            lh.follower_venue = ExchangeName::Lighter;
+            // Empty whitelist = trade every base symbol. The strategy's
+            // base_of() handles Lighter (bare base, no quote suffix).
+            lh.whitelist = std::env::var("GL_LH_WHITELIST")
+                .ok()
+                .map(|v| v.split(',').filter(|s| !s.is_empty()).map(|s| s.trim().to_uppercase()).collect())
+                .unwrap_or_default();
+            lh.blacklist = std::env::var("GL_LH_BLACKLIST")
+                .ok()
+                .map(|v| v.split(',').filter(|s| !s.is_empty()).map(|s| s.trim().to_uppercase()).collect())
+                .unwrap_or_default();
+            lh.mode_tag = std::env::var("GL_LH_MODE_TAG")
+                .unwrap_or_else(|_| "lighter_paper".into());
+            lh.backtest_mode = is_backtest;
+            tracing::info!(
+                account_id = %lh.account_id,
+                follower = "lighter",
+                min_move_bp = lh.min_move_bp,
+                exit_bp = lh.exit_bp,
+                whitelist_len = lh.whitelist.len(),
+                "LIGHTER_LEAD enabled"
+            );
+            let writer_l = writer.clone();
+            let rx_l = tx.subscribe();
+            let fill_rx_l = if lh.backtest_mode { None } else { Some(fill_events_tx.subscribe()) };
+            tokio::spawn(async move {
+                collector::bingx_lead::run(writer_l, rx_l, fill_rx_l, lh).await;
+            });
+        }
+
         // Spread-reversion strategy (Binance↔Flipster mid-gap mean revert).
         // Off by default — enable via SPREAD_REVERT=1. Independent of
         // gate_lead; uses strategy='spread_revert' tag in position_log.
@@ -443,6 +660,63 @@ async fn main() -> Result<()> {
             });
         }
 
+        // HL clone of spread_revert: BIN↔HL gap mean reversion.
+        // Enable via HL_SPREAD_REVERT=1.
+        if std::env::var("HL_SPREAD_REVERT").unwrap_or_else(|_| "0".into()) != "0" {
+            let writer_h = writer.clone();
+            let rx_h = tx.subscribe();
+            let mut h_params = collector::hl_spread_revert::SpreadRevertParams::from_env();
+            h_params.backtest_mode = is_backtest;
+            tracing::info!(
+                account_id = %h_params.account_id,
+                backtest = h_params.backtest_mode,
+                "hl_spread_revert strategy enabled"
+            );
+            // Always spawn baseline_writer — even in backtest. Live 30-min
+            // window approximates the historical baseline closely enough
+            // for our HL dataset (backtest range fits in available history).
+            let baselines = collector::hl_baseline_writer::spawn();
+            // HSR_LIVE=1 + HLP_AGENT_KEY → real IOC orders on HL.
+            let live_exec = if std::env::var("HSR_LIVE").unwrap_or_default() == "1" {
+                match hl_pairs::exec::LiveCfg::from_env() {
+                    Some(cfg) => match hl_pairs::exec::LiveExec::new(cfg.clone()).await {
+                        Ok(e) => {
+                            tracing::warn!(
+                                agent = %hl_pairs::exec::agent_address(&cfg.agent_key).unwrap_or_default(),
+                                max_size_usd = cfg.max_size_usd,
+                                daily_loss_cap_usd = cfg.daily_loss_cap_usd,
+                                testnet = cfg.testnet,
+                                "HSR_LIVE=1 — hl_spread_revert sending real HL orders"
+                            );
+                            // Set max leverage on top performers (cross).
+                            let coins = ["DASH","CHILLGUY","MEGA","VVV","STBL","PENDLE","ZEC","MERL","HYPE","ENA","DYDX","INJ","STX","ORDI","BABY","USTC","AR","VIRTUAL","CHIP","SPX"];
+                            let n_ok = e.set_max_leverage_for(&coins).await;
+                            tracing::warn!("set max leverage on {}/{} coins (cross)", n_ok, coins.len());
+                            Some(std::sync::Arc::new(e))
+                        }
+                        Err(err) => { tracing::warn!(error = %err, "LiveExec init failed — paper-only"); None }
+                    },
+                    None => { tracing::warn!("HSR_LIVE=1 but HLP_AGENT_KEY missing — paper-only"); None }
+                }
+            } else { None };
+
+            // Live state cache: master positions + open orders refreshed every 5s.
+            // Strategy uses this to enforce "1 position per coin at master level".
+            let live_state = if live_exec.is_some() {
+                let master = std::env::var("HLP_MASTER_ADDRESS").unwrap_or_default();
+                let testnet = std::env::var("HLP_TESTNET").map(|v| v=="1").unwrap_or(false);
+                if !master.is_empty() {
+                    Some(hl_pairs::live_state::spawn(master, testnet, 5))
+                } else {
+                    tracing::warn!("HLP_MASTER_ADDRESS missing — live_state guard disabled");
+                    None
+                }
+            } else { None };
+            tokio::spawn(async move {
+                collector::hl_spread_revert::run(writer_h, rx_h, h_params, baselines, live_exec, live_state).await;
+            });
+        }
+
         // If BACKTEST_START_TS + BACKTEST_END_TS are set, run historical
         // replay through the same broadcast channel, wait for it to finish,
         // flush the ILP writer, emit a summary, and exit. Falls through to
@@ -462,12 +736,35 @@ async fn main() -> Result<()> {
                 hedge = hedge_table,
                 "backtest replay: running"
             );
+            // Follower table picks the strategy under test:
+            //   MEXC_LEAD=1 → mexc_bookticker (mexc_lead reads from this)
+            //   HL_LEAD=1   → hyperliquid_bookticker (hl_lead reads)
+            //   default     → flipster_bookticker (gate_lead / pairs / spread_revert)
+            let mexc_lead_on = std::env::var("MEXC_LEAD").unwrap_or_else(|_| "0".into()) != "0";
+            let hl_lead_on = std::env::var("HL_LEAD").unwrap_or_else(|_| "0".into()) != "0";
+            let bingx_lead_on = std::env::var("BINGX_LEAD").unwrap_or_else(|_| "0".into()) != "0";
+            let (follower_exchange, follower_table) = if mexc_lead_on {
+                (ExchangeName::Mexc, "mexc_bookticker")
+            } else if bingx_lead_on {
+                (ExchangeName::Bingx, "bingx_bookticker")
+            } else if hl_lead_on {
+                (ExchangeName::Hyperliquid, "hyperliquid_bookticker")
+            } else {
+                (ExchangeName::Flipster, "flipster_bookticker")
+            };
+            tracing::info!(
+                follower = follower_exchange.as_str(),
+                follower_table,
+                "backtest replay: follower selected"
+            );
             let emitted = collector::questdb_reader::replay_merged(
                 cfg,
                 start_ts,
                 end_ts,
                 base.hedge_venue,
                 hedge_table,
+                follower_exchange,
+                follower_table,
                 tx.clone(),
             )
             .await?;
@@ -544,6 +841,22 @@ async fn main() -> Result<()> {
         collector::zmq_reader::spawn(flipster_addr, ExchangeName::Flipster, tx.clone());
         collector::zmq_reader::spawn(binance_addr, ExchangeName::Binance, tx.clone());
         collector::zmq_reader::spawn(gate_addr, ExchangeName::Gate, tx.clone());
+        // Hyperliquid has no ZMQ publisher yet — fall back to QuestDB polling
+        // for the hyperliquid_bookticker table (populated by hyperliquid_publisher).
+        // Required for the hl_lead strategy to see HL ticks.
+        {
+            let qdb_http = std::env::var("QUESTDB_HTTP_URL")
+                .unwrap_or_else(|_| "http://211.181.122.102:9000".into());
+            let cfg = collector::questdb_reader::ReaderConfig {
+                http_url: qdb_http,
+                poll_interval_ms: 200,
+                ..Default::default()
+            };
+            collector::questdb_reader::spawn(
+                ExchangeName::Hyperliquid, "hyperliquid_bookticker", cfg, tx.clone(),
+            );
+            tracing::info!("USE_ZMQ=1 — added QDB polling for hyperliquid_bookticker (hl_lead leg)");
+        }
         tracing::info!("USE_ZMQ=1 — direct ZMQ SUB feeds active (flipster/binance/gate)");
         let flush_writer = writer.clone();
         tokio::spawn(async move {
@@ -577,17 +890,237 @@ async fn main() -> Result<()> {
             poll_interval_ms: poll_ms,
             ..Default::default()
         };
-        // Spawn one reader per table. Match the default set to what the paper
-        // bot actually consumes: flipster + gate + binance (pairs strategy
-        // and latency signal inputs).
-        for (exchange, table) in [
+        // BINANCE_WS_DIRECT=1 → subscribe to Binance USDⓈ-M perpetual WS
+        // directly (combined-stream `bookTicker`) instead of polling the
+        // central QuestDB. Saves the data_publisher → QDB write delay
+        // (typically 50-200ms), which is the single biggest latency lever
+        // for any strategy that fires on Binance shocks (gate_lead /
+        // bingx_lead / mexc_lead). Other exchanges still come via QDB
+        // poll. Symbols come from BINANCE_WS_SYMBOLS (comma list, e.g.
+        // "LABUSDT,RAVEUSDT,..."); empty = full perpetual universe.
+        let binance_ws_direct = std::env::var("BINANCE_WS_DIRECT")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        // BINGX_WS_DIRECT=1 → subscribe to BingX swap public bookTicker WS
+        // directly. Killing the central QDB poll on BingX is the second
+        // half of the latency budget for bingx_lead — without it, the
+        // strategy compares fresh Binance (WS) against a 100ms-stale
+        // BingX feed, which the lag/velocity filters interpret as
+        // "BingX already caught up" and skips most signals.
+        let bingx_ws_direct = std::env::var("BINGX_WS_DIRECT")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let mut tables: Vec<(ExchangeName, &'static str)> = vec![
             (ExchangeName::Flipster, "flipster_bookticker"),
             (ExchangeName::Gate, "gate_bookticker"),
-            (ExchangeName::Binance, "binance_bookticker"),
-        ] {
+            (ExchangeName::Hyperliquid, "hyperliquid_bookticker"),
+            (ExchangeName::Mexc, "mexc_bookticker"),
+        ];
+        if !binance_ws_direct {
+            tables.push((ExchangeName::Binance, "binance_bookticker"));
+        }
+        if !bingx_ws_direct {
+            tables.push((ExchangeName::Bingx, "bingx_bookticker"));
+        }
+        for (exchange, table) in tables {
             collector::questdb_reader::spawn(exchange, table, cfg.clone(), tx.clone());
         }
-        tracing::info!("READ_FROM_QUESTDB=1 — skipping all WS subscribers");
+        if binance_ws_direct {
+            // Pick symbol set. Prefer explicit BINANCE_WS_SYMBOLS; fall
+            // back to fetch_usdt_perps (full universe). Each WS connection
+            // is capped at 10 symbols to avoid Binance's stream-limit RST.
+            let env_syms = std::env::var("BINANCE_WS_SYMBOLS").ok();
+            let syms: Vec<String> = if let Some(raw) = env_syms.as_deref() {
+                raw.split(',')
+                    .map(|s| s.trim().to_uppercase())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            } else {
+                let set = collector::exchanges::binance::fetch_usdt_perps()
+                    .await
+                    .unwrap_or_default();
+                let mut v: Vec<String> = set.into_iter().collect();
+                v.sort();
+                v
+            };
+            tracing::info!(
+                count = syms.len(),
+                "BINANCE_WS_DIRECT=1 — subscribing to Binance bookTicker WS instead of QDB poll"
+            );
+            for chunk in syms.chunks(10) {
+                let chunk: Vec<String> = chunk.to_vec();
+                let writer_b = writer.clone();
+                let tx_b = tx.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = collector::exchanges::run_collector(
+                        collector::exchanges::binance::BinanceCollector::new(chunk.clone()),
+                        chunk,
+                        writer_b,
+                        tx_b,
+                    )
+                    .await
+                    {
+                        tracing::warn!(error = %e, "binance WS chunk exited");
+                    }
+                });
+            }
+        }
+        if bingx_ws_direct {
+            // BingX symbol shape is "BTC-USDT" (dash). Pull from
+            // BINGX_WS_SYMBOLS or fall back to the Binance whitelist
+            // converted to BingX form (replace "USDT" with "-USDT").
+            let env_syms = std::env::var("BINGX_WS_SYMBOLS").ok();
+            let bin_syms = std::env::var("BINANCE_WS_SYMBOLS").ok();
+            let syms: Vec<String> = if let Some(raw) = env_syms.as_deref() {
+                raw.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            } else if let Some(raw) = bin_syms.as_deref() {
+                // Convert "LABUSDT" → "LAB-USDT" using the trailing USDT.
+                raw.split(',')
+                    .filter_map(|s| {
+                        let s = s.trim();
+                        s.strip_suffix("USDT").map(|base| format!("{base}-USDT"))
+                    })
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            tracing::info!(
+                count = syms.len(),
+                "BINGX_WS_DIRECT=1 — subscribing to BingX bookTicker WS instead of QDB poll"
+            );
+            // BingX WS limit appears generous; safe chunking at 50 symbols.
+            for chunk in syms.chunks(50) {
+                let chunk: Vec<String> = chunk.to_vec();
+                let writer_b = writer.clone();
+                let tx_b = tx.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = collector::exchanges::run_collector(
+                        collector::exchanges::bingx::BingxCollector::new(chunk.clone()),
+                        chunk,
+                        writer_b,
+                        tx_b,
+                    )
+                    .await
+                    {
+                        tracing::warn!(error = %e, "bingx WS chunk exited");
+                    }
+                });
+            }
+        }
+        // PANCAKESWAP perp + ASTERDEX collectors. Both are Binance API
+        // forks. AsterDex serves a real bookTicker firehose (proper BBO);
+        // PancakeSwap only has a markPriceTicker arr (last/c only, no
+        // BBO). We spawn one collector each — all-symbol streams, no
+        // chunking needed. Enable with PANCAKE_WS_DIRECT=1 / ASTER_WS_DIRECT=1.
+        let pancake_on = std::env::var("PANCAKE_WS_DIRECT")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if pancake_on {
+            tracing::info!("PANCAKE_WS_DIRECT=1 — subscribing to PancakeSwap perp markPriceTicker");
+            let writer_p = writer.clone();
+            let tx_p = tx.clone();
+            tokio::spawn(async move {
+                if let Err(e) = collector::exchanges::run_collector(
+                    collector::exchanges::pancake::PancakeCollector::new(Vec::new()),
+                    Vec::new(),
+                    writer_p,
+                    tx_p,
+                )
+                .await
+                {
+                    tracing::warn!(error = %e, "pancake WS exited");
+                }
+            });
+        }
+        let aster_on = std::env::var("ASTER_WS_DIRECT")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if aster_on {
+            tracing::info!("ASTER_WS_DIRECT=1 — subscribing to AsterDex !bookTicker");
+            let writer_a = writer.clone();
+            let tx_a = tx.clone();
+            tokio::spawn(async move {
+                if let Err(e) = collector::exchanges::run_collector(
+                    collector::exchanges::aster::AsterCollector::new(Vec::new()),
+                    Vec::new(),
+                    writer_a,
+                    tx_a,
+                )
+                .await
+                {
+                    tracing::warn!(error = %e, "aster WS exited");
+                }
+            });
+        }
+        let lighter_on = std::env::var("LIGHTER_WS_DIRECT")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if lighter_on {
+            tracing::info!("LIGHTER_WS_DIRECT=1 — subscribing to Lighter market_stats");
+            let writer_l = writer.clone();
+            let tx_l = tx.clone();
+            tokio::spawn(async move {
+                if let Err(e) = collector::exchanges::run_collector(
+                    collector::exchanges::lighter::LighterCollector::new(Vec::new()),
+                    Vec::new(),
+                    writer_l,
+                    tx_l,
+                )
+                .await
+                {
+                    tracing::warn!(error = %e, "lighter WS exited");
+                }
+            });
+        }
+        // VARIATIONAL — subscribe with reverse-engineered protocol from the
+        // 2026-05-06 JS bundle capture. Universe is curated (~35 majors)
+        // because the WS doesn't expose a "give me all" mode and discovery
+        // would require crawling the REST `/instruments` endpoint. Override
+        // with VARIATIONAL_UNDERLYINGS=BTC,ETH,...
+        let variational_on = std::env::var("VARIATIONAL_WS_DIRECT")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if variational_on {
+            let env_uls = std::env::var("VARIATIONAL_UNDERLYINGS").ok();
+            let underlyings: Vec<String> = if let Some(raw) = env_uls.as_deref() {
+                raw.split(',')
+                    .map(|s| s.trim().to_uppercase())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            tracing::info!(
+                count = underlyings.len(),
+                "VARIATIONAL_WS_DIRECT=1 — subscribing to Variational /prices"
+            );
+            let writer_v = writer.clone();
+            let tx_v = tx.clone();
+            tokio::spawn(async move {
+                if let Err(e) = collector::exchanges::run_collector(
+                    collector::exchanges::variational::VariationalCollector::new(underlyings),
+                    Vec::new(),
+                    writer_v,
+                    tx_v,
+                )
+                .await
+                {
+                    tracing::warn!(error = %e, "variational WS exited");
+                }
+            });
+        }
+        tracing::info!(
+            binance_direct = binance_ws_direct,
+            pancake = pancake_on,
+            aster = aster_on,
+            lighter = lighter_on,
+            variational = variational_on,
+            "READ_FROM_QUESTDB=1 — using QDB poll for non-Binance feeds"
+        );
         // Periodic flush safety net still useful for any ILP writes
         let flush_writer = writer.clone();
         tokio::spawn(async move {

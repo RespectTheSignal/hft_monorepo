@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["collector", "flipster_rust", "executor", "pairs_core"]
+members = ["collector", "flipster_rust", "executor", "pairs_core", "hl_pairs", "hl_quoter"]
 
 [workspace.package]
 edition = "2021"

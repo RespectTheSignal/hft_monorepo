@@ -26,7 +26,7 @@ WINDOW_MINUTES: tuple[int, ...] = FAST_WINDOWS + SLOW_WINDOWS  # 모드 == "all"
 
 # === price_change 윈도우 (분) ===
 FAST_PRICE_CHANGE_WINDOWS: tuple[int, ...] = (1, 5)
-SLOW_PRICE_CHANGE_WINDOWS: tuple[int, ...] = (15, 30, 60, 240, 1440)
+SLOW_PRICE_CHANGE_WINDOWS: tuple[int, ...] = (15, 30, 60, 240)
 PRICE_CHANGE_WINDOWS: tuple[int, ...] = FAST_PRICE_CHANGE_WINDOWS + SLOW_PRICE_CHANGE_WINDOWS
 
 # === 윈도우별 갱신 cadence (초) ===
@@ -43,7 +43,6 @@ DEFAULT_CADENCE_SECS: dict[int, float] = {
     60: 120,
     240: 600,
     720: 1800,
-    1440: 3600,
 }
 
 
@@ -87,7 +86,6 @@ DEFAULT_CORR_RETURN_SECONDS: dict[int, int] = {
     60: 30,   # 120
     240: 60,  # 240
     720: 300, # 144
-    1440: 600, # 720
 }
 
 

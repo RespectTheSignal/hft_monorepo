@@ -1,0 +1,700 @@
+{
+  "uid": "variational-vs-cex",
+  "title": "16 \u00b7 Variational vs CEX (Binance/Bybit/Bitget/Gate/MEXC/BingX)",
+  "schemaVersion": 39,
+  "version": 6,
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timezone": "utc",
+  "tags": [
+    "variational",
+    "cex",
+    "compare"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "sym",
+        "type": "textbox",
+        "label": "Symbol (Variational + CEX)",
+        "query": "BTC",
+        "current": {
+          "selected": true,
+          "text": "BTC",
+          "value": "BTC"
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "${sym} \u2014 Variational vs all CEX mids + cex_avg consensus (white dashed)",
+      "description": "All venues with the symbol overlaid. Variational uses underlying_price (LP fair quote). CEX use bid-ask mid. Watch for systematic offset or oscillation.",
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "questdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 6,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1.4,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "variational"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF85A2"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "binance"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0B90B"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2.2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bybit"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F7A600"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bitget"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#54C1FB"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "gate"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#2E91E5"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "mexc"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#ADFF2F"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bingx"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#2954FE"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cex_avg"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FFFFFF"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2.8
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    5
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "V",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"variational\" FROM variational_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "BN",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"binance\" FROM binance_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "BB",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"bybit\" FROM bybit_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "BG",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"bitget\" FROM bitget_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "G",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"gate\" FROM gate_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "M",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"mexc\" FROM mexc_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "BX",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"bingx\" FROM bingx_bookticker WHERE symbol = concat('${sym}','-USDT') AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "CEXAVG",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH ticks AS (SELECT timestamp ts, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bybit_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bitget_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM gate_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM mexc_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bingx_bookticker WHERE symbol=concat('${sym}','-USDT') AND timestamp > dateadd('m',-30,now())) SELECT ts time, avg(mid) \"cex_avg\" FROM ticks timestamp(ts) SAMPLE BY 2s ALIGN TO CALENDAR ORDER BY ts"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "${sym} \u2014 divergence vs Binance (bp). CEXes only.",
+      "description": "Each venue's mid minus Binance mid in bp. Variational shows the LP's fair-value vs the live CEX consensus.",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "questdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1.4,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Variational-Binance"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF85A2"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2.5
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Bybit-Binance"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F7A600"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "min",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "VB",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH v AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM variational_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-30,now())), b AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())) SELECT v.timestamp time, (v.mid-b.mid)/b.mid*10000 \"Variational-Binance\" FROM v ASOF JOIN b ORDER BY v.timestamp"
+        },
+        {
+          "refId": "BBB",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH bb AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM bybit_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())), b AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())) SELECT bb.timestamp time, (bb.mid-b.mid)/b.mid*10000 \"Bybit-Binance\" FROM bb ASOF JOIN b ORDER BY bb.timestamp"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Live snapshot \u2014 all venues + freshness (last 5min)",
+      "description": "Current mid + max age. Stale data shown as old timestamps. Use this to detect dead feeds.",
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "questdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 6
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "mid",
+            "desc": false
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT 'variational' venue, last((bid_price+ask_price)/2.0) mid, max(timestamp) latest, count() n FROM variational_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-5,now()) UNION ALL SELECT 'binance', last((bid_price+ask_price)/2.0), max(timestamp), count() FROM binance_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-5,now()) UNION ALL SELECT 'bybit', last((bid_price+ask_price)/2.0), max(timestamp), count() FROM bybit_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-5,now()) UNION ALL SELECT 'bitget', last((bid_price+ask_price)/2.0), max(timestamp), count() FROM bitget_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-5,now()) UNION ALL SELECT 'gate', last((bid_price+ask_price)/2.0), max(timestamp), count() FROM gate_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-5,now()) UNION ALL SELECT 'mexc', last((bid_price+ask_price)/2.0), max(timestamp), count() FROM mexc_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-5,now()) UNION ALL SELECT 'bingx', last((bid_price+ask_price)/2.0), max(timestamp), count() FROM bingx_bookticker WHERE symbol = concat('${sym}','-USDT') AND timestamp > dateadd('m',-5,now()) UNION ALL SELECT 'hyperliquid', last((bid_price+ask_price)/2.0), max(timestamp), count() FROM hyperliquid_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-5,now()) UNION ALL SELECT 'pancake', last((bid_price+ask_price)/2.0), max(timestamp), count() FROM pancake_bookticker WHERE symbol = concat('${sym}','USDT') AND timestamp > dateadd('m',-5,now()) UNION ALL SELECT 'aster', last((bid_price+ask_price)/2.0), max(timestamp), count() FROM aster_bookticker WHERE symbol = concat('${sym}','USDT') AND timestamp > dateadd('m',-5,now()) UNION ALL SELECT 'lighter', last((bid_price+ask_price)/2.0), max(timestamp), count() FROM lighter_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-5,now())"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Variational vs each CEX \u2014 basis stats (30min)",
+      "description": "ASOF-joined basis between Variational and each CEX. High std + low |mean| = best mean-revert candidate.",
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "questdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "std_bp",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH v AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM variational_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-30,now())), b AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())), bb AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM bybit_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())), bg AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM bitget_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())), g AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM gate_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())), m AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM mexc_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())), bx AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM bingx_bookticker WHERE symbol=concat('${sym}','-USDT') AND timestamp > dateadd('m',-30,now())), h AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM hyperliquid_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-30,now())), p AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pancake_bookticker WHERE symbol=concat('${sym}','USDT') AND timestamp > dateadd('m',-30,now())), a AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM aster_bookticker WHERE symbol=concat('${sym}','USDT') AND timestamp > dateadd('m',-30,now())), l AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM lighter_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-30,now())) SELECT 'V-Binance' pair, count() n, round(avg((v.mid-b.mid)/b.mid*10000),2) mean_bp, round(stddev_samp((v.mid-b.mid)/b.mid*10000),2) std_bp FROM v ASOF JOIN b UNION ALL SELECT 'V-Bybit', count(), round(avg((v.mid-bb.mid)/bb.mid*10000),2), round(stddev_samp((v.mid-bb.mid)/bb.mid*10000),2) FROM v ASOF JOIN bb UNION ALL SELECT 'V-Bitget', count(), round(avg((v.mid-bg.mid)/bg.mid*10000),2), round(stddev_samp((v.mid-bg.mid)/bg.mid*10000),2) FROM v ASOF JOIN bg UNION ALL SELECT 'V-Gate', count(), round(avg((v.mid-g.mid)/g.mid*10000),2), round(stddev_samp((v.mid-g.mid)/g.mid*10000),2) FROM v ASOF JOIN g UNION ALL SELECT 'V-MEXC', count(), round(avg((v.mid-m.mid)/m.mid*10000),2), round(stddev_samp((v.mid-m.mid)/m.mid*10000),2) FROM v ASOF JOIN m UNION ALL SELECT 'V-BingX', count(), round(avg((v.mid-bx.mid)/bx.mid*10000),2), round(stddev_samp((v.mid-bx.mid)/bx.mid*10000),2) FROM v ASOF JOIN bx UNION ALL SELECT 'V-Hyperliquid', count(), round(avg((v.mid-h.mid)/h.mid*10000),2), round(stddev_samp((v.mid-h.mid)/h.mid*10000),2) FROM v ASOF JOIN h UNION ALL SELECT 'V-Pancake', count(), round(avg((v.mid-p.mid)/p.mid*10000),2), round(stddev_samp((v.mid-p.mid)/p.mid*10000),2) FROM v ASOF JOIN p UNION ALL SELECT 'V-Aster', count(), round(avg((v.mid-a.mid)/a.mid*10000),2), round(stddev_samp((v.mid-a.mid)/a.mid*10000),2) FROM v ASOF JOIN a UNION ALL SELECT 'V-Lighter', count(), round(avg((v.mid-l.mid)/l.mid*10000),2), round(stddev_samp((v.mid-l.mid)/l.mid*10000),2) FROM v ASOF JOIN l ORDER BY std_bp DESC"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "${sym} \u2014 Variational vs CEX-only avg vs CEX+HL consensus",
+      "description": "consensus = mean(binance, bybit, bitget, gate, mexc, bingx, hyperliquid). Watch where variational diverges from the cross-CEX consensus.",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "questdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 6,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1.6,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "variational"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF85A2"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2.5
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "consensus"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FFFFFF"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2.5
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    8,
+                    4
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cex_only"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0B90B"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2.0
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    4,
+                    4
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "V",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"variational\" FROM variational_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-30,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "C",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH ticks AS (SELECT timestamp ts, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bybit_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bitget_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM gate_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM mexc_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bingx_bookticker WHERE symbol=concat('${sym}','-USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM hyperliquid_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-30,now())) SELECT ts time, avg(mid) \"consensus\" FROM ticks timestamp(ts) SAMPLE BY 2s ALIGN TO CALENDAR ORDER BY ts"
+        },
+        {
+          "refId": "CEXONLY",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH ticks AS (SELECT timestamp ts, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bybit_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bitget_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM gate_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM mexc_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now()) UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bingx_bookticker WHERE symbol=concat('${sym}','-USDT') AND timestamp > dateadd('m',-30,now())) SELECT ts time, avg(mid) \"cex_only\" FROM ticks timestamp(ts) SAMPLE BY 2s ALIGN TO CALENDAR ORDER BY ts"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "${sym} \u2014 Variational vs CEX-only & vs CEX+HL consensus (bp)",
+      "description": "Live divergence between Variational LP quote and the cross-CEX-and-HL average mid. Sustained large gap = LP mispriced or stale.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "questdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1.5,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "min",
+            "max",
+            "stdDev"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH cons AS (  WITH ticks AS (  SELECT timestamp ts, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())   UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bybit_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())   UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bitget_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())   UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM gate_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())   UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM mexc_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())   UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bingx_bookticker WHERE symbol=concat('${sym}','-USDT') AND timestamp > dateadd('m',-30,now())   UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM hyperliquid_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-30,now())  ) SELECT ts, avg(mid) consensus FROM ticks timestamp(ts) SAMPLE BY 2s ALIGN TO CALENDAR), v AS (SELECT timestamp ts, (bid_price+ask_price)/2.0 mid FROM variational_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-30,now())) SELECT v.ts time, (v.mid - cons.consensus)/cons.consensus*10000 \"V - consensus bp\" FROM v ASOF JOIN cons ON ts ORDER BY v.ts"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH cex AS (  WITH ticks AS (  SELECT timestamp ts, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())   UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bybit_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())   UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bitget_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())   UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM gate_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())   UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM mexc_bookticker WHERE symbol=concat('${sym}','_USDT') AND timestamp > dateadd('m',-30,now())   UNION ALL SELECT timestamp, (bid_price+ask_price)/2.0 FROM bingx_bookticker WHERE symbol=concat('${sym}','-USDT') AND timestamp > dateadd('m',-30,now())  ) SELECT ts, avg(mid) cex_avg FROM ticks timestamp(ts) SAMPLE BY 2s ALIGN TO CALENDAR), v AS (SELECT timestamp ts, (bid_price+ask_price)/2.0 mid FROM variational_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-30,now())) SELECT v.ts time, (v.mid - cex.cex_avg)/cex.cex_avg*10000 \"V - CEX-only bp\" FROM v ASOF JOIN cex ON ts ORDER BY v.ts"
+        }
+      ]
+    }
+  ]
+}

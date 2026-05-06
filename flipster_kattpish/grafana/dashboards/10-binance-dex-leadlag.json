@@ -1,0 +1,467 @@
+{
+  "uid": "binance-dex-leadlag",
+  "title": "10 \u00b7 Binance \u2192 DEX Lead-Lag (Pancake / Aster / Lighter / Variational)",
+  "schemaVersion": 39,
+  "version": 3,
+  "refresh": "1s",
+  "time": {
+    "from": "now-5m",
+    "to": "now"
+  },
+  "timezone": "utc",
+  "tags": [
+    "dex",
+    "lag",
+    "binance",
+    "pancake",
+    "aster",
+    "lighter"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "base",
+        "type": "textbox",
+        "label": "Base coin",
+        "query": "BTC",
+        "current": {
+          "selected": true,
+          "text": "BTC",
+          "value": "BTC"
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "${base} \u2014 cumulative return since window start (bp). Binance vs DEXes only.",
+      "description": "Each exchange's mid is rebased to its own first-tick value in the visible window. Binance is the lead. The horizontal gap to a DEX line at any Y level = lag in seconds.",
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "questdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1.5,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "binance"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0B90B"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3.5
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pancake"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#D1884F"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "aster"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#7B61FF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lighter"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#00D4FF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "variational"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF85A2"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH base AS (SELECT first((bid_price+ask_price)/2.0) m0 FROM binance_bookticker WHERE symbol='${base}_USDT' AND timestamp > dateadd('m',-5,now())) SELECT t.timestamp time, ((t.bid_price+t.ask_price)/2.0 / base.m0 - 1) * 10000 \"binance\" FROM binance_bookticker t CROSS JOIN base WHERE t.symbol='${base}_USDT' AND t.timestamp > dateadd('m',-5,now()) ORDER BY t.timestamp"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH base AS (SELECT first((bid_price+ask_price)/2.0) m0 FROM pancake_bookticker WHERE symbol = concat('${base}', 'USDT') AND timestamp > dateadd('m',-5,now())) SELECT t.timestamp time, ((t.bid_price+t.ask_price)/2.0 / base.m0 - 1) * 10000 \"pancake\" FROM pancake_bookticker t CROSS JOIN base WHERE t.symbol = concat('${base}', 'USDT') AND t.timestamp > dateadd('m',-5,now()) ORDER BY t.timestamp"
+        },
+        {
+          "refId": "C",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH base AS (SELECT first((bid_price+ask_price)/2.0) m0 FROM aster_bookticker WHERE symbol = concat('${base}', 'USDT') AND timestamp > dateadd('m',-5,now())) SELECT t.timestamp time, ((t.bid_price+t.ask_price)/2.0 / base.m0 - 1) * 10000 \"aster\" FROM aster_bookticker t CROSS JOIN base WHERE t.symbol = concat('${base}', 'USDT') AND t.timestamp > dateadd('m',-5,now()) ORDER BY t.timestamp"
+        },
+        {
+          "refId": "D",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH base AS (SELECT first((bid_price+ask_price)/2.0) m0 FROM lighter_bookticker WHERE symbol='${base}' AND timestamp > dateadd('m',-5,now())) SELECT t.timestamp time, ((t.bid_price+t.ask_price)/2.0 / base.m0 - 1) * 10000 \"lighter\" FROM lighter_bookticker t CROSS JOIN base WHERE t.symbol='${base}' AND t.timestamp > dateadd('m',-5,now()) ORDER BY t.timestamp"
+        },
+        {
+          "refId": "E",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH base AS (SELECT first((bid_price+ask_price)/2.0) m0 FROM variational_bookticker WHERE symbol='${base}' AND timestamp > dateadd('m',-5,now())) SELECT t.timestamp time, ((t.bid_price+t.ask_price)/2.0 / base.m0 - 1) * 10000 \"variational\" FROM variational_bookticker t CROSS JOIN base WHERE t.symbol='${base}' AND t.timestamp > dateadd('m',-5,now()) ORDER BY t.timestamp"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "${base} \u2014 raw mid prices, Binance highlighted",
+      "description": "Tick-by-tick mid for Binance vs each DEX. When Binance jumps, watch how long until each DEX follows.",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "questdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 6,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1.4,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "binance"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0B90B"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pancake"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#D1884F"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "aster"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#7B61FF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lighter"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#00D4FF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "variational"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF85A2"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"binance\" FROM binance_bookticker WHERE symbol='${base}_USDT' AND timestamp > dateadd('m',-5,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"pancake\" FROM pancake_bookticker WHERE symbol = concat('${base}', 'USDT') AND timestamp > dateadd('m',-5,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "C",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"aster\" FROM aster_bookticker WHERE symbol = concat('${base}', 'USDT') AND timestamp > dateadd('m',-5,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "D",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"lighter\" FROM lighter_bookticker WHERE symbol='${base}' AND timestamp > dateadd('m',-5,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "E",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"variational\" FROM variational_bookticker WHERE symbol='${base}' AND timestamp > dateadd('m',-5,now()) ORDER BY timestamp"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "${base} \u2014 last-5-min lag stats vs Binance (avg/stddev/min/max bp dev, tick count)",
+      "description": "ASOF JOIN over the past 5 minutes. Higher stddev/avg of bp dev = more lag/staleness vs Binance. Lower tick count = collector starvation.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "questdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "stddev_bp",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH bin AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol='${base}_USDT' AND timestamp > dateadd('m', -5, now())), pa AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pancake_bookticker WHERE symbol = concat('${base}', 'USDT') AND timestamp > dateadd('m', -5, now())), ar AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM aster_bookticker WHERE symbol = concat('${base}', 'USDT') AND timestamp > dateadd('m', -5, now())), li AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM lighter_bookticker WHERE symbol='${base}' AND timestamp > dateadd('m', -5, now())), va AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM variational_bookticker WHERE symbol='${base}' AND timestamp > dateadd('m', -5, now())) SELECT 'pancake' exchange, count() ticks, round(avg((pa.mid - bin.mid)/bin.mid*10000),3) avg_bp, round(stddev_samp((pa.mid - bin.mid)/bin.mid*10000),3) stddev_bp, round(min((pa.mid - bin.mid)/bin.mid*10000),3) min_bp, round(max((pa.mid - bin.mid)/bin.mid*10000),3) max_bp FROM pa ASOF JOIN bin UNION ALL SELECT 'aster', count(), round(avg((ar.mid - bin.mid)/bin.mid*10000),3), round(stddev_samp((ar.mid - bin.mid)/bin.mid*10000),3), round(min((ar.mid - bin.mid)/bin.mid*10000),3), round(max((ar.mid - bin.mid)/bin.mid*10000),3) FROM ar ASOF JOIN bin UNION ALL SELECT 'lighter', count(), round(avg((li.mid - bin.mid)/bin.mid*10000),3), round(stddev_samp((li.mid - bin.mid)/bin.mid*10000),3), round(min((li.mid - bin.mid)/bin.mid*10000),3), round(max((li.mid - bin.mid)/bin.mid*10000),3) FROM li ASOF JOIN bin UNION ALL SELECT 'variational', count(), round(avg((va.mid - bin.mid)/bin.mid*10000),3), round(stddev_samp((va.mid - bin.mid)/bin.mid*10000),3), round(min((va.mid - bin.mid)/bin.mid*10000),3), round(max((va.mid - bin.mid)/bin.mid*10000),3) FROM va ASOF JOIN bin ORDER BY stddev_bp DESC"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Top-30 widest current Binance \u2194 DEX divergence across ALL coins (bp)",
+      "description": "Live pulse: which coin \u00d7 DEX combo is showing the largest mid divergence right now. Updated every 1s. Refresh window = 60s. Auto-discovered universe.",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "questdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "abs_bp",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "questdb"
+          },
+          "rawSql": "WITH bin AS (SELECT replace(symbol,'_USDT','') base, last((bid_price+ask_price)/2.0) mid FROM binance_bookticker WHERE timestamp > dateadd('s', -60, now()) AND symbol LIKE '%_USDT' GROUP BY symbol), pa AS (SELECT replace(symbol,'USDT','') base, last((bid_price+ask_price)/2.0) mid FROM pancake_bookticker WHERE timestamp > dateadd('s', -60, now()) AND symbol LIKE '%USDT' GROUP BY symbol), ar AS (SELECT replace(symbol,'USDT','') base, last((bid_price+ask_price)/2.0) mid FROM aster_bookticker WHERE timestamp > dateadd('s', -60, now()) AND symbol LIKE '%USDT' GROUP BY symbol), li AS (SELECT symbol base, last((bid_price+ask_price)/2.0) mid FROM lighter_bookticker WHERE timestamp > dateadd('s', -60, now()) GROUP BY symbol), va AS (SELECT symbol base, last((bid_price+ask_price)/2.0) mid FROM variational_bookticker WHERE timestamp > dateadd('s', -60, now()) GROUP BY symbol) SELECT 'pancake' dex, pa.base sym, round((pa.mid - bin.mid)/bin.mid*10000, 2) bp_dev, round(abs((pa.mid - bin.mid)/bin.mid*10000), 2) abs_bp FROM pa JOIN bin ON pa.base = bin.base UNION ALL SELECT 'aster', ar.base, round((ar.mid - bin.mid)/bin.mid*10000, 2), round(abs((ar.mid - bin.mid)/bin.mid*10000), 2) FROM ar JOIN bin ON ar.base = bin.base UNION ALL SELECT 'lighter', li.base, round((li.mid - bin.mid)/bin.mid*10000, 2), round(abs((li.mid - bin.mid)/bin.mid*10000), 2) FROM li JOIN bin ON li.base = bin.base UNION ALL SELECT 'variational', va.base, round((va.mid - bin.mid)/bin.mid*10000, 2), round(abs((va.mid - bin.mid)/bin.mid*10000), 2) FROM va JOIN bin ON va.base = bin.base ORDER BY abs_bp DESC LIMIT 30"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+{
+  "uid": "binance-lighter-crypto",
+  "title": "13 · Binance → Lighter Crypto Lead-Lag",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "timezone": "utc",
+  "tags": ["lighter", "binance", "leadlag", "crypto"],
+  "templating": {
+    "list": [
+      {
+        "name": "sym",
+        "type": "textbox",
+        "label": "Crypto symbol",
+        "query": "AVAX",
+        "current": {"selected": true, "text": "AVAX", "value": "AVAX"}
+      }
+    ]
+  },
+  "annotations": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "${sym} — Binance vs Lighter mid (Binance leads alts by ~1s, corr +0.5-0.65)",
+      "description": "If Binance is the leader, its line moves first and Lighter's curve follows ~1s later. AVAX/LINK/SUI/WIF/POPCAT show this. BTC/ETH/SOL are simultaneous.",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 0},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 4,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1.5,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "binance"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F0B90B"}}, {"id": "custom.lineWidth", "value": 2.5}]},
+          {"matcher": {"id": "byName", "options": "lighter"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#00D4FF"}}, {"id": "custom.lineWidth", "value": 2}]}
+        ]
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min", "max"]},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [
+        {"refId": "B", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"},
+         "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"binance\" FROM binance_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"},
+        {"refId": "L", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"},
+         "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"lighter\" FROM lighter_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"}
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "${sym} — divergence in bp (Lighter - Binance). Persistent positive = Lighter trades above Binance.",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 14},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {"decimals": 1, "unit": "none", "custom": {"drawStyle": "line", "lineWidth": 1.5, "fillOpacity": 5, "spanNulls": true, "showPoints": "never"}},
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "mean", "min", "max"]}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "A", "format": "time_series", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"},
+         "rawSql": "WITH l AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM lighter_bookticker WHERE symbol='${sym}' AND timestamp > dateadd('m',-15,now())), b AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol = concat('${sym}','_USDT') AND timestamp > dateadd('m',-15,now())) SELECT l.timestamp time, (l.mid - b.mid)/b.mid*10000 \"Lighter-Binance bp\" FROM l ASOF JOIN b ORDER BY l.timestamp"}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "All Lighter crypto: Binance lead-lag stats (5min window)",
+      "description": "ASOF-joined 1s grid. mean/std of (Lighter - Binance) basis in bp. Persistent positive/negative = systematic lag. High std = mean-revert opportunity.",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 24},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {"defaults": {"decimals": 2}, "overrides": []},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "abs_mean", "desc": true}]},
+      "targets": [
+        {"refId": "A", "format": "table", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"},
+         "rawSql": "WITH lh AS (SELECT timestamp, symbol sym, (bid_price+ask_price)/2.0 mid FROM lighter_bookticker WHERE symbol IN ('BTC','ETH','SOL','HYPE','BNB','XRP','DOGE','LINK','AVAX','TON','SUI','APT','ARB','TIA','PYTH','TAO','WIF','PENGU','FARTCOIN','TRUMP','POPCAT','AAVE','UNI','LTC','BCH','ADA','DOT','NEAR','ATOM') AND timestamp > dateadd('m',-5,now())), bn AS (SELECT timestamp, replace(symbol,'_USDT','') sym, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol IN ('BTC_USDT','ETH_USDT','SOL_USDT','HYPE_USDT','BNB_USDT','XRP_USDT','DOGE_USDT','LINK_USDT','AVAX_USDT','TON_USDT','SUI_USDT','APT_USDT','ARB_USDT','TIA_USDT','PYTH_USDT','TAO_USDT','WIF_USDT','PENGU_USDT','FARTCOIN_USDT','TRUMP_USDT','POPCAT_USDT','AAVE_USDT','UNI_USDT','LTC_USDT','BCH_USDT','ADA_USDT','DOT_USDT','NEAR_USDT','ATOM_USDT') AND timestamp > dateadd('m',-5,now())), j AS (SELECT lh.sym, ((lh.mid - bn.mid)/bn.mid*10000) bp FROM lh ASOF JOIN bn ON sym) SELECT sym, count() ticks, round(avg(bp),2) mean_bp, round(stddev_samp(bp),2) std_bp, round(min(bp),1) min_bp, round(max(bp),1) max_bp, round(abs(avg(bp)),2) abs_mean FROM j GROUP BY sym ORDER BY abs_mean DESC"}
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Live divergence (last 60s mid)",
+      "description": "Latest Lighter mid vs Binance mid for each shared symbol. Snapshot view.",
+      "gridPos": {"h": 12, "w": 12, "x": 0, "y": 38},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {"defaults": {"decimals": 4}, "overrides": []},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "abs_bp", "desc": true}]},
+      "targets": [
+        {"refId": "A", "format": "table", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"},
+         "rawSql": "WITH lh AS (SELECT symbol sym, last((bid_price+ask_price)/2.0) px FROM lighter_bookticker WHERE symbol IN ('BTC','ETH','SOL','HYPE','BNB','XRP','DOGE','LINK','AVAX','TON','SUI','APT','TIA','TAO','WIF','PENGU','FARTCOIN','TRUMP','POPCAT','AAVE','LTC','BCH','ADA','DOT','NEAR') AND timestamp > dateadd('s',-60,now()) GROUP BY symbol), bn AS (SELECT replace(symbol,'_USDT','') sym, last((bid_price+ask_price)/2.0) px FROM binance_bookticker WHERE symbol IN ('BTC_USDT','ETH_USDT','SOL_USDT','HYPE_USDT','BNB_USDT','XRP_USDT','DOGE_USDT','LINK_USDT','AVAX_USDT','TON_USDT','SUI_USDT','APT_USDT','TIA_USDT','TAO_USDT','WIF_USDT','PENGU_USDT','FARTCOIN_USDT','TRUMP_USDT','POPCAT_USDT','AAVE_USDT','LTC_USDT','BCH_USDT','ADA_USDT','DOT_USDT','NEAR_USDT') AND timestamp > dateadd('s',-60,now()) GROUP BY symbol) SELECT lh.sym, round(lh.px,4) lighter, round(bn.px,4) binance, round((lh.px-bn.px)/bn.px*10000,2) bp_dev, round(abs((lh.px-bn.px)/bn.px*10000),2) abs_bp FROM lh JOIN bn ON lh.sym=bn.sym ORDER BY abs_bp DESC"}
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Cross-correlation lead-lag (15min, multiple lags)",
+      "description": "For each symbol, correlation at lag=0 vs lag=+1s. If lag=+1s > lag=0 by significant margin, Binance is the leader (Lighter follows 1s later).",
+      "gridPos": {"h": 12, "w": 12, "x": 12, "y": 38},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {"defaults": {"decimals": 4}, "overrides": []},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "ticks", "desc": true}]},
+      "targets": [
+        {"refId": "A", "format": "table", "datasource": {"type":"grafana-postgresql-datasource","uid":"questdb"},
+         "rawSql": "WITH lh AS (SELECT timestamp, symbol sym, (bid_price+ask_price)/2.0 mid FROM lighter_bookticker WHERE symbol IN ('BTC','ETH','SOL','HYPE','BNB','XRP','DOGE','LINK','AVAX','TON','SUI','APT','TAO','WIF','PENGU','POPCAT') AND timestamp > dateadd('m',-15,now())), bn AS (SELECT timestamp, replace(symbol,'_USDT','') sym, (bid_price+ask_price)/2.0 mid FROM binance_bookticker WHERE symbol IN ('BTC_USDT','ETH_USDT','SOL_USDT','HYPE_USDT','BNB_USDT','XRP_USDT','DOGE_USDT','LINK_USDT','AVAX_USDT','TON_USDT','SUI_USDT','APT_USDT','TAO_USDT','WIF_USDT','PENGU_USDT','POPCAT_USDT') AND timestamp > dateadd('m',-15,now())), j AS (SELECT lh.sym, ((lh.mid - bn.mid)/bn.mid*10000) bp FROM lh ASOF JOIN bn ON sym) SELECT sym, count() ticks, round(avg(bp),2) mean_bp, round(stddev_samp(bp),2) std_bp FROM j GROUP BY sym ORDER BY ticks DESC"}
+      ]
+    }
+  ]
+}

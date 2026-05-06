@@ -29,6 +29,7 @@ pub enum CookieError {
 pub struct CookieBundle {
     pub flipster: HashMap<String, String>,
     pub gate: HashMap<String, String>,
+    pub bingx: HashMap<String, String>,
     pub ts: String,
 }
 
@@ -44,12 +45,19 @@ pub fn load(path: &Path) -> Result<CookieBundle, CookieError> {
     })?;
     let flipster = pluck(&v, "flipster", &path_disp)?;
     let gate = pluck(&v, "gate", &path_disp)?;
+    // BingX is optional — older cookies.json files predate the BingX integration.
+    let bingx = pluck(&v, "bingx", &path_disp).unwrap_or_default();
     let ts = v
         .get("ts")
         .and_then(|t| t.as_str())
         .unwrap_or("")
         .to_string();
-    Ok(CookieBundle { flipster, gate, ts })
+    Ok(CookieBundle {
+        flipster,
+        gate,
+        bingx,
+        ts,
+    })
 }
 
 fn pluck(

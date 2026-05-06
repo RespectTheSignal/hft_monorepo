@@ -1,0 +1,24 @@
+[package]
+name = "hl_quoter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+hl_pairs    = { path = "../hl_pairs" }
+pairs_core  = { path = "../pairs_core" }
+
+tokio.workspace        = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+serde.workspace        = true
+serde_json.workspace   = true
+reqwest.workspace      = true
+chrono.workspace       = true
+tracing.workspace      = true
+tracing-subscriber.workspace = true
+anyhow.workspace       = true
+parking_lot = "0.12"
+dotenvy = "0.15"
+hyperliquid_rust_sdk = "0.6"
+ethers = { version = "2", features = ["rustls"], default-features = false }

@@ -3,6 +3,11 @@ pub mod flipster;
 pub mod bybit;
 pub mod bitget;
 pub mod gate;
+pub mod bingx;
+pub mod pancake;
+pub mod aster;
+pub mod lighter;
+pub mod variational;
 
 use crate::ilp::IlpWriter;
 use crate::model::{BookTick, ExchangeName};
@@ -20,6 +25,19 @@ pub trait ExchangeCollector: Send + Sync {
     fn subscribe_msgs(&self, symbols: &[String]) -> Vec<String>;
     /// Parse a raw text frame into zero or more bookticks.
     fn parse_frame(&self, frame: &str) -> Vec<BookTick>;
+    /// Parse a binary frame (e.g. gzip-compressed JSON used by BingX).
+    /// Default: none — collectors that send only Text frames can skip this.
+    fn parse_binary_frame(&self, _bytes: &[u8]) -> Vec<BookTick> {
+        Vec::new()
+    }
+    /// Optional reply to a server-side ping payload (BingX uses an
+    /// application-level "Ping" text message that must be answered with
+    /// a "Pong" text frame; native WS Ping/Pong is also supported but
+    /// not used by BingX). Returning `Some(text)` here causes the run
+    /// loop to send that text after each parsed frame heartbeat-style.
+    fn pong_text(&self, _frame: &str) -> Option<String> {
+        None
+    }
     /// Optional extra HTTP headers for the WebSocket handshake (auth, etc.).
     /// Default: none.
     fn handshake_headers(&self) -> Vec<(String, String)> {
@@ -129,7 +147,23 @@ pub async fn run_collector<C: ExchangeCollector + 'static>(
                 while let Some(msg) = ws.next().await {
                     match msg {
                         Ok(Message::Text(txt)) => {
+                            // BingX uses an app-level Ping text frame ("Ping")
+                            // that wants a "Pong" reply; collectors opt in
+                            // by overriding `pong_text`.
+                            if let Some(reply) = collector.pong_text(&txt) {
+                                let _ = ws.send(Message::Text(reply)).await;
+                                continue;
+                            }
                             for tick in collector.parse_frame(&txt) {
+                                let _ = tx.send(tick.clone());
+                                if let Err(e) = writer.write_tick(&tick).await {
+                                    warn!(exchange = %name, error = %e, "ilp write failed");
+                                }
+                            }
+                        }
+                        Ok(Message::Binary(bytes)) => {
+                            // BingX sends gzipped JSON over Binary frames.
+                            for tick in collector.parse_binary_frame(&bytes) {
                                 let _ = tx.send(tick.clone());
                                 if let Err(e) = writer.write_tick(&tick).await {
                                     warn!(exchange = %name, error = %e, "ilp write failed");

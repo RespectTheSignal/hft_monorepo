@@ -18,6 +18,13 @@ pub enum ExchangeName {
     Bybit,
     Bitget,
     Gate,
+    Hyperliquid,
+    Mexc,
+    Bingx,
+    Pancake,
+    Aster,
+    Lighter,
+    Variational,
 }
 
 impl ExchangeName {
@@ -28,6 +35,13 @@ impl ExchangeName {
             Self::Bybit => "bybit",
             Self::Bitget => "bitget",
             Self::Gate => "gate",
+            Self::Hyperliquid => "hyperliquid",
+            Self::Mexc => "mexc",
+            Self::Bingx => "bingx",
+            Self::Pancake => "pancake",
+            Self::Aster => "aster",
+            Self::Lighter => "lighter",
+            Self::Variational => "variational",
         }
     }
     pub fn table(&self) -> &'static str {
@@ -37,6 +51,13 @@ impl ExchangeName {
             Self::Bybit => "bybit_bookticker",
             Self::Bitget => "bitget_bookticker",
             Self::Gate => "gate_bookticker",
+            Self::Hyperliquid => "hyperliquid_bookticker",
+            Self::Mexc => "mexc_bookticker",
+            Self::Bingx => "bingx_bookticker",
+            Self::Pancake => "pancake_bookticker",
+            Self::Aster => "aster_bookticker",
+            Self::Lighter => "lighter_bookticker",
+            Self::Variational => "variational_bookticker",
         }
     }
 }
@@ -119,11 +140,31 @@ impl Quote {
 /// exchanges any pairs strategy reads (Binance, Flipster, Gate, Bybit, Bitget
 /// are all expected to expose USDT-quoted perps with the same shape).
 pub fn base_of(exchange: ExchangeName, symbol: &str) -> Option<String> {
+    // Hyperliquid: symbol IS the base ("BTC", "PENGU", "kNEIRO" …). No quote
+    // suffix to strip.
+    if matches!(
+        exchange,
+        ExchangeName::Hyperliquid | ExchangeName::Lighter | ExchangeName::Variational
+    ) {
+        // Bare-base symbols ("BTC", "ETH"). Variational subscribes by
+        // {underlying:"BTC",...} so we store symbol as the underlying name.
+        let s = symbol.trim();
+        return if s.is_empty() { None } else { Some(s.to_uppercase()) };
+    }
     let cleaned = symbol.replace('_', "");
     let trimmed = match exchange {
         ExchangeName::Flipster => cleaned.trim_end_matches(".PERP").to_string(),
-        ExchangeName::Binance | ExchangeName::Gate | ExchangeName::Bybit | ExchangeName::Bitget => {
-            cleaned
+        ExchangeName::Binance
+        | ExchangeName::Gate
+        | ExchangeName::Bybit
+        | ExchangeName::Bitget
+        | ExchangeName::Mexc
+        | ExchangeName::Pancake
+        | ExchangeName::Aster => cleaned,
+        // BingX uses "BTC-USDT" with a dash. Strip it before suffix match.
+        ExchangeName::Bingx => cleaned.replace('-', ""),
+        ExchangeName::Hyperliquid | ExchangeName::Lighter | ExchangeName::Variational => {
+            unreachable!()
         }
     };
     trimmed

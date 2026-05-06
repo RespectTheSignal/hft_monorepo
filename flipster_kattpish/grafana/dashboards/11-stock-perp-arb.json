@@ -1,0 +1,188 @@
+{
+  "uid": "stock-perp-arb",
+  "title": "11 · Stock Perp Arb (Lighter / Gate / Pyth)",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "timezone": "utc",
+  "tags": ["stocks", "lighter", "gate", "pyth", "arb"],
+  "templating": {
+    "list": [
+      {
+        "name": "stock",
+        "type": "textbox",
+        "label": "Stock symbol",
+        "query": "NVDA",
+        "current": {"selected": true, "text": "NVDA", "value": "NVDA"}
+      }
+    ]
+  },
+  "annotations": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "${stock} — mid prices: Lighter (perp) vs Gate (perp) vs Pyth (oracle)",
+      "description": "Direct mid-price comparison. When market is closed/halted, divergences indicate which venue is leading the others.",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 0},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 4,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1.5,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "lighter"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#00D4FF"}}, {"id": "custom.lineWidth", "value": 2}]},
+          {"matcher": {"id": "byName", "options": "gate"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#2E91E5"}}]},
+          {"matcher": {"id": "byName", "options": "pyth"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#9D4EDD"}}, {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 6]}}]}
+        ]
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min", "max"]},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [
+        {
+          "refId": "L",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"lighter\" FROM lighter_bookticker WHERE symbol='${stock}' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "G",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"gate\" FROM gate_bookticker WHERE symbol IN (concat('${stock}','_USDT'), concat('${stock}','X_USDT')) AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"
+        },
+        {
+          "refId": "P",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "SELECT timestamp time, (bid_price+ask_price)/2.0 \"pyth\" FROM pyth_bookticker WHERE symbol='${stock}' AND timestamp > dateadd('m',-15,now()) ORDER BY timestamp"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "${stock} — cross-venue divergence (bp). Positive = Lighter higher than other.",
+      "description": "Lighter-Gate, Lighter-Pyth, Gate-Pyth in basis points. Sustained non-zero values reveal lead-lag structure.",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 14},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1.5,
+            "fillOpacity": 5,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "Lighter-Gate"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#54C1FB"}}]},
+          {"matcher": {"id": "byName", "options": "Lighter-Pyth"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#9D4EDD"}}]},
+          {"matcher": {"id": "byName", "options": "Gate-Pyth"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F0B90B"}}]}
+        ]
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "mean", "min", "max"]},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [
+        {
+          "refId": "LG",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "WITH l AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM lighter_bookticker WHERE symbol='${stock}' AND timestamp > dateadd('m',-15,now())), g AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM gate_bookticker WHERE symbol IN (concat('${stock}','_USDT'), concat('${stock}','X_USDT')) AND timestamp > dateadd('m',-15,now())) SELECT l.timestamp time, (l.mid - g.mid)/g.mid*10000 \"Lighter-Gate\" FROM l ASOF JOIN g ORDER BY l.timestamp"
+        },
+        {
+          "refId": "LP",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "WITH l AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM lighter_bookticker WHERE symbol='${stock}' AND timestamp > dateadd('m',-15,now())), p AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pyth_bookticker WHERE symbol='${stock}' AND timestamp > dateadd('m',-15,now())) SELECT l.timestamp time, (l.mid - p.mid)/p.mid*10000 \"Lighter-Pyth\" FROM l ASOF JOIN p ORDER BY l.timestamp"
+        },
+        {
+          "refId": "GP",
+          "format": "time_series",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "WITH g AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM gate_bookticker WHERE symbol IN (concat('${stock}','_USDT'), concat('${stock}','X_USDT')) AND timestamp > dateadd('m',-15,now())), p AS (SELECT timestamp, (bid_price+ask_price)/2.0 mid FROM pyth_bookticker WHERE symbol='${stock}' AND timestamp > dateadd('m',-15,now())) SELECT g.timestamp time, (g.mid - p.mid)/p.mid*10000 \"Gate-Pyth\" FROM g ASOF JOIN p ORDER BY g.timestamp"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "All stocks — latest snapshot (Lighter / Gate / Pyth + bp divergence)",
+      "description": "Live cross-venue snapshot. Sort by |L-P bp| or |L-G bp| to find biggest current divergences.",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 26},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {"defaults": {"decimals": 2}, "overrides": []},
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "abs_LP_bp", "desc": true}]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "WITH lh AS (SELECT symbol sym, last((bid_price+ask_price)/2.0) px FROM lighter_bookticker WHERE symbol IN ('NVDA','TSLA','AAPL','AMZN','MSFT','META','GOOGL','AMD','MU','INTC','SPY','QQQ','ORCL','ASML','SNDK','MRVL') AND timestamp > dateadd('m',-2,now()) GROUP BY symbol), gt AS (SELECT replace(replace(symbol,'_USDT',''),'X','') sym, last((bid_price+ask_price)/2.0) px FROM gate_bookticker WHERE symbol IN ('NVDAX_USDT','TSLAX_USDT','AAPLX_USDT','AMZNX_USDT','MSFT_USDT','METAX_USDT','GOOGLX_USDT','AMD_USDT','MU_USDT','INTC_USDT','SPYX_USDT','QQQX_USDT','ORCLX_USDT','ASML_USDT') AND timestamp > dateadd('m',-2,now()) GROUP BY symbol), py AS (SELECT symbol sym, last((bid_price+ask_price)/2.0) px FROM pyth_bookticker WHERE symbol IN ('NVDA','TSLA','AAPL','AMZN','MSFT','META','GOOGL','AMD','MU','INTC','SPY','QQQ','ORCL','ASML','SNDK','MRVL') AND timestamp > dateadd('m',-30,now()) GROUP BY symbol) SELECT lh.sym, round(lh.px,2) lighter, round(gt.px,2) gate, round(py.px,2) pyth, round((lh.px-gt.px)/gt.px*10000,1) LG_bp, round((lh.px-py.px)/py.px*10000,1) LP_bp, round((gt.px-py.px)/py.px*10000,1) GP_bp, round(abs((lh.px-py.px)/py.px*10000),1) abs_LP_bp FROM lh LEFT JOIN gt ON lh.sym=gt.sym LEFT JOIN py ON lh.sym=py.sym ORDER BY abs_LP_bp DESC NULLS LAST"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Top |Lighter-Gate| divergence right now (across all stocks)",
+      "description": "Both Lighter and Gate have stock perps. Same instrument on two perp DEXes — should converge. Wide gaps = arbitrage candidates.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {"defaults": {"decimals": 2}, "overrides": []},
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "abs_bp", "desc": true}]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "WITH lh AS (SELECT symbol sym, last((bid_price+ask_price)/2.0) px FROM lighter_bookticker WHERE symbol IN ('NVDA','TSLA','AAPL','AMZN','MSFT','META','GOOGL','AMD','MU','INTC','SPY','QQQ','ORCL','ASML','SNDK','MRVL') AND timestamp > dateadd('m',-1,now()) GROUP BY symbol), gt AS (SELECT replace(replace(symbol,'_USDT',''),'X','') sym, last((bid_price+ask_price)/2.0) px FROM gate_bookticker WHERE symbol IN ('NVDAX_USDT','TSLAX_USDT','AAPLX_USDT','AMZNX_USDT','MSFT_USDT','METAX_USDT','GOOGLX_USDT','AMD_USDT','MU_USDT','INTC_USDT','SPYX_USDT','QQQX_USDT','ORCLX_USDT','ASML_USDT') AND timestamp > dateadd('m',-1,now()) GROUP BY symbol) SELECT lh.sym, round(lh.px,2) lighter, round(gt.px,2) gate, round((lh.px-gt.px)/gt.px*10000,2) bp_dev, round(abs((lh.px-gt.px)/gt.px*10000),2) abs_bp FROM lh JOIN gt ON lh.sym=gt.sym ORDER BY abs_bp DESC"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Top |Lighter-Pyth| divergence right now",
+      "description": "Pyth as oracle reference. Large positive Lighter-Pyth = Lighter quotes above Pyth's aggregate price.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 38},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+      "fieldConfig": {"defaults": {"decimals": 2}, "overrides": []},
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "abs_bp", "desc": true}]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "questdb"},
+          "rawSql": "WITH lh AS (SELECT symbol sym, last((bid_price+ask_price)/2.0) px FROM lighter_bookticker WHERE symbol IN ('NVDA','TSLA','AAPL','AMZN','MSFT','META','GOOGL','AMD','MU','INTC','SPY','QQQ','ORCL','ASML','SNDK','MRVL','AVGO') AND timestamp > dateadd('m',-1,now()) GROUP BY symbol), py AS (SELECT symbol sym, last((bid_price+ask_price)/2.0) px FROM pyth_bookticker WHERE symbol IN ('NVDA','TSLA','AAPL','AMZN','MSFT','META','GOOGL','AMD','MU','INTC','SPY','QQQ','ORCL','ASML','SNDK','MRVL','AVGO') AND timestamp > dateadd('m',-30,now()) GROUP BY symbol) SELECT lh.sym, round(lh.px,2) lighter, round(py.px,2) pyth, round((lh.px-py.px)/py.px*10000,2) bp_dev, round(abs((lh.px-py.px)/py.px*10000),2) abs_bp FROM lh JOIN py ON lh.sym=py.sym ORDER BY abs_bp DESC"
+        }
+      ]
+    }
+  ]
+}

@@ -28,6 +28,18 @@ pub const MIN_SAMPLES: usize = 8;
 pub const PNL_THRESHOLD_BP: f64 = -2.0;
 pub const PAPER_THRESHOLD_BP: f64 = 3.0;
 pub const SPREAD_THRESHOLD_BP: f64 = 8.0;
+
+/// Read SPREAD_THRESHOLD_BP, allowing env override `SYM_STATS_SPREAD_THRESHOLD_BP`.
+/// BingX low-cap alts (GRIFFAIN, BR, etc.) routinely trade with 10-20bp own
+/// spreads — the default 8.0 effectively blacklists them. Per-strategy raise
+/// (e.g. 25.0 for bingx_lead) keeps these symbols tradable while still gating
+/// truly broken quotes.
+fn spread_threshold_bp() -> f64 {
+    std::env::var("SYM_STATS_SPREAD_THRESHOLD_BP")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(SPREAD_THRESHOLD_BP)
+}
 pub const COOLDOWN_SECS: f64 = 1800.0; // 30 min
 pub const PROBE_COUNT: u32 = 5;
 
@@ -234,7 +246,7 @@ impl SymbolStatsStore {
     /// in bp (computed by caller). Returns Pass / Skip / Probe.
     pub fn check_entry(&self, base: &str, spread_bp: Option<f64>) -> FilterDecision {
         if let Some(sp) = spread_bp {
-            if sp > SPREAD_THRESHOLD_BP {
+            if sp > spread_threshold_bp() {
                 return FilterDecision::Skip(SkipReason::WideSpread);
             }
         }

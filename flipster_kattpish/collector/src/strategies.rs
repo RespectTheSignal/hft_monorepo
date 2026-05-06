@@ -239,6 +239,7 @@ impl Params {
                 .as_str()
             {
                 "gate" => ExchangeName::Gate,
+                "hyperliquid" | "hl" => ExchangeName::Hyperliquid,
                 _ => ExchangeName::Binance,
             },
 
