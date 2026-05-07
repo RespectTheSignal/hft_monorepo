@@ -68,6 +68,7 @@ def build_schedules(
 ) -> list[Schedule]:
     """활성 job × 윈도우 × 거래소를 평면화해서 list[Schedule]."""
     gap_windows, pc_windows = windows_for_mode(cfg.window_mode)
+    corr_windows = cfg.corr_windows or gap_windows
     out: list[Schedule] = []
 
     def cad(w: int) -> float:
@@ -275,7 +276,7 @@ def build_schedules(
     # 9) gate_web ↔ quote step-return correlation : quote × window
     if cfg.include_price_change_gap_corr:
         for quote in cfg.corr_quote_exchanges:
-            for w in gap_windows:
+            for w in corr_windows:
                 ret = corr_return_seconds(w, cfg.corr_return_seconds_overrides)
                 out.append(
                     Schedule(

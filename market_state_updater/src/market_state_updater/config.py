@@ -43,6 +43,10 @@ def _split_csv(s: str) -> tuple[str, ...]:
     return tuple(x.strip().lower() for x in s.split(",") if x.strip())
 
 
+def _split_int_csv(s: str) -> tuple[int, ...]:
+    return tuple(int(x.strip()) for x in s.split(",") if x.strip())
+
+
 @dataclass(frozen=True, slots=True)
 class AppConfig:
     questdb_url: str
@@ -75,6 +79,7 @@ class AppConfig:
 
     include_price_change_gap_corr: bool
     corr_quote_exchanges: tuple[str, ...]
+    corr_windows: tuple[int, ...] | None
     corr_return_seconds_overrides: dict[int, int]
 
     include_mid_corr: bool
@@ -200,6 +205,19 @@ def _csv_or_list_from(
         return tuple(str(x).strip().lower() for x in file_val if str(x).strip())
     if isinstance(file_val, str):
         return _split_csv(file_val)
+    return default
+
+
+def _int_csv_or_list_from(
+    env_key: str, file_val: Any, default: tuple[int, ...] | None
+) -> tuple[int, ...] | None:
+    v = os.environ.get(env_key)
+    if v is not None:
+        return _split_int_csv(v)
+    if isinstance(file_val, list):
+        return tuple(int(x) for x in file_val)
+    if isinstance(file_val, str):
+        return _split_int_csv(file_val)
     return default
 
 
@@ -443,6 +461,7 @@ def load_config(argv: list[str] | None = None) -> AppConfig:
         corr_quote_exchanges=_csv_or_list_from(
             "CORR_QUOTE_EXCHANGES", corr.get("quote_exchanges"), ("binance",)
         ),
+        corr_windows=_int_csv_or_list_from("CORR_WINDOWS", corr.get("windows"), None),
         corr_return_seconds_overrides=_corr_overrides_from(
             "CORR_RETURN_SECONDS_OVERRIDES",
             corr.get("return_seconds_overrides"),

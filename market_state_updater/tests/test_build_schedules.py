@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from market_state_updater.config import AppConfig
 from market_state_updater.jobs.common import (
+    DEFAULT_CADENCE_SECS,
     FAST_PRICE_CHANGE_WINDOWS,
     FAST_WINDOWS,
     PRICE_CHANGE_WINDOWS,
@@ -44,6 +45,7 @@ def _cfg(window_mode: str, *, include_corr: bool = True) -> AppConfig:
         price_change_sources=("gate", "binance"),
         include_price_change_gap_corr=include_corr,
         corr_quote_exchanges=("binance",),
+        corr_windows=None,
         corr_return_seconds_overrides={},
         include_mid_corr=False,
         mid_corr_prefix="mc",
@@ -118,12 +120,12 @@ def test_build_schedules_names_unique() -> None:
 
 
 def test_build_schedules_cadence_matches_window() -> None:
-    """1m schedule 은 cadence 5s, 60m 는 300s — DEFAULT_CADENCE_SECS 따라감."""
+    """1m / 60m schedule cadence 는 DEFAULT_CADENCE_SECS 따라감."""
     schedules = build_schedules(_cfg("all"), MagicMock())
     by_name = {s.name: s.cadence_secs for s in schedules}
     # gap:gate:binance:1m / gap:gate:binance:60m 둘 다 있어야
-    assert by_name.get("gap:gate:binance:1m") == 5
-    assert by_name.get("gap:gate:binance:60m") == 300
+    assert by_name.get("gap:gate:binance:1m") == DEFAULT_CADENCE_SECS[1]
+    assert by_name.get("gap:gate:binance:60m") == DEFAULT_CADENCE_SECS[60]
 
 
 def test_fast_includes_only_fast_windows_in_names() -> None:
@@ -205,3 +207,14 @@ def test_corr_disabled_drops_schedules() -> None:
     from market_state_updater.jobs.common import WINDOW_MINUTES as _W
 
     assert diff == len(_W)
+
+
+def test_corr_windows_can_differ_from_gap_windows() -> None:
+    cfg = replace(_cfg("fast"), corr_windows=(10, 30))
+    schedules = build_schedules(cfg, MagicMock())
+    corr_names = [s.name for s in schedules if s.name.startswith("corr:")]
+
+    assert corr_names == [
+        "corr:gate_web:binance:10m:5s",
+        "corr:gate_web:binance:30m:10s",
+    ]

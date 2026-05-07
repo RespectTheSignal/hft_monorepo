@@ -15,7 +15,7 @@ QuestDB 의 bookticker 테이블을 주기적으로 집계해서 **Redis 에 시
 | `price_change` | `{price_change_prefix}:{source}:{window}` | source 거래소의 (last_mid - first_mid) / first_mid |
 | `price_change_gap_corr` | `{prefix}:price_change_gap_corr:gate_web:{quote}:{window}` | corr( gate_web mid 의 1-step return, gate_web↔quote mid gap ) per symbol |
 
-윈도우 (분): gap / spread / gate_web_gap / corr 은 1, 5, 10, 30, 60, 240, 720. price_change 는 1, 5, 15, 30, 60, 240, 1440.
+윈도우 (분): gap / spread / gate_web_gap / corr 은 기본적으로 `WINDOW_MODE` 에 따른 gap-family window 를 공유한다. corr 만 따로 보고 싶으면 `corr.windows` 또는 `CORR_WINDOWS` 로 분리 가능. price_change 는 1, 5, 15, 30, 60, 240.
 짧은 윈도우는 매 cycle, 긴 윈도우는 N cycle 마다 1번 (`WINDOW_PERIOD` / `PRICE_CHANGE_PERIOD` 참조).
 
 **`price_change_gap_corr` 작동 방식**: window 별 X return interval (디폴트 dict, env override 가능):
@@ -115,6 +115,7 @@ gate_hft:_meta:market_state_updater:slow
 | `MARKET_GAP_INCLUDE_PRICE_CHANGE` | 1 | price_change job 활성화 |
 | `MARKET_GAP_INCLUDE_PRICE_CHANGE_GAP_CORR` | 1 | corr job 활성화 |
 | `CORR_QUOTE_EXCHANGES` | `binance` | corr 의 quote 후보 (현재 binance only 권장) |
+| `CORR_WINDOWS` | (none) | `10,30,60` 형식. 설정 시 corr job 만 이 window 목록 사용 |
 | `CORR_RETURN_SECONDS_OVERRIDES` | (none) | `1:1,5:5,60:60` 형식. 윈도우별 X return interval override |
 | `MARKET_GAP_FILL_PREV_LOOKBACK_MINUTES` | 10 | 1m/5m 윈도우의 FILL(PREV) lookback |
 | `PRICE_CHANGE_REDIS_PREFIX` | `gate_hft:price_change` | |

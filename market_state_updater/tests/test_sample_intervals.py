@@ -30,6 +30,7 @@ def test_default_intervals_match_user_spec() -> None:
         60: "1s",
         240: "5s",
         720: "10s",
+        1440: "20s",
     }
 
 

@@ -27,6 +27,7 @@ _KEYS = [
     "MARKET_GAP_INCLUDE_MID_CORR",
     "MARKET_GAP_FILL_PREV_LOOKBACK_MINUTES",
     "CORR_QUOTE_EXCHANGES",
+    "CORR_WINDOWS",
     "CORR_RETURN_SECONDS_OVERRIDES",
     "MID_CORR_REDIS_PREFIX",
     "MID_CORR_QUOTE_EXCHANGES",
@@ -79,6 +80,7 @@ def test_load_config_pure_defaults(clean_env: Path) -> None:
     assert cfg.include_price_change_gap_corr is True
     assert cfg.price_change_sources == ("gate", "binance")
     assert cfg.corr_quote_exchanges == ("binance",)
+    assert cfg.corr_windows is None
     assert cfg.corr_return_seconds_overrides == {}
     assert cfg.heartbeat_prefix == "gate_hft:_meta:market_state_updater"
     assert cfg.telegram_bot_token is None
@@ -103,7 +105,10 @@ def test_config_json_loaded_from_cwd(clean_env: Path) -> None:
             },
             "include": {"gate_web": False, "price_change_gap_corr": False},
             "price_change": {"sources": ["gate"]},
-            "corr": {"return_seconds_overrides": {"60": 60, "240": 120}},
+            "corr": {
+                "windows": [10, 30, 60],
+                "return_seconds_overrides": {"60": 60, "240": 120},
+            },
             "heartbeat": {"redis_prefix": "test:hb"},
             "alert_after_consecutive_failures": 9,
         },
@@ -124,6 +129,7 @@ def test_config_json_loaded_from_cwd(clean_env: Path) -> None:
     assert cfg.gap_bases == ("binance",)  # gate_web disabled
     assert cfg.include_price_change_gap_corr is False
     assert cfg.price_change_sources == ("gate",)
+    assert cfg.corr_windows == (10, 30, 60)
     assert cfg.corr_return_seconds_overrides == {60: 60, 240: 120}
     assert cfg.heartbeat_prefix == "test:hb"
     assert cfg.alert_after_consecutive_failures == 9
@@ -141,12 +147,17 @@ def test_config_json_explicit_path(clean_env: Path) -> None:
 def test_env_overrides_config_json(
     clean_env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _write_cfg(clean_env, {"window_mode": "fast", "interval_secs": 30})
+    _write_cfg(
+        clean_env,
+        {"window_mode": "fast", "interval_secs": 30, "corr": {"windows": [10]}},
+    )
     monkeypatch.setenv("WINDOW_MODE", "slow")
     monkeypatch.setenv("UPDATE_INTERVAL_SECS", "120")
+    monkeypatch.setenv("CORR_WINDOWS", "30,60")
     cfg = load_config([])
     assert cfg.window_mode == "slow"
     assert cfg.interval_secs == 120
+    assert cfg.corr_windows == (30, 60)
 
 
 def test_cli_overrides_env(clean_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
